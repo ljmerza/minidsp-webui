@@ -1,0 +1,15 @@
+name: Cleanup PR Image
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    permissions:
+      contents: read
+      packages: write
+    uses: ljmerza/misc-actions/.github/workflows/cleanup-pr-image.yml@v2
+    with:
+      package-name: minidsp-webui
+    secrets: inherit

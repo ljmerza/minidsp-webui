@@ -1,0 +1,33 @@
+name: Build and Push Image
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    permissions:
+      contents: read
+    uses: ljmerza/misc-actions/.github/workflows/python-tests.yml@v2
+    with:
+      python-version: "3.12"
+      coverage-source: app
+    secrets: inherit
+
+  build:
+    needs: tests
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ljmerza/misc-actions/.github/workflows/docker-release.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/minidsp-webui
+    secrets: inherit

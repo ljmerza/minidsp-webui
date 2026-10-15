@@ -1,0 +1,14 @@
+# Planning docs stay local, never committed
+docs/
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.devdata/
+*.sqlite3
+.env
