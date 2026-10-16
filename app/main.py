@@ -17,6 +17,7 @@ from app.daemon.client import DaemonClient
 from app.mqtt import create_bridge
 from app.state import Database, Repo
 from app.sync.session import SessionManager
+from app.web import filters as filters_ui
 from app.web import state_ui
 from app.web.settings_ui import apply_stored_runtime_settings
 
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.include_router(v1.build_router())
     app.include_router(web.router)
     app.include_router(state_ui.router)
+    app.include_router(filters_ui.router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

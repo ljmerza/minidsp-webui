@@ -7,8 +7,9 @@ Preset state (docs 03 §1-3, §8):
 
 - Each preset has a desired `ConfigDoc` and an applied shadow, held by the `DeviceWriter` and persisted (debounced)
   in ``preset_state``. Master settings are not part of it: they are device-truth, read from the monitor.
-- Edits are JSON merge patches validated here (shape, ranges, per-channel gain ceilings, the big-step guard) and then
-  handed to the writer. Edits to an inactive preset are staged by the writer and flushed when it becomes active.
+- Edits are JSON merge patches validated here (shape, ranges, per-channel gain ceilings, the PEQ/crossover boost
+  limit, the big-step guard) and then handed to the writer. Edits to an inactive preset are staged by the writer and
+  flushed when it becomes active.
 - Revision rows are written at commit boundaries only: an explicit commit (form submit, slider release), or after
   ``commit_idle_s`` without edits.
 """
@@ -17,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -29,6 +31,8 @@ from app.bus import DESIRED, DEVICE, LOG, MASTER, Bus
 from app.config import Settings
 from app.daemon.client import DaemonClient, DaemonError, DaemonUnavailable, DeviceNotFound
 from app.daemon.monitor import DeviceMonitor
+from app.dsp.recognize import annotate_designs
+from app.dsp.response import peak_gain_db
 from app.formats.cli_script import ParsedScript, ScriptIssue, export_script, parse_script
 from app.model.config_doc import ConfigDoc, PathError, default_config_doc, diff_paths, flatten, set_path, validate_doc
 from app.model.device_profile import DeviceProfile, profile_for
@@ -42,6 +46,7 @@ from app.sync.writer import DeviceWriter, FlushResult, PresetState, SyncStatus
 log = logging.getLogger(__name__)
 
 COMMIT_IDLE_S = 5.0
+_FILTER_UNIT = re.compile(r"(inputs|outputs)\.(\d+)\.(peq|crossover)\.(\d+)\.")
 BULK_TIMEOUT_S = 60.0  # longest a bulk apply (push-all, import, adopt) is awaited by the caller
 COMPRESSOR_THRESHOLD_RANGE = (-90.0, 0.0)  # spike-results §5: the device stores any float, keep it sane
 _MISSING = object()
@@ -990,6 +995,15 @@ class DeviceSession:
                     problems.append(f"{path}: threshold {value:g} dB outside {low:g}..{high:g}")
         if problems:
             raise DesiredValidationError("invalid settings", problems)
+        boosts = self._filter_boosts(old, new, changed)
+        limit = self.settings.peq_max_boost_db
+        too_big = [
+            f"{unit}: boosts {after:.1f} dB, more than the {limit:g} dB a band or group may add"
+            for unit, before, after in boosts
+            if after > limit and after > before + 0.01
+        ]
+        if too_big:
+            raise DesiredValidationError("filter boost too large", too_big)
         step = self.settings.gain_step_confirm_db
         if not confirm and step > 0:
             raises = [
@@ -998,10 +1012,29 @@ class DeviceSession:
                 if p.endswith("gain_db") and isinstance(old_values.get(p), int | float)
                 if new_values[p] - old_values[p] > step
             ]
+            raises += [(f"{unit} peak", after - before) for unit, before, after in boosts if after - before > step]
             if raises:
-                text = ", ".join(f"{p} by {delta:g} dB" for p, delta in raises)
+                text = ", ".join(f"{p} by {delta:.3g} dB" for p, delta in raises)
                 raise ConfirmationRequired(f"raising {text} needs confirmation (more than {step:g} dB at once)")
         return changed
+
+    def _filter_boosts(self, old: ConfigDoc, new: ConfigDoc, paths: Sequence[str]) -> list[tuple[str, float, float]]:
+        """``(band or group path, peak dB before, peak dB after)`` for each PEQ band / crossover group that ``paths``
+        touch. A bypassed band or group counts as 0 dB, so un-bypassing a boost is a raise too."""
+        units = dict.fromkeys(m.groups() for p in paths if (m := _FILTER_UNIT.match(p)))
+        fs = self.profile.sample_rate
+
+        def peak(doc: ConfigDoc, side: str, ch: int, kind: str, k: int) -> float:
+            item = getattr(getattr(doc, side)[ch], kind)[k]
+            if item.bypass:
+                return 0.0
+            return peak_gain_db([item.compiled] if kind == "peq" else item.compiled, fs)
+
+        out = []
+        for side, ch, kind, k in units:
+            args = (side, int(ch), kind, int(k))
+            out.append((f"{side}.{ch}.{kind}.{k}", peak(old, *args), peak(new, *args)))
+        return out
 
     # --- edits ----------------------------------------------------------------------------------------------------
 
@@ -1375,6 +1408,8 @@ class DeviceSession:
             new = self._defaults_for_push()
         else:
             new = default_config_doc(self.profile)
+        # Recognize the adopted coefficients (e.g. 'LR4 LP 80 Hz'); values and bypass flags are never changed.
+        new = await asyncio.to_thread(annotate_designs, new)
         if mode == AdoptMode.PUSH and not confirm:
             raise ConfirmationRequired(f"pushing overwrites every setting of preset {preset + 1}; repeat with confirm")
 
@@ -1473,6 +1508,7 @@ class DeviceSession:
                 new = parsed.apply(start)
             except (PathError, ValidationError) as exc:
                 raise DesiredValidationError(f"the script can't be applied: {exc}") from None
+            new = await asyncio.to_thread(annotate_designs, new)
             summary = f"import CLI script ({len(parsed.ops)} setting(s))"
             change = self._stage(preset, new, confirm=confirm, source="import", summary=summary)
         result = await self._finish(preset, change, commit=commit, bulk=True, timeout=timeout)

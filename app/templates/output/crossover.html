@@ -1,0 +1,116 @@
+{#- Output page, Crossover tab (docs 05 §4): two group cards, presets, a raw-coefficient drawer per group and the
+    graph of group 1, group 2 and their combination. -#}
+{% import "components/peq_editor.html" as fx with context %}
+{%- set base = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/crossover" -%}
+{%- set cfg = {
+  "channel": channel.index, "preset": preset, "color": channel.color, "name": channel.name,
+  "nBiquads": session.profile.crossover_biquads, "fs": session.profile.sample_rate,
+  "stateUrl": base, "groupUrl": base ~ "/{group}", "presetUrl": base
+} -%}
+<div class="xover" x-data='crossoverEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
+  <div class="card-head">
+    <h2>Crossover</h2>
+    <span class="xover-presets" role="group" aria-label="Presets">
+      <span class="hdr-label">Presets</span>
+      <template x-for="p in presets" :key="p.key">
+        <button type="button" class="btn-small" @click="applyPreset(p)" x-text="p.label"></button>
+      </template>
+    </span>
+  </div>
+  <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+
+  <div class="xover-groups">
+    <template x-for="group in groups" :key="group.index">
+      <section class="xover-group" :class="{ 'is-bypassed': group.bypass, 'is-invalid': group.invalid || tooBig(group) }"
+               :aria-label="`Group ${group.index + 1}`" :style="`--group: ${color(group.index)}`">
+        <header class="xover-head">
+          <h3>Group <span x-text="group.index + 1"></span></h3>
+          <span class="xover-label" x-text="label(group)"></span>
+          <span class="sync-badge is-compact" :class="`sync-${status(group)}`" :title="status(group)">
+            <span class="sync-icon" aria-hidden="true" x-text="statusIcon(group)"></span>
+            <span class="sync-text visually-hidden" x-text="status(group)"></span>
+          </span>
+          <label class="enable">
+            <input type="checkbox" :checked="!group.bypass" @change="setEnabled(group, $event.target.checked)">
+            <span x-text="group.bypass ? 'bypassed' : 'enabled'"></span>
+          </label>
+        </header>
+        <div class="xover-fields">
+          <label>Type
+            <select x-model="group.form.kind" @change="onShapeChange(group)">
+              <option value="lp">Low-pass</option><option value="hp">High-pass</option><option value="bp">Band-pass</option>
+            </select></label>
+          <label>Family
+            <select x-model="group.form.family" @change="onShapeChange(group)">
+              <option value="lr">Linkwitz-Riley</option><option value="bw">Butterworth</option><option value="bessel">Bessel</option>
+            </select></label>
+          <label x-show="group.form.family === 'bessel'" x-cloak>Normalization
+            <select x-model="group.form.bessel_norm" @change="commit(group)"
+                    title="Phase: the low- and high-pass are in phase at the crossover. −3 dB: the response is 3 dB down at the frequency.">
+              <option value="phase">Phase</option><option value="mag">−3 dB</option>
+            </select></label>
+          <label><span x-text="group.form.kind === 'bp' ? 'High-pass at' : 'Freq'"></span>
+            <span class="num-field"><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
+                   x-model.number="group.form.freq" @input="onInput(group)" @change="commit(group)"> <span class="unit">Hz</span></span></label>
+          <label x-show="group.form.kind === 'bp'">Low-pass at
+            <span class="num-field"><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
+                   x-model.number="group.form.freq_hi" @input="onInput(group)" @change="commit(group)"> <span class="unit">Hz</span></span></label>
+          <label>Slope
+            <select x-model.number="group.form.order" @change="commit(group)">
+              <template x-for="o in orders" :key="o">
+                <option :value="o" x-text="orderLabel(group, o)" :disabled="orderDisabled(group, o)" :selected="o === group.form.order"></option>
+              </template>
+            </select></label>
+        </div>
+        <p class="xover-uses">
+          Uses <strong x-text="`${used(group)}/${cfg.nBiquads}`"></strong> biquads
+          <span class="muted" x-show="needed(group) !== used(group) && !group.inflight"
+                x-text="`(this design needs ${needed(group)})`"></span>
+        </p>
+        <p class="field-error" x-show="group.invalid" x-text="group.invalid" x-cloak></p>
+        <p class="hint" x-show="!group.design" x-cloak>
+          <span x-text="group.biquads_used ? 'Custom coefficients' : 'Flat'"></span>: the fields show a starting design; changing one
+          replaces the group's coefficients.</p>
+        <button type="button" class="btn-small" @click="toggleDrawer(group)" :aria-expanded="(drawer === group.index).toString()">
+          Raw coefficients <span aria-hidden="true" x-text="drawer === group.index ? '▾' : '▸'"></span></button>
+
+        <div class="drawer" x-show="drawer === group.index" x-cloak>
+          <div class="table-scroll">
+            <table class="data-table raw-table">
+              <caption class="visually-hidden">Group raw biquads (device convention)</caption>
+              <thead><tr><th scope="col">#</th><th>b0</th><th>b1</th><th>b2</th><th>a1</th><th>a2</th><th scope="col">Stable</th></tr></thead>
+              <tbody>
+                <template x-for="(row, k) in rows" :key="k">
+                  <tr>
+                    <th scope="row" x-text="k + 1"></th>
+                    <template x-for="c in ['b0', 'b1', 'b2', 'a1', 'a2']" :key="c">
+                      <td><input type="text" class="coef" inputmode="decimal" spellcheck="false" x-model="row[c]"
+                                 :aria-label="`Biquad ${k + 1} ${c}`"></td>
+                    </template>
+                    <td class="stability" :class="rowStability(k).ok ? 'is-ok' : 'is-bad'" :title="rowStability(k).text">
+                      <span aria-hidden="true" x-text="rowStability(k).ok ? '✓' : '⚠'"></span>
+                      <span class="visually-hidden" x-text="rowStability(k).text"></span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="drawer-actions">
+            <button type="button" @click="applyRaw(group)">Apply raw</button>
+            <button type="button" @click="flatten(group)">Flatten</button>
+          </div>
+          <p class="hint">Rows are cascaded in order; a1/a2 are negated relative to the usual RBJ form. Known designs
+            (LR, Butterworth, Bessel) are recognised after applying.</p>
+        </div>
+      </section>
+    </template>
+  </div>
+
+  {{ fx.graph_toolbar() }}
+  <div class="graph-box" x-ref="graph" aria-label="{{ channel.name }} crossover response"></div>
+  {{ fx.warnings() }}
+  <p class="hint">Dashed: a bypassed group (not in the combined curve). Changing a field previews the curve; the server's
+    coefficients replace the preview once it confirms.</p>
+</div>
+{{ fx.assets(crossover=true) }}

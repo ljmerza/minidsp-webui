@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "components/peq_editor.html" as fx with context %}
 
 {% block content %}
 <h1 class="visually-hidden">Dashboard</h1>
@@ -88,10 +89,33 @@
       {% endfor %}
     </ul>
   </section>
+
+  {%- set response_cfg = {
+    "url": root ~ "/ui/devices/" ~ serial ~ "/response", "key": "dashboard.response", "view": "sub", "preset": none,
+    "refresh": ["sync", "master"], "height": 240, "title": "…"
+  } %}
+  <section class="card response-card" aria-labelledby="response-title"
+           x-data='responseView({{ response_cfg|tojson }})' hx-trigger="sse:sync, sse:master">
+    <div class="card-head">
+      <h2 id="response-title">Response <span class="muted">(<span x-text="title"></span>, electrical)</span></h2>
+      <span class="seg" role="group" aria-label="Plot">
+        <button type="button" class="btn-small" :class="{ 'is-current': mode === 'magnitude' }" @click="setMode('magnitude')">dB</button>
+        <button type="button" class="btn-small" :class="{ 'is-current': mode === 'phase' }" @click="setMode('phase')">Phase</button>
+        <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Fit</button>
+      </span>
+    </div>
+    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the un-muted outputs, 5 to 300 Hz"></div>
+    {{ fx.warnings() }}
+    <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+    <p class="hint" x-show="empty" x-cloak>Every output is muted.</p>
+    <p class="hint">5&ndash;300 Hz, active preset: each un-muted output and their electrical sum (delay and polarity
+      included; drivers and the room are not).</p>
+  </section>
 </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+{% if session is not none %}{{ fx.assets() }}{% endif %}
 {% endblock %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "partials/params_macros.html" as m %}
+{% import "components/peq_editor.html" as fx with context %}
 
 {% block content %}
 {% if session is none or state_error or page_error %}
@@ -16,9 +17,10 @@
   {% include "partials/channel_strip.html" %}
 
   <section class="card" aria-labelledby="peq-title">
-    <h2 id="peq-title">PEQ</h2>
-    <p class="muted">The parametric EQ editor ({{ session.profile.peq_per_input }} bands) arrives with the DSP phase.
-      Its bands are already tracked: see the <a href="{{ root }}/device?preset={{ preset + 1 }}#sync">sync table</a>.</p>
+    <h2 id="peq-title">PEQ <span class="muted">{{ session.profile.peq_per_input }} bands</span></h2>
+    {{ fx.editor("inputs", channel.index, channel.color, channel.name, view="full") }}
+    <p class="hint">The graph is this input's PEQ only; gain and mute are not included. Every output this input is routed
+      to hears it.</p>
   </section>
 </div>
 {% endif %}
@@ -26,4 +28,5 @@
 
 {% block scripts %}
 <script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
+{% if session is not none and not state_error and not page_error %}{{ fx.assets() }}{% endif %}
 {% endblock %}

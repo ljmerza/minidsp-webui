@@ -432,6 +432,72 @@ textarea { width: 100%; font-family: var(--mono); font-size: 0.85rem; resize: ve
 .settings-form .check .hint { display: block; margin: 0.15rem 0 0 1.6rem; }
 .settings-table input[type="text"] { width: 100%; min-width: 8rem; }
 
+/* --- filter editors: graphs, PEQ table, crossover cards, response views (docs 05 §4-5) --------------------------- */
+
+.graph-box { position: relative; min-width: 0; margin: 0.5rem 0 0.25rem; }
+.graph-box .graph-canvas { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.peq-graph .graph-canvas { touch-action: none; cursor: crosshair; } /* handle drags and pinch-to-Q, no page scroll */
+.graph-readout { padding: 0.3rem 0.2rem 0; }
+.graph-toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; }
+.graph-warnings { list-style: none; margin: 0.3rem 0 0; padding: 0; color: var(--warn); font-size: 0.82rem; }
+
+.peq-editor .table-scroll { margin-top: var(--gap); }
+.peq-table { min-width: 44rem; }
+.peq-table th, .peq-table td { vertical-align: middle; padding: 0.25rem 0.35rem; }
+.peq-table tbody th { white-space: nowrap; font-weight: 600; }
+.peq-table select { min-height: 2.2rem; max-width: 11rem; }
+.peq-table input.num { min-height: 2.2rem; width: 5.6rem; text-align: right; }
+.peq-table tbody.is-selected > tr:first-child { background: rgba(78, 161, 255, 0.08); }
+.peq-table tbody.is-bypassed > tr:first-child .source, .peq-table tbody.is-bypassed > tr:first-child th { opacity: 0.6; }
+.peq-table tbody.is-external > tr:first-child { opacity: 0.55; }
+.peq-table tr.is-invalid input.num { border-color: var(--bad); }
+.peq-table .band-on { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); }
+.peq-table .source { color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; }
+.row-actions { white-space: nowrap; }
+.row-actions > * + * { margin-left: 0.25rem; }
+.band-swatch { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; margin-right: 0.3rem; vertical-align: -1px; }
+.lock { margin-left: 0.2rem; font-size: 0.8rem; }
+.peq-drawer-row td { background: var(--bg); }
+.drawer { display: grid; gap: 0.5rem; padding: 0.4rem 0; }
+.drawer-actions, .peq-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+.raw-grid { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; }
+.raw-grid label { display: inline-flex; align-items: center; gap: 0.3rem; font-family: var(--mono); font-size: 0.85rem; }
+input.coef { width: 11.5rem; min-height: 2.2rem; font-family: var(--mono); font-size: 0.82rem; }
+.stability { margin: 0.3rem 0 0; font-size: 0.85rem; }
+.stability.is-ok { color: var(--ok); }
+.stability.is-bad { color: var(--bad); }
+
+.xover-presets { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.xover-groups { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) { .xover-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.xover-group {
+  border: 1px solid var(--border); border-top: 3px solid var(--group, var(--border)); border-radius: var(--radius);
+  padding: 0.6rem 0.8rem; background: var(--bg); min-width: 0;
+}
+.xover-group.is-bypassed { border-top-style: dashed; }
+.xover-group.is-invalid { border-color: var(--bad); }
+.xover-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; }
+.xover-head h3 { margin: 0; }
+.xover-label { color: var(--text-muted); font-size: 0.88rem; margin-right: auto; }
+.xover-head .enable { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+.xover-head .enable input { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); }
+.xover-fields { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin: 0.6rem 0 0.2rem; }
+.xover-fields label { display: flex; flex-direction: column; gap: 0.2rem; color: var(--text-muted); font-size: 0.8rem; }
+.xover-fields label { min-width: 0; max-width: 100%; }
+.xover-fields select, .xover-fields input { color: var(--text); font-size: 0.95rem; max-width: 100%; }
+.xover-fields input.num { width: 6.5rem; text-align: right; }
+.xover-uses { margin: 0.4rem 0; font-size: 0.9rem; }
+.raw-table { min-width: 40rem; }
+.raw-table td, .raw-table th { padding: 0.2rem 0.3rem; vertical-align: middle; }
+.raw-table input.coef { width: 100%; min-width: 7.5rem; }
+.raw-table .stability { text-align: center; }
+
+.response-options { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; margin-bottom: 0.4rem; }
+.response-options .check { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+.response-options select { min-height: 2.2rem; margin-left: 0.3rem; }
+.response-card .graph-box { margin-top: 0; }
+
 /* --- toasts ------------------------------------------------------------------------------------------------------ */
 
 .toasts {

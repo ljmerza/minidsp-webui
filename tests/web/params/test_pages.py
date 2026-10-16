@@ -74,7 +74,7 @@ async def test_output_page_strip_and_delay_tab(ctx):
     assert "data-confirm-unmute" in _tag(html, r'data-path="outputs\.1\.mute"')
     # tabs: Delay is live, later phases are listed but disabled, FIR is hidden without FIR support
     assert 'class="tab is-current"' in html and ">Delay</a>" in html
-    assert re.search(r'class="tab is-disabled"[^>]*>Crossover<', html)
+    assert re.search(r'class="tab is-disabled"[^>]*>Compressor<', html)
     assert ">FIR<" not in html
     # helpers: default distance 3 m at 343 m/s, the other outputs as references, the real device limit
     assert '"distance": 3.0' in html and '"speed": 343.0' in html
