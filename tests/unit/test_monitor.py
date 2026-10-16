@@ -248,3 +248,81 @@ def test_empty_first_master_does_not_wipe_the_cache():
     assert monitor.status.master.volume == -20.0
     monitor.handle_message(json.dumps({"master": {**MASTER_JSON, "volume": -30.0, "dirac": None}}))
     assert monitor.status.master.volume == -30.0 and monitor.status.master.dirac is None
+
+
+class ProbeClient(FakeClient):
+    """``get_status`` for the idle probe; ``fail`` makes it raise."""
+
+    def __init__(self, base: str) -> None:
+        super().__init__(base)
+        self.fail = False
+        self.probes = 0
+
+    async def get_status(self, index: int):
+        from app.model.master import StatusSummary
+
+        self.probes += 1
+        if self.fail:
+            raise ConnectionError("daemon gone")
+        return StatusSummary.model_validate({"master": {**MASTER_JSON, "volume": -31.0}})
+
+
+def make_probe_monitor(bus: Bus, client: ProbeClient, **kwargs) -> DeviceMonitor:
+    async def resolve() -> int:
+        return 0
+
+    return DeviceMonitor(
+        serial=1,
+        bus=bus,
+        client=client,
+        resolve_index=resolve,
+        backoff_min_s=0.02,
+        backoff_max_s=0.1,
+        levels_idle_grace_s=0.05,
+        **kwargs,
+    )
+
+
+async def test_connects_without_keepalive_pings():
+    """minidspd never reads the socket, so pings would time out and drop a healthy stream."""
+    connect = SlowHandshake(0.0)
+    kwargs: list[dict] = []
+
+    def capture(url, **kw):
+        kwargs.append(kw)
+        return connect(url, **kw)
+
+    monitor = make_monitor(Bus(), connect=capture)
+    monitor.start()
+    try:
+        await wait_for(lambda: monitor.connected)
+        assert kwargs[0]["ping_interval"] is None
+    finally:
+        await monitor.stop()
+
+
+async def test_quiet_stream_is_probed_over_http_and_kept(fake_ws):
+    bus = Bus()
+    client = ProbeClient(fake_ws.base)
+    monitor = make_probe_monitor(bus, client, idle_probe_s=0.05)
+    monitor.start()
+    try:
+        await wait_for(lambda: client.probes >= 3)
+        assert monitor.connected and monitor.connect_count == 1
+        assert monitor.status.master.volume == -31.0  # the probe's status is merged in
+    finally:
+        await monitor.stop()
+
+
+async def test_quiet_stream_reconnects_when_the_daemon_stops_answering(fake_ws):
+    bus = Bus()
+    client = ProbeClient(fake_ws.base)
+    monitor = make_probe_monitor(bus, client, idle_probe_s=0.05)
+    monitor.start()
+    try:
+        await wait_for(lambda: monitor.connected)
+        client.fail = True
+        await wait_for(lambda: monitor.connect_count >= 2, timeout=10)
+        assert len(fake_ws.paths) >= 2
+    finally:
+        await monitor.stop()

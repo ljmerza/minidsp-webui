@@ -1,0 +1,44 @@
+{#- Sync table (docs 05 §8): desired vs. applied shadow per device path. Rendered with ``t``. -#}
+{% import "partials/params_macros.html" as m %}
+{%- set c = t.counts -%}
+<div class="sync-table" id="sync-table" hx-get="{{ t.table_url }}"
+     hx-trigger="sse:sync throttle:1s, mdsp-sync-changed from:body" hx-target="this" hx-swap="outerHTML">
+  <div class="sync-table-head">
+    <div class="filter" role="group" aria-label="Rows to show">
+      <button type="button" class="btn-small{% if t.show == 'unsynced' %} is-current{% endif %}"
+              aria-pressed="{{ 'true' if t.show == 'unsynced' else 'false' }}"
+              hx-get="{{ t.unsynced_url }}" hx-target="#sync-table">Not synced ({{ c.pending + c.failed + c.unknown }})</button>
+      <button type="button" class="btn-small{% if t.show == 'all' %} is-current{% endif %}"
+              aria-pressed="{{ 'true' if t.show == 'all' else 'false' }}"
+              hx-get="{{ t.all_url }}" hx-target="#sync-table">All ({{ c.synced + c.pending + c.failed + c.unknown }})</button>
+    </div>
+    <p class="hint">"On device" is what the app last wrote successfully (the device can't be read back);
+      &mdash; means unknown. Push writes one setting again.</p>
+  </div>
+  {% if t.rows %}
+    <div class="table-scroll">
+      <table class="data-table sync-rows">
+        <thead>
+          <tr><th scope="col">Setting</th><th scope="col">Desired</th><th scope="col">On device</th>
+              <th scope="col">Status</th><th scope="col"><span class="visually-hidden">Action</span></th></tr>
+        </thead>
+        <tbody>
+          {% for r in t.rows %}
+            <tr class="row-{{ r.status }}">
+              <td><span class="param-name">{{ r.label }}</span><code class="param-path">{{ r.path }}</code></td>
+              <td class="val">{{ r.desired }}</td>
+              <td class="val">{{ r.applied }}</td>
+              <td>{{ m.sync_badge([r.path], {r.path: r.status}) }}{% if r.reason %}<div class="reason">{{ r.reason }}</div>{% endif %}</td>
+              <td><button type="button" class="btn-small" hx-post="{{ t.push_path_url }}"
+                          {% if r.confirm %}hx-confirm="{{ r.confirm }}"
+                          hx-vals='{{ {"path": r.path, "confirm": "1"}|tojson }}'{% else %}hx-vals='{{ {"path": r.path}|tojson }}'{% endif %}
+                          hx-target="#sync-table" aria-label="Push {{ r.label }}">Push</button></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Every setting of preset {{ t.preset + 1 }} is synced.</p>
+  {% endif %}
+</div>

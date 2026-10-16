@@ -47,7 +47,7 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     assert html.count('class="output-card"') == 4
 
     # live feed + vendored assets only
-    assert f'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice&amp;serial={SERIAL}"' in html
+    assert f'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync&amp;serial={SERIAL}"' in html
     assert f'hx-get="/ui/header?serial={SERIAL}"' in html
     for src in re.findall(r'<script[^>]*src="([^"]+)"', html):
         assert src.startswith("/static/"), src
@@ -69,7 +69,7 @@ async def test_dashboard_without_device_when_daemon_is_down():
     assert "minidspd unreachable" in html and 'role="alert"' in html
     assert 'id="master-volume"' not in html and 'id="preset-1"' not in html
     assert 'data-serial=""' in html
-    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice"' in html
+    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync"' in html
 
 
 async def test_unsupported_device_names_are_listed_and_escaped():

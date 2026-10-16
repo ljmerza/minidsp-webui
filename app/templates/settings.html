@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Settings</h1>
+
+<section class="card" aria-labelledby="channels-title">
+  <h2 id="channels-title">Channels</h2>
+  {% if session is none %}
+    <p class="muted">{{ conn_label }}. Channel settings appear once minidspd reports a supported device.</p>
+  {% elif state_error %}
+    {% include "partials/state_error.html" %}
+  {% else %}
+    {% include "partials/settings_channels.html" %}
+  {% endif %}
+</section>
+
+<section class="card" aria-labelledby="runtime-title">
+  <h2 id="runtime-title">Safety &amp; sync</h2>
+  {% include "partials/settings_runtime.html" %}
+</section>
+
+<section class="card" aria-labelledby="mqtt-title">
+  <h2 id="mqtt-title">Home Assistant (MQTT)</h2>
+  {% include "partials/settings_mqtt.html" %}
+</section>
+{% endblock %}

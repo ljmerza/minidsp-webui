@@ -24,14 +24,14 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
-from app.web.nav import build_nav, channel_names
+from app.web.nav import build_nav
 from app.web.templating import templates
 
 router = APIRouter(include_in_schema=False)
 
 ERROR_HEADER = "X-Mdsp-Error"
 
-DASHBOARD_TOPICS = ("levels", "master", "device")
+DASHBOARD_TOPICS = ("levels", "master", "device", "sync")
 DEVICE_TOPICS = ("master", "device")
 
 
@@ -106,10 +106,49 @@ def page_context(request: Request, session: DeviceSession | None, topics: tuple[
     serial = session.serial if session else None
     return {
         **header_context(request, session),
-        "nav": build_nav(request, session.profile if session else None),
+        "nav": build_nav(
+            request, session.profile if session else None, getattr(session, "channel_meta", None) if session else None
+        ),
         "sse_url": _url(request, "/api/v1/events", topics=",".join(topics), serial=serial),
         "header_url": _url(request, "/ui/header", serial=serial),
     }
+
+
+# Same order and glyphs as the editing pages' sync badges (app/web/ui_common.py).
+_SYNC_ORDER = ("failed", "pending", "unknown", "synced")
+_SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}
+
+
+async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | None:
+    """Per-output gain/delay/crossover of the active preset plus a worst-of sync badge; None until state is loaded."""
+    if session is None or not hasattr(session, "ensure_loaded"):
+        return None
+    try:
+        await session.ensure_loaded()
+    except Exception:
+        return None
+    master = session.master
+    preset = master.preset if master is not None and master.preset is not None else 0
+    if not 0 <= preset < session.profile.n_presets:
+        return None
+    doc = session.desired(preset)
+    sync = session.sync_status(preset)
+    cards = []
+    for i, out in enumerate(doc.outputs):
+        prefix = f"outputs.{i}."
+        statuses = {status for path, status in sync.items() if path.startswith(prefix)}
+        worst = next((s for s in _SYNC_ORDER if s in statuses), "synced")
+        cards.append(
+            {
+                "gain_db": out.gain_db,
+                "mute": out.mute,
+                "delay_ms": out.delay_ms,
+                "crossover": "on" if any(not g.bypass for g in out.crossover) else "bypassed",
+                "sync": worst,
+                "sync_icon": _SYNC_ICON[worst],
+            }
+        )
+    return cards
 
 
 def _not_found_page(request: Request, serial: int) -> HTMLResponse:
@@ -127,14 +166,15 @@ async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DASHBOARD_TOPICS)
-    profile = session.profile if session else None
     status = session.status if session else None
     outputs_nav = next((item.children for item in ctx["nav"] if item.path == "/outputs"), ())
+    inputs_nav = next((item.children for item in ctx["nav"] if item.path == "/inputs"), ())
     ctx.update(
         title="Dashboard",
         output_links=[child.path if child.enabled else None for child in outputs_nav],
-        input_names=channel_names("In", profile.n_inputs if profile else 0),
-        output_names=channel_names("Out", profile.n_outputs if profile else 0),
+        input_names=[child.label for child in inputs_nav],  # names saved in Settings, else "In 1" / "Out 1"
+        output_names=[child.label for child in outputs_nav],
+        output_state=await output_cards(session),
         initial_levels={
             "i": list(status.input_levels) if status else [],
             "o": list(status.output_levels) if status else [],

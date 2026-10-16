@@ -23,6 +23,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./.devdata:/data
+      - ./migrations:/app/migrations:ro
     command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8480", "--reload", "--reload-dir", "/app/app"]
     ports:
       # Loopback by default; WEBUI_DEV_BIND=0.0.0.0 to open it from a phone on the LAN.

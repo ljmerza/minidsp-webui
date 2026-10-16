@@ -60,15 +60,28 @@
               <span x-text="readout('{{ key }}')">&mdash;</span>
             </span>
           </div>
+          {%- set card = output_state[loop.index0] if output_state else none -%}
           <dl class="output-params">
-            <div><dt>Gain</dt><dd>&mdash;</dd></div>
-            <div><dt>Delay</dt><dd>&mdash;</dd></div>
-            <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+            {% if card %}
+              <div><dt>Gain</dt><dd>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
+              <div><dt>Delay</dt><dd>{{ card.delay_ms|num(2) }} ms</dd></div>
+              <div><dt>Crossover</dt><dd>{{ card.crossover }}</dd></div>
+            {% else %}
+              <div><dt>Gain</dt><dd>&mdash;</dd></div>
+              <div><dt>Delay</dt><dd>&mdash;</dd></div>
+              <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+            {% endif %}
           </dl>
           <div class="output-foot">
-            <span class="sync-badge sync-unknown" title="Per-output settings and sync status arrive with the sync engine">
-              <span aria-hidden="true">&ndash;</span> not tracked yet
-            </span>
+            {% if card %}
+              <span class="sync-badge sync-{{ card.sync }}" title="Sync status of this output's settings (active preset)">
+                <span aria-hidden="true">{{ card.sync_icon }}</span> {{ card.sync }}
+              </span>
+            {% else %}
+              <span class="sync-badge sync-unknown" title="Preset state is not loaded">
+                <span aria-hidden="true">&ndash;</span> not tracked yet
+              </span>
+            {% endif %}
             {% if edit_path %}<a href="{{ root }}{{ edit_path }}">edit &rarr;</a>{% endif %}
           </div>
         </li>

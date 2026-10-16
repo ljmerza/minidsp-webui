@@ -1,0 +1,72 @@
+{#- Macros for the preset-editing pages. Controls carry data-path; static/js/params.js sends them and keeps the
+    sync badges (data-sync-for, space-separated paths, showing the worst status) up to date. -#}
+
+{% macro sync_badge(paths, statuses, reasons=none, compact=false) -%}
+  {%- set ns = namespace(found=[], reason=none) -%}
+  {%- for p in paths -%}
+    {%- set _ = ns.found.append(statuses.get(p, "unknown")) -%}
+    {%- if reasons and reasons.get(p) and ns.reason is none %}{% set ns.reason = reasons.get(p) %}{% endif -%}
+  {%- endfor -%}
+  {%- set st = worst_status(ns.found) -%}
+  <span class="sync-badge sync-{{ st }}{% if compact %} is-compact{% endif %}" data-sync-for="{{ paths|join(' ') }}"
+        title="{{ status_text[st]|capitalize }}{% if ns.reason %}: {{ ns.reason }}{% endif %}">
+    <span class="sync-icon" aria-hidden="true">{{ status_icon[st] }}</span>
+    <span class="sync-text{% if compact %} visually-hidden{% endif %}">{{ status_text[st] }}</span>
+  </span>
+{%- endmacro %}
+
+{% macro gain_control(id, path, value, label, gain_min, ceiling, gain_max, statuses, reasons) -%}
+  <div class="param param-gain">
+    <label class="param-label" for="{{ id }}">{{ label }}</label>
+    <div class="gain-row">
+      <input type="range" id="{{ id }}" data-path="{{ path }}" data-type="number" data-gain
+             min="{{ gain_min }}" max="{{ ceiling }}" step="0.1" value="{{ value }}"
+             aria-valuetext="{{ value|db }}">
+      <span class="num-field">
+        <input type="number" data-path="{{ path }}" data-type="number" data-gain inputmode="decimal"
+               aria-label="{{ label }} in dB" min="{{ gain_min }}" max="{{ ceiling }}" step="0.1" value="{{ '%.1f'|format(value) }}">
+        <span class="unit">dB</span>
+      </span>
+      {{ sync_badge([path], statuses, reasons) }}
+    </div>
+    <p class="hint">
+      {{ gain_min|db }} to {{ ceiling|db(signed=true) }}
+      {%- if ceiling < gain_max %} &middot; <span class="ceiling-note">ceiling {{ ceiling|db(signed=true) }} (device allows {{ gain_max|db(signed=true) }}; <a href="{{ root }}/settings">Settings</a>)</span>{% endif %}
+    </p>
+  </div>
+{%- endmacro %}
+
+{% macro toggle(id, path, checked, label, on_text, off_text, statuses, reasons, confirm_unmute=none) -%}
+  <div class="param param-toggle">
+    <span class="param-label" id="{{ id }}-label">{{ label }}</span>
+    <label class="switch">
+      <input type="checkbox" id="{{ id }}" data-path="{{ path }}" data-type="bool" role="switch"
+             aria-labelledby="{{ id }}-label"{% if checked %} checked{% endif %}
+             {%- if confirm_unmute %} data-confirm-unmute="{{ confirm_unmute }}"{% endif %}>
+      <span class="switch-on" aria-hidden="true">{{ on_text }}</span>
+      <span class="switch-off" aria-hidden="true">{{ off_text }}</span>
+    </label>
+    {{ sync_badge([path], statuses, reasons) }}
+  </div>
+{%- endmacro %}
+
+{% macro delay_control(id, path, value_ms, sample_rate, max_ms, statuses, reasons, label="Delay") -%}
+  <div class="param param-delay">
+    <label class="param-label" for="{{ id }}">{{ label }}</label>
+    <div class="gain-row">
+      <span class="num-field">
+        <input type="number" id="{{ id }}" data-path="{{ path }}" data-type="number" data-delay inputmode="decimal"
+               min="0" max="{{ '%.3f'|format(max_ms) }}" step="0.01" value="{{ '%.2f'|format(value_ms) }}">
+        <span class="unit">ms</span>
+      </span>
+      <span class="samples">= <span data-samples-for="{{ path }}">{{ (value_ms * sample_rate / 1000)|round|int }}</span> samples</span>
+      {{ sync_badge([path], statuses, reasons) }}
+    </div>
+  </div>
+{%- endmacro %}
+
+{% macro params_data(statuses, values, reasons) -%}
+  <script type="application/json" data-sync-state>{{ statuses|tojson }}</script>
+  <script type="application/json" data-desired-state>{{ values|tojson }}</script>
+  <script type="application/json" data-sync-reasons>{{ (reasons or {})|tojson }}</script>
+{%- endmacro %}

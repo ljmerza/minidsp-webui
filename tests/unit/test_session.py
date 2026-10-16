@@ -196,13 +196,6 @@ async def test_resolve_index_updates_state(session, daemon):
     assert session.state == SessionState.DAEMON_DOWN
 
 
-async def test_phase2_stubs(session):
-    with pytest.raises(NotImplementedError):
-        await session.get_desired(0)
-    with pytest.raises(NotImplementedError):
-        await session.push_all(0)
-
-
 async def test_manager_discovery(client, bus, settings, daemon):
     manager = SessionManager(client, bus, settings)
     daemon.get("/devices").mock(side_effect=httpx.ConnectError("refused"))

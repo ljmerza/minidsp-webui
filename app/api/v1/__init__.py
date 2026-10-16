@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from app.api.deps import require_same_origin
-from app.api.v1 import devices, events, health, master, status
+from app.api.v1 import adopt, devices, events, health, import_export, master, presets, status
 
 PREFIX = "/api/v1"
 
@@ -13,6 +13,9 @@ ROUTERS: list[APIRouter] = [
     status.router,
     master.router,
     events.router,
+    presets.router,
+    adopt.router,
+    import_export.router,
 ]
 
 

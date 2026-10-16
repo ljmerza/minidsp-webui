@@ -1,0 +1,11 @@
+{#- Inline channel rename (header strip of the input/output pages). Saved on change; keeps colour and ceiling. -#}
+<form class="channel-name" hx-post="{{ channel.name_url }}" hx-trigger="change, submit" hx-swap="outerHTML"
+      hx-target="this">
+  <label>
+    <span class="param-label">Name</span>
+    <input type="text" name="name" value="{{ channel.custom_name }}" maxlength="32" autocomplete="off"
+           placeholder="{{ 'In' if channel.kind == 'input' else 'Out' }} {{ channel.index + 1 }}"
+           aria-describedby="channel-name-hint">
+  </label>
+  <span id="channel-name-hint" class="hint">{% if name_error %}<span class="field-error">{{ name_error }}</span>{% else %}Shown in the menu and on every page{% endif %}</span>
+</form>

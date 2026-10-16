@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,9 +14,36 @@ from app.api.errors import register_exception_handlers
 from app.bus import Bus
 from app.config import Settings, get_settings
 from app.daemon.client import DaemonClient
+from app.mqtt import create_bridge
+from app.state import Database, Repo
 from app.sync.session import SessionManager
+from app.web import state_ui
+from app.web.settings_ui import apply_stored_runtime_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
+MAINTENANCE_INTERVAL_S = 24 * 3600
+
+log = logging.getLogger(__name__)
+
+
+async def _open_db(path: str) -> Database | None:
+    """Open the state DB. Without it the app still serves master controls; preset routes answer 503."""
+    try:
+        return await Database.open(path)
+    except Exception:
+        log.exception("cannot open the state database at %s; preset state will not be kept", path)
+        return None
+
+
+async def _maintenance(repo: Repo) -> None:
+    """Daily housekeeping: keep the event log bounded (runs once shortly after startup, then every 24 h)."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await repo.trim_events()
+        except Exception:
+            log.exception("event log trim failed")
+        await asyncio.sleep(MAINTENANCE_INTERVAL_S - 60)
 
 
 def create_app(settings: Settings | None = None, *, client: DaemonClient | None = None) -> FastAPI:
@@ -29,15 +58,34 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
             timeout=settings.daemon_timeout_s,
             preset_timeout=settings.preset_switch_timeout_s,
         )
-        manager = SessionManager(daemon, bus, settings)
+        db = await _open_db(settings.db_path)
+        repo = Repo(db) if db else None
+        if repo:
+            await apply_stored_runtime_settings(repo, settings)  # values saved on the Settings page override the env
+        manager = SessionManager(daemon, bus, settings, repo=repo)
+        mqtt = create_bridge(manager, bus, settings)
         app.state.bus = bus
         app.state.client = daemon
+        app.state.db = db
+        app.state.repo = repo
         app.state.manager = manager
+        app.state.mqtt = mqtt
         manager.start()  # discovery retries in the background, so the app serves even when the daemon is down
+        if mqtt:
+            mqtt.start()
+        maintenance = asyncio.create_task(_maintenance(repo), name="maintenance") if repo else None
         try:
             yield
         finally:
-            await manager.stop()
+            if maintenance:
+                maintenance.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await maintenance
+            if mqtt:
+                await mqtt.stop()  # publishes "offline" while the sessions still exist
+            await manager.stop()  # commits pending edits and flushes each session's persister
+            if db:
+                await db.close()
             if client is None:
                 await daemon.aclose()
 
@@ -46,6 +94,7 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     register_exception_handlers(app)
     app.include_router(v1.build_router())
     app.include_router(web.router)
+    app.include_router(state_ui.router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

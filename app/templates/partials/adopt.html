@@ -1,0 +1,100 @@
+{#- Adopt wizard (docs 03 §8). Rendered by /ui/devices/{serial}/adopt and replaced by its own form posts. -#}
+{%- set f_mode = form.mode -%}
+{%- set f_source = form.source -%}
+{%- set f_preset = form.preset -%}
+<div id="adopt-wizard" class="adopt">
+  {% if result %}
+    <div class="adopt-result{% if result.flush_ok == false %} is-warn{% endif %}" role="status">
+      <h3>Adopted preset {{ result.preset + 1 }} ({{ result.mode }})</h3>
+      <p>{{ result.known }} setting(s) known, {{ result.unknown }} unknown. {{ result.writes }} write(s) sent to the device{% if result.mode != "push" %} (nothing is written by "{{ result.mode }}"){% endif %}.</p>
+      {% if result.flush_ok == false %}<p class="field-error">The push didn't complete{% if result.flush_error %}: {{ result.flush_error }}{% endif %}. See the sync table; the affected outputs stay muted until it does.</p>{% endif %}
+      {% if result.warnings %}
+        <details><summary>{{ result.warnings|length }} ignored line(s)</summary>
+          <ul class="issues">{% for w in result.warnings %}<li>line {{ w.line }}: {{ w.message }} <code>{{ w.text }}</code></li>{% endfor %}</ul>
+        </details>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if errors %}
+    <div class="form-errors" role="alert">
+      <p>Nothing was adopted:</p>
+      <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <p class="adopt-status">
+    {% if needs_adoption %}
+      <strong>Not adopted yet.</strong> The app starts with no knowledge of what the device holds. Tell it here.
+    {% else %}
+      Adopted with <strong>{{ adoption.mode }}</strong> on preset {{ (adoption.preset or 0) + 1 }}{% if adoption.script %} from a command script{% endif %}{% if adoption.at %} ({{ adoption.at|replace("T", " ")|truncate(19, true, "") }} UTC){% endif %}. You can run it again, for example for another preset.
+    {% endif %}
+  </p>
+
+  <form class="adopt-form" hx-post="{{ adopt_url }}" hx-target="#adopt-wizard" hx-swap="outerHTML"
+        hx-encoding="multipart/form-data"
+        x-data='{ mode: {{ f_mode|tojson }}, source: {{ f_source|tojson }} }'>
+    <fieldset>
+      <legend>1. Preset</legend>
+      <label>Adopt
+        <select name="preset">
+          {% for p in presets %}
+            <option value="{{ p }}"{% if p == f_preset %} selected{% endif %}>Preset {{ p + 1 }}{% if p == active_preset %} (active){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>2. Starting point</legend>
+      <label class="radio"><input type="radio" name="source" value="script" x-model="source"{% if f_source == "script" %} checked{% endif %}>
+        A <code>minidsp -f</code> command script (what you ran to set the device up)</label>
+      <label class="radio"><input type="radio" name="source" value="defaults" x-model="source"{% if f_source == "defaults" %} checked{% endif %}>
+        The defaults: unity gains, all filters flat and bypassed. With push, outputs without a name in Settings start muted</label>
+
+      <div class="script-entry" x-show="source === 'script'">
+        <label for="adopt-script" class="param-label">Script</label>
+        <textarea id="adopt-script" name="script" rows="12" spellcheck="false" autocomplete="off" x-ref="script"
+                  placeholder="output 0 gain 12&#10;output 0 delay 9&#10;output 2 mute on">{{ form.script or "" }}</textarea>
+        <textarea hidden aria-hidden="true" tabindex="-1" x-ref="sample">{{ sample }}</textarea>
+        <div class="script-actions">
+          <label class="file-pick">Upload a file
+            <input type="file" name="script_file" accept=".txt,.sh,.minidsp,text/plain"
+                   @change="const f = $event.target.files[0]; if (f) f.text().then(t => { $refs.script.value = t; $event.target.value = ''; })">
+          </label>
+          <button type="button" class="btn-small" @click="$refs.script.value = $refs.sample.value">Use the sample</button>
+          <button type="button" class="btn-small" hx-post="{{ preview_url }}" hx-include="closest form"
+                  hx-encoding="multipart/form-data" hx-target="#adopt-preview" hx-swap="innerHTML">Preview</button>
+        </div>
+        <details class="hint">
+          <summary>What the script may contain</summary>
+          <p>Literal commands, one per line, as <code>minidsp -f</code> runs them: <code>output 0 gain 12</code>,
+            <code>input 0 routing 1 enable on</code>, <code>output 0 crossover 0 0 set -- b0 b1 b2 a1 a2</code>,
+            <code>output 1 peq 3 bypass off</code>, <code>output 0 compressor -t -30</code> and so on. The
+            <code>minidsp</code> prefix is optional and <code>#</code> starts a comment. Shell loops and variables
+            can't be read: write them out (the sample shows a whole preset expanded). Master and FIR lines are
+            ignored with a warning.</p>
+        </details>
+      </div>
+      <div id="adopt-preview" aria-live="polite"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>3. What the device holds</legend>
+      <label class="radio"><input type="radio" name="mode" value="trust" x-model="mode"{% if f_mode == "trust" %} checked{% endif %}>
+        <strong>Trust</strong>: this is exactly what's on the device. Nothing is written.</label>
+      <label class="radio sub" x-show="mode === 'trust' && source === 'script'">
+        <input type="checkbox" name="trust_all"{% if form.trust_all %} checked{% endif %}>
+        Also trust the defaults for everything the script doesn't set (otherwise those stay unknown)</label>
+      <label class="radio"><input type="radio" name="mode" value="push" x-model="mode"{% if f_mode == "push" %} checked{% endif %}>
+        <strong>Push</strong>: write all of it to the device{% if mute_wrap %}, with the outputs muted while it runs{% endif %}.</label>
+      <label class="radio sub confirm" x-show="mode === 'push'">
+        <input type="checkbox" name="confirm">
+        I understand this overwrites every setting of the chosen preset on the device.</label>
+      <label class="radio"><input type="radio" name="mode" value="unknown" x-model="mode"{% if f_mode == "unknown" %} checked{% endif %}>
+        <strong>Unknown</strong>: the device state is unknown; each setting is written the first time you change it. Nothing is written now.</label>
+    </fieldset>
+
+    <button type="submit" hx-disabled-elt="this">Adopt<span class="htmx-indicator spinner" aria-hidden="true"></span></button>
+  </form>
+</div>

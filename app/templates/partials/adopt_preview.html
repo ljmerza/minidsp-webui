@@ -1,0 +1,23 @@
+{#- Adopt wizard script preview: what the script sets, and its warnings and errors. Nothing is stored. -#}
+{% if errors %}
+  <div class="form-errors" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% elif defaults %}
+  <p class="muted">Starting from the defaults: no script to preview.</p>
+{% elif preview %}
+  <div class="adopt-preview{% if not preview.ok %} has-errors{% endif %}">
+    <p>
+      {% if preview.ok %}<span class="sync-badge sync-synced"><span aria-hidden="true">✓</span> readable</span>
+      {% else %}<span class="sync-badge sync-failed"><span aria-hidden="true">⚠</span> {{ preview.errors|length }} error(s)</span>{% endif %}
+      {{ preview.ops }} setting(s) from the script, covering {{ preview.device_paths }} of the preset's {{ preview.total_paths }} device settings.
+      With <strong>trust</strong>, the other {{ preview.total_paths - preview.device_paths }} stay unknown unless you also trust the defaults.
+    </p>
+    {% if preview.errors %}
+      <h4>Errors (fix these first)</h4>
+      <ul class="issues">{% for e in preview.errors %}<li>line {{ e.line }}: {{ e.message }} <code>{{ e.text }}</code></li>{% endfor %}</ul>
+    {% endif %}
+    {% if preview.warnings %}
+      <h4>Ignored lines</h4>
+      <ul class="issues">{% for w in preview.warnings %}<li>line {{ w.line }}: {{ w.message }} <code>{{ w.text }}</code></li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+{% endif %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "partials/params_macros.html" as m %}
+
+{% block content %}
+{% if session is none or state_error or page_error %}
+  <h1>Output</h1>
+  {% include "partials/edit_guard.html" %}
+{% else %}
+<h1><span class="chan-dot" style="--chan: {{ channel.color }}" aria-hidden="true"></span>{{ channel.name }}
+  <span class="muted">output {{ channel.index + 1 }}</span></h1>
+{% include "partials/adopt_banner.html" %}
+<div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
+     data-sample-rate="{{ sample_rate }}" hx-trigger="sse:sync, sse:desired">
+  {{ m.params_data(statuses, values, failed_reasons) }}
+  {% include "partials/syncbar.html" %}
+  {% include "partials/channel_strip.html" %}
+
+  <nav class="tabs" aria-label="{{ channel.name }} sections">
+    {% for t in output_tabs %}
+      {% if t.enabled %}
+        <a class="tab{% if t.key == tab %} is-current{% endif %}" href="{{ tab_link(t.key) }}"
+           {%- if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
+      {% else %}
+        <span class="tab is-disabled" title="Arrives in a later phase">{{ t.label }}</span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+
+  <section class="card tab-panel" aria-label="{{ tab|capitalize if tab else 'Sections' }}">
+    {% if tab_template %}
+      {% include tab_template %}
+    {% else %}
+      <p class="muted">No sections available yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
+{% endblock %}

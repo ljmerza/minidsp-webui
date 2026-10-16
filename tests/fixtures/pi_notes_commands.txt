@@ -1,0 +1,37 @@
+# Preset 0 of a bass-shaker + subwoofer setup on a miniDSP 2x4 HD, as the literal commands that built it.
+# The original notes used shell loops, which `minidsp -f` can't run; they are expanded here.
+
+# Input 1 feeds all four outputs.
+minidsp input 0 routing 0 enable on
+minidsp input 0 routing 1 enable on
+minidsp input 0 routing 2 enable on
+minidsp input 0 routing 3 enable on
+
+# Out 1 (output 0): bass shakers. +12 dB, 9 ms (864 samples),
+# LR4 low-pass 80 Hz in crossover group 0 and LR4 high-pass 20 Hz in group 1 (two BW2 sections each).
+minidsp output 0 gain 12
+minidsp output 0 delay 9
+minidsp output 0 crossover 0 0 set -- 6.828594198269291e-06 1.3657188396538582e-05 6.828594198269291e-06 1.992595228750302 -0.992622543127095
+minidsp output 0 crossover 0 1 set -- 6.828594198269291e-06 1.3657188396538582e-05 6.828594198269291e-06 1.992595228750302 -0.992622543127095
+minidsp output 0 crossover 1 0 set -- 0.9990748276239033 -1.9981496552478066 0.9990748276239033 1.9981487993036977 -0.9981505111919151
+minidsp output 0 crossover 1 1 set -- 0.9990748276239033 -1.9981496552478066 0.9990748276239033 1.9981487993036977 -0.9981505111919151
+# Only un-bypass after the coefficients above went in.
+minidsp output 0 crossover 0 0 bypass off
+minidsp output 0 crossover 1 0 bypass off
+
+# Out 2 (output 1): subwoofer. No filtering here (the sub amp does the crossover):
+# every crossover biquad flattened to pass-through and both groups bypassed.
+minidsp output 1 crossover 0 0 set -- 1 0 0 0 0
+minidsp output 1 crossover 0 1 set -- 1 0 0 0 0
+minidsp output 1 crossover 0 2 set -- 1 0 0 0 0
+minidsp output 1 crossover 0 3 set -- 1 0 0 0 0
+minidsp output 1 crossover 1 0 set -- 1 0 0 0 0
+minidsp output 1 crossover 1 1 set -- 1 0 0 0 0
+minidsp output 1 crossover 1 2 set -- 1 0 0 0 0
+minidsp output 1 crossover 1 3 set -- 1 0 0 0 0
+minidsp output 1 crossover 0 0 bypass on
+minidsp output 1 crossover 1 0 bypass on
+
+# Out 3/4 (outputs 2 and 3): unused.
+minidsp output 2 mute on
+minidsp output 3 mute on

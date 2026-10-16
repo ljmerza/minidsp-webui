@@ -1,0 +1,20 @@
+{#- Home Assistant bridge status and the "Remove from HA" action. Rendered with ``mqtt``. -#}
+<div id="settings-mqtt">
+  {% if not mqtt.mqtt_enabled %}
+    <p class="muted">Off. Set <code>MQTT_ENABLED=true</code> and <code>MQTT_HOST</code> to publish the master controls to
+      Home Assistant through MQTT discovery.</p>
+  {% else %}
+    <p>
+      {% if mqtt.mqtt_connected %}<span class="sync-badge sync-synced"><span aria-hidden="true">✓</span> connected</span>
+      {% elif mqtt.mqtt_running %}<span class="sync-badge sync-pending"><span aria-hidden="true">⟳</span> connecting</span>
+      {% else %}<span class="sync-badge sync-unknown"><span aria-hidden="true">?</span> not running</span>{% endif %}
+      {% if mqtt.mqtt_error %}<span class="muted">{{ mqtt.mqtt_error }}</span>{% endif %}
+    </p>
+    {% if mqtt.mqtt_remove_url %}
+      <button type="button" class="btn-small" hx-post="{{ mqtt.mqtt_remove_url }}" hx-target="#settings-mqtt" hx-swap="outerHTML"
+              hx-confirm="Remove this device's entities from Home Assistant? They come back after the next MQTT reconnect or app restart."
+              {%- if not mqtt.mqtt_connected %} disabled{% endif %}>Remove from Home Assistant</button>
+    {% endif %}
+  {% endif %}
+  {% if mqtt.mqtt_message %}<p class="form-saved" role="status">{{ mqtt.mqtt_message }}</p>{% endif %}
+</div>

@@ -1,0 +1,20 @@
+{#- Device page event log: persisted events, newest first. -#}
+{% if not repo %}
+  <p class="muted">The event log is kept in the database, which this app instance doesn't have.</p>
+{% elif error %}
+  <p class="field-error">The event log couldn't be read: {{ error }}</p>
+{% elif not events %}
+  <p class="muted">No events yet.</p>
+{% else %}
+  <ol class="event-log">
+    {% for e in events %}
+      <li class="ev ev-{{ e.level }}">
+        <time datetime="{{ e.ts }}">{{ e.ts|replace("T", " ")|truncate(19, true, "") }}</time>
+        <span class="ev-level">{{ e.level }}</span>
+        <span class="ev-kind">{{ e.kind }}</span>
+        <span class="ev-msg">{{ e.message }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+  <p class="hint">Newest first, times in UTC; up to the last {{ events|length }} events for this device.</p>
+{% endif %}

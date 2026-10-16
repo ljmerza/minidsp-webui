@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% import "partials/params_macros.html" as m %}
+
+{% block content %}
+<h1>Routing</h1>
+{% if session is none or state_error or page_error %}
+  {% include "partials/edit_guard.html" %}
+{% else %}
+{% include "partials/adopt_banner.html" %}
+<div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
+     hx-trigger="sse:sync, sse:desired">
+  {{ m.params_data(statuses, values, failed_reasons) }}
+  {% include "partials/syncbar.html" %}
+
+  <section class="card" aria-labelledby="matrix-title">
+    <div class="card-head">
+      <h2 id="matrix-title">Matrix <span class="muted">preset {{ preset + 1 }}</span></h2>
+    </div>
+    <div class="table-scroll">
+      <table class="routing-matrix">
+        <thead>
+          <tr>
+            <th scope="col"><span class="visually-hidden">Input</span></th>
+            {% for name in output_names %}
+              {%- set o = loop.index0 -%}
+              {%- set ns = namespace(any=false) -%}
+              {%- for _ in input_names %}{% if values["inputs.%d.routing.%d.enabled"|format(loop.index0, o)] %}{% set ns.any = true %}{% endif %}{% endfor %}
+              <th scope="col" style="--chan: {{ output_colors[o] }}">
+                <span class="chan-dot" aria-hidden="true"></span>{{ name }}
+                <span class="silent-warning" data-silent-output="{{ o }}" role="img"
+                      aria-label="No input is routed to {{ name }}: it will be silent"
+                      title="No input is routed to {{ name }}: it will be silent"{% if ns.any %} hidden{% endif %}>&#9888;</span>
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for in_name in input_names %}
+            {%- set i = loop.index0 %}
+            <tr>
+              <th scope="row" style="--chan: {{ input_colors[i] }}"><span class="chan-dot" aria-hidden="true"></span>{{ in_name }}</th>
+              {% for out_name in output_names %}
+                {%- set o = loop.index0 -%}
+                {%- set ep = "inputs.%d.routing.%d.enabled"|format(i, o) -%}
+                {%- set gp = "inputs.%d.routing.%d.gain_db"|format(i, o) -%}
+                {%- set on = values[ep] -%}
+                <td class="route-cell{% if on %} is-on{% endif %}" data-route-cell>
+                  <label class="route-toggle">
+                    <input type="checkbox" data-path="{{ ep }}" data-type="bool"
+                           data-route-output="{{ o }}"{% if on %} checked{% endif %}>
+                    <span class="visually-hidden">Route {{ in_name }} to {{ out_name }}</span>
+                  </label>
+                  <span class="num-field route-gain">
+                    <input type="number" data-path="{{ gp }}" data-type="number" data-gain data-enabled-by="{{ ep }}"
+                           inputmode="decimal" step="0.1" min="{{ session.profile.gain_min_db }}" max="{{ ceilings[o] }}"
+                           value="{{ '%.1f'|format(values[gp]) }}" aria-label="Gain from {{ in_name }} to {{ out_name }} in dB"
+                           {%- if not on %} disabled{% endif %}>
+                    <span class="unit">dB</span>
+                  </span>
+                  {{ m.sync_badge([ep, gp], statuses, failed_reasons, compact=true) }}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Tick a cell to route the input to that output; the gain applies to that route only.
+      Routing gains are limited by the destination output's ceiling.</p>
+  </section>
+
+  {% if input_names|length > 1 %}
+  <section class="card" aria-labelledby="mono-title">
+    <h2 id="mono-title">Mono sum</h2>
+    <div class="mono-sum">
+      <label>Send every input at <strong>&minus;6 dB</strong> to
+        <select data-mono-target>
+          {% for name in output_names %}<option value="{{ loop.index0 }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="button" data-mono-sum data-gain="-6">Apply</button>
+    </div>
+    <p class="hint">Enables the routes from all inputs to the chosen output, each at &minus;6 dB, so a stereo source
+      sums to mono without clipping.</p>
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
+{% endblock %}
