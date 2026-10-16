@@ -1,0 +1,33 @@
+{#- App-wide safety and sync options. Rendered with ``runtime``. -#}
+{%- set v = runtime.current -%}
+<form id="settings-runtime" class="settings-form" hx-post="{{ runtime.runtime_url }}" hx-target="this" hx-swap="outerHTML">
+  {% if runtime.errors %}
+    <div class="form-errors" role="alert"><ul>{% for e in runtime.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% elif runtime.saved %}
+    <p class="form-saved" role="status">Saved{% if not runtime.persisted %} until the app restarts (no database){% endif %}.</p>
+  {% endif %}
+  <div class="field">
+    <label for="gain-step">Big-step confirmation</label>
+    <span class="num-field"><input type="number" id="gain-step" name="gain_step_confirm_db" inputmode="decimal"
+           min="1" max="24" step="0.5" value="{{ v.gain_step_confirm_db }}" aria-describedby="gain-step-hint"><span class="unit">dB</span></span>
+    <p class="hint" id="gain-step-hint">A single change that raises the master volume, a channel gain or a routing gain by
+      more than this asks for confirmation first (the app, the API and Home Assistant alike).</p>
+  </div>
+  <div class="field">
+    <label for="coalesce">Write gather window</label>
+    <span class="num-field"><input type="number" id="coalesce" name="write_coalesce_ms" inputmode="numeric"
+           min="0" max="1000" step="10" value="{{ v.write_coalesce_ms }}" aria-describedby="coalesce-hint"><span class="unit">ms</span></span>
+    <p class="hint" id="coalesce-hint">How long the writer collects changes before sending them. Longer means fewer
+      writes while dragging, shorter means snappier.</p>
+  </div>
+  <label class="check"><input type="checkbox" name="mute_wrap_bulk_apply"{% if v.mute_wrap_bulk_apply %} checked{% endif %}>
+    Mute the affected outputs during bulk applies (push all, adopt push, script import)</label>
+  <label class="check"><input type="checkbox" name="reapply_on_reconnect"{% if v.reapply_on_reconnect %} checked{% endif %}>
+    Re-apply the active preset after the device reconnects
+    <span class="hint">Leave off unless the device is known to lose its settings on a power cycle; otherwise a
+      reconnect only marks the preset unknown.</span></label>
+  <label class="check"><input type="checkbox" checked disabled>
+    Apply staged edits when their preset becomes active <span class="hint">(always on)</span></label>
+  <p class="hint">These start from the environment variables; saving here overrides them{% if runtime.persisted %} and is kept across restarts{% endif %}.</p>
+  <button type="submit">Save</button>
+</form>

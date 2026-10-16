@@ -1,0 +1,48 @@
+{#- Output page, Delay tab: the delay itself plus the distance and relative helpers (all client-side maths). -#}
+{% import "partials/params_macros.html" as m %}
+{%- set path = "outputs." ~ channel.index ~ ".delay_ms" -%}
+{%- set others = [] -%}
+{%- for name in output_names %}{% if loop.index0 != channel.index %}{% set _ = others.append({"index": loop.index0, "name": name}) %}{% endif %}{% endfor -%}
+<h2>Delay</h2>
+{{ m.delay_control("delay-" ~ channel.index, path, values[path], sample_rate, delay_max_ms, statuses, failed_reasons) }}
+<p class="hint">Range 0 to {{ '%.3f'|format(delay_max_ms) }} ms ({{ delay_max_samples }} samples at {{ (sample_rate / 1000)|round|int }} kHz).
+  The device stores whole samples, so the value is rounded to the nearest sample.</p>
+
+<div class="delay-helpers"
+     x-data='delayHelper({{ {"path": path, "speed": speed_of_sound, "distance": default_distance_m, "maxMs": delay_max_ms, "sampleRate": sample_rate, "others": others}|tojson }})'>
+  <fieldset class="helper">
+    <legend>Distance helper</legend>
+    <div class="helper-row">
+      <label><span class="visually-hidden">Distance in metres</span>
+        <input type="number" inputmode="decimal" min="0" step="0.01" x-model.number="metres" @input="fromMetres()"> <span class="unit">m</span></label>
+      <span aria-hidden="true">/</span>
+      <label><span class="visually-hidden">Distance in feet</span>
+        <input type="number" inputmode="decimal" min="0" step="0.1" x-model.number="feet" @input="fromFeet()"> <span class="unit">ft</span></label>
+      <label>@ <input type="number" inputmode="decimal" min="300" max="360" step="1" x-model.number="speed" aria-label="Speed of sound in m/s"> <span class="unit">m/s</span></label>
+      <span class="helper-result">= <strong x-text="fmtMs(distanceMs())"></strong></span>
+      <button type="button" @click="apply(distanceMs())" :disabled="!valid(distanceMs())">Apply &rarr;</button>
+    </div>
+    <p class="hint">Sound travels {{ speed_of_sound|round|int }} m/s at about 20 &deg;C: delaying by the distance lines this output up with a speaker that much farther away.</p>
+  </fieldset>
+
+  {% if others %}
+  <fieldset class="helper">
+    <legend>Relative helper</legend>
+    <div class="helper-row">
+      <span>This output is</span>
+      <label><span class="visually-hidden">Distance difference in metres</span>
+        <input type="number" inputmode="decimal" min="0" step="0.01" x-model.number="relative"> <span class="unit">m</span></label>
+      <label><span class="visually-hidden">Closer or farther</span>
+        <select x-model="direction"><option value="closer">closer</option><option value="farther">farther</option></select></label>
+      <span>than</span>
+      <label><span class="visually-hidden">Other output</span>
+        <select x-model.number="other">
+          {% for o in others %}<option value="{{ o.index }}">{{ o.name }}</option>{% endfor %}
+        </select></label>
+      <span class="helper-result">&rarr; <strong x-text="fmtMs(relativeMs())"></strong></span>
+      <button type="button" @click="apply(relativeMs())" :disabled="!valid(relativeMs())">Apply &rarr;</button>
+    </div>
+    <p class="hint" x-text="relativeHint()"></p>
+  </fieldset>
+  {% endif %}
+</div>

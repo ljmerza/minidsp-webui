@@ -4,7 +4,9 @@ Entries are enabled only when the app actually serves their path, so pages added
 registering their routes. Channel pages use 1-based numbers in the URL (``/outputs/1`` is "Out 1").
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import Request
 from starlette.routing import Match
@@ -34,7 +36,18 @@ def channel_names(prefix: str, count: int) -> list[str]:
     return [f"{prefix} {n}" for n in range(1, count + 1)]
 
 
-def build_nav(request: Request, profile: DeviceProfile | None) -> list[NavItem]:
+def _named(defaults: list[str], kind: str, channel_meta: Mapping[tuple[str, int], Any]) -> list[str]:
+    """Replace the default "In 1" / "Out 1" labels with names saved in Settings ("Shakers")."""
+    names = []
+    for i, default in enumerate(defaults):
+        meta = channel_meta.get((kind, i))
+        names.append(getattr(meta, "name", None) or default)
+    return names
+
+
+def build_nav(
+    request: Request, profile: DeviceProfile | None, channel_meta: Mapping[tuple[str, int], Any] | None = None
+) -> list[NavItem]:
     current = request.url.path.removeprefix(request.scope.get("root_path", "")) or "/"
     n_inputs = profile.n_inputs if profile else 0
     n_outputs = profile.n_outputs if profile else 0
@@ -48,8 +61,11 @@ def build_nav(request: Request, profile: DeviceProfile | None) -> list[NavItem]:
             children=children,
         )
 
-    inputs = tuple(item(name, f"/inputs/{n}") for n, name in enumerate(channel_names("In", n_inputs), start=1))
-    outputs = tuple(item(name, f"/outputs/{n}") for n, name in enumerate(channel_names("Out", n_outputs), start=1))
+    meta = channel_meta or {}
+    input_names = _named(channel_names("In", n_inputs), "input", meta)
+    output_names = _named(channel_names("Out", n_outputs), "output", meta)
+    inputs = tuple(item(name, f"/inputs/{n}") for n, name in enumerate(input_names, start=1))
+    outputs = tuple(item(name, f"/outputs/{n}") for n, name in enumerate(output_names, start=1))
     return [
         item("Dashboard", "/"),
         item("Routing", "/routing"),

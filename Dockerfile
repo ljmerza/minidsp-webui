@@ -17,6 +17,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY app ./app
+COPY migrations ./migrations
 
 RUN useradd --system --uid 1000 webui && mkdir -p /data && chown webui /data
 USER webui

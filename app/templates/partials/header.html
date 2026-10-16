@@ -2,6 +2,9 @@
 {%- set vol = master.volume if master is not none and master.volume is not none else none -%}
 {%- set muted = master is not none and master.mute -%}
 {%- set base = root ~ "/ui/devices/" ~ serial ~ "/master" if serial is not none else "" -%}
+{#- Sync tracking is shown once the session's preset state is loaded (DeviceSession.loaded). -#}
+{%- set tracked = session is not none and session.loaded is defined and session.loaded -%}
+{%- set active_preset = master.preset if master is not none else none -%}
 <div class="hdr" data-serial="{{ serial if serial is not none else '' }}"
      hx-target="#app-header" hx-swap="innerHTML">
   <div class="hdr-row">
@@ -21,15 +24,18 @@
       <span class="hdr-label" aria-hidden="true">Preset</span>
       {% for p in presets %}
         {%- set active = master is not none and master.preset == p %}
-        <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}"
+        {%- set staged = session.sync_summary(p).counts.pending if tracked and not active else 0 %}
+        <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}{% if staged %} has-staged{% endif %}"
                 aria-pressed="{{ 'true' if active else 'false' }}"
-                aria-label="Preset {{ p + 1 }}{% if active %} (active){% endif %}"
+                aria-label="Preset {{ p + 1 }}{% if active %} (active){% endif %}{% if staged %}, {{ staged }} staged change{{ 's' if staged != 1 }}{% endif %}"
+                {%- if staged %} title="{{ staged }} staged change{{ 's' if staged != 1 }}: written when this preset becomes active"{% endif %}
                 aria-keyshortcuts="{{ p + 1 }}"
                 data-preset-key="{{ p + 1 }}"
                 {%- if not controls_enabled or active %} disabled{% endif %}
                 hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
                 hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
           {{- p + 1 -}}
+          {%- if staged %}<span class="staged-dot" aria-hidden="true"></span>{% endif -%}
         </button>
       {% endfor %}
     </div>
@@ -99,10 +105,27 @@
               hx-post="{{ base }}/volume/up">+</button>
     </div>
 
-    <div class="hdr-sync" title="Per-parameter sync tracking arrives with the sync engine">
+    {% if tracked and active_preset is not none %}
+      {%- set c = session.sync_summary(active_preset).counts -%}
+      {%- set st = "failed" if c.failed else "pending" if c.pending else "unknown" if c.unknown else "synced" -%}
+      <a class="hdr-sync" href="{{ root }}/device?preset={{ active_preset + 1 }}#sync"
+         title="Sync status of the active preset {{ active_preset + 1 }}: open the sync table">
+        <span class="hdr-label">Sync</span>
+        <span class="sync-badge sync-{{ st }}">
+          <span aria-hidden="true">{{ {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}[st] }}</span>
+          {% if st == "synced" %}all synced
+          {%- else %}{% if c.failed %}{{ c.failed }} failed{% endif %}{% if c.pending %}{% if c.failed %}, {% endif %}{{ c.pending }} pending{% endif %}{% if c.unknown %}{% if c.failed or c.pending %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif %}
+        </span>
+      </a>
+      {#- Re-render the header when sync status changes (on pages whose feed carries "sync"). -#}
+      <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}" hx-trigger="sse:sync delay:500ms"
+            hx-target="#app-header" hx-swap="innerHTML"></span>
+    {% else %}
+    <div class="hdr-sync" title="Sync tracking starts once the stored preset state is loaded">
       <span class="hdr-label">Sync</span>
       <span class="sync-badge sync-unknown"><span aria-hidden="true">&ndash;</span> not tracked yet</span>
     </div>
+    {% endif %}
   </div>
   {% endif %}
 

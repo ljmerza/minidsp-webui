@@ -19,10 +19,11 @@ MASTER_JSON = {"preset": 0, "source": "Analog", "volume": -20.0, "mute": False, 
 
 
 @pytest.fixture
-def settings() -> Settings:
+def settings(tmp_path) -> Settings:
     return Settings(
         _env_file=None,
         minidspd_url=DAEMON_URL,
+        db_path=str(tmp_path / "state.sqlite3"),
         preset_switch_timeout_s=2.0,
         monitor_backoff_min_s=0.05,
         monitor_backoff_max_s=0.2,

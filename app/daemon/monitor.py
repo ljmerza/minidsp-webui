@@ -4,6 +4,11 @@ The first message is a full status. After that the daemon sends level frames (~4
 (2 s polling plus instant IR-remote changes). The monitor keeps a merged cached status and publishes ``levels`` and
 ``master`` events on the bus. When nobody subscribes to levels (after a grace period) it reconnects with ``poll=true``
 only, sparing the USB bus; when a levels subscriber appears it reconnects with levels again.
+
+minidspd (0.1.12) only ever writes to this socket and never reads it, so it answers neither pings nor close frames.
+Websocket keepalive pings would therefore drop a healthy stream every ``ping_interval + ping_timeout`` seconds (and
+each drop marks the active preset unknown). Instead, when the stream has been quiet for ``idle_probe_s`` the monitor
+checks the daemon over HTTP and reconnects only if that fails twice in a row.
 """
 
 import asyncio
@@ -24,6 +29,8 @@ log = logging.getLogger(__name__)
 
 Hook = Callable[[], Awaitable[None] | None]
 
+IDLE_PROBE_FAILURES = 2  # consecutive failed HTTP probes before a quiet stream is treated as dead
+
 
 class DeviceMonitor:
     def __init__(
@@ -36,6 +43,7 @@ class DeviceMonitor:
         backoff_min_s: float = 0.5,
         backoff_max_s: float = 10.0,
         levels_idle_grace_s: float = 5.0,
+        idle_probe_s: float = 30.0,
         on_connected: Callable[[bool], Awaitable[None] | None] | None = None,  # arg: recovered after a drop
         on_disconnected: Hook | None = None,
         connect: Callable[..., Any] = ws_connect,
@@ -47,6 +55,7 @@ class DeviceMonitor:
         self._backoff_min = backoff_min_s
         self._backoff_max = backoff_max_s
         self._grace = levels_idle_grace_s
+        self._idle_probe = idle_probe_s
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
         self._connect = connect
@@ -140,16 +149,21 @@ class DeviceMonitor:
                 index = await self._resolve_index()
                 levels = self.levels_wanted()
                 url = self._client.ws_url(index, levels=levels, poll=True)
-                # minidspd never answers a close frame, so a long close_timeout only delays reconnects and shutdown.
-                async with self._connect(
-                    url, open_timeout=10, ping_interval=20, ping_timeout=20, close_timeout=1
-                ) as ws:
+                # minidspd never answers pings or close frames (see the module docstring): no keepalive pings, and a
+                # short close_timeout so reconnects and shutdown aren't delayed.
+                async with self._connect(url, open_timeout=10, ping_interval=None, close_timeout=1) as ws:
                     self._ws = ws
                     await self._mark_connected(levels)
                     backoff = self._backoff_min
-                    async for message in ws:
-                        self.handle_message(message)
-                if not self._reconnect_now:
+                    watchdog = asyncio.create_task(self._watch_idle(index, ws), name=f"monitor-idle-{self.serial}")
+                    try:
+                        async for message in ws:
+                            self.handle_message(message)
+                    finally:
+                        watchdog.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await watchdog
+                if not self._reconnect_now and not watchdog_closed(watchdog):
                     self.last_error = "connection closed by minidspd"
             except asyncio.CancelledError:
                 raise
@@ -165,6 +179,30 @@ class DeviceMonitor:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=backoff)
             backoff = min(backoff * 2, self._backoff_max)
+
+    async def _watch_idle(self, index: int, ws: Any) -> bool:
+        """Probe the daemon over HTTP while the stream is quiet; close the stream (returning True) if the daemon stops
+        answering."""
+        failures = 0
+        while True:
+            age = self.status_age()
+            if age is None or age < self._idle_probe:
+                await asyncio.sleep(self._idle_probe - (age or 0.0))
+                continue
+            try:
+                status = await self._client.get_status(index)
+            except Exception as exc:
+                failures += 1
+                self.last_error = str(exc) or type(exc).__name__
+                log.debug("idle probe %d for device %s failed: %s", failures, self.serial, self.last_error)
+                if failures >= IDLE_PROBE_FAILURES:
+                    log.warning("device %s stream is quiet and the daemon isn't answering; reconnecting", self.serial)
+                    await ws.close()
+                    return True
+                await asyncio.sleep(min(self._idle_probe, 5.0))
+                continue
+            failures = 0
+            self.update_master(status.master)  # refreshes last_message_at
 
     async def _mark_connected(self, levels: bool) -> None:
         recovered, self._recovering = self._recovering, False
@@ -237,6 +275,11 @@ class DeviceMonitor:
             self._bus.publish(MASTER, {"serial": self.serial, "master": master.model_dump()}, serial=self.serial)
         if has_levels:
             self._bus.publish(LEVELS, {"i": input_levels, "o": output_levels}, serial=self.serial)
+
+
+def watchdog_closed(task: asyncio.Task) -> bool:
+    """Whether the idle watchdog closed the stream (its probe error is then kept as ``last_error``)."""
+    return task.done() and not task.cancelled() and task.exception() is None and task.result() is True
 
 
 async def _call(hook: Callable[..., Awaitable[None] | None] | None, *args: Any) -> None:

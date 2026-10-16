@@ -25,10 +25,11 @@ HX = {"HX-Request": "true"}
 
 
 @pytest.fixture
-async def ctx():
+async def ctx(tmp_path):
     settings = Settings(
         _env_file=None,
         minidspd_url=DAEMON_URL,
+        db_path=str(tmp_path / "state.sqlite3"),
         preset_switch_timeout_s=2.0,
         monitor_backoff_min_s=0.05,
         monitor_backoff_max_s=0.2,

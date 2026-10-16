@@ -19,6 +19,8 @@ def health_summary(manager: SessionManager) -> dict:
         "daemon": daemon,
         "daemon_error": manager.last_error,
         "device": "connected" if connected else "absent",
+        # "memory": the state DB could not be opened, so preset state and history are lost on restart
+        "state": "persistent" if manager.repo is not None else "memory",
         "devices": [
             {"serial": s.serial, "state": str(s.state), "monitor_connected": s.monitor.connected} for s in sessions
         ],

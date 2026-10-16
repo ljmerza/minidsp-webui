@@ -8,7 +8,10 @@ per-output gain, mute, delay, polarity, routing, PEQ and crossover editing with 
 graphs and level meters, plus Home Assistant entities via MQTT discovery.
 
 > **Status: early development.** Working so far: the live header with master volume, mute, source and preset
-> controls, a dashboard with live level meters, and a device info page. Per-channel editing comes next.
+> controls, a dashboard with live level meters, routing, input/output gain, mute, polarity and delay editing with
+> per-setting sync status, staged edits for inactive presets, an adopt wizard (trust or push the device's current
+> config, optionally from a `minidsp` CLI script), CLI-script import/export, and Home Assistant master controls over
+> MQTT. PEQ, crossover and response graphs come next.
 
 ## How it works
 
@@ -53,6 +56,19 @@ Works with minidspd 0.1.12, the current minidsp-rs release.
 | `GAIN_MIN_DB` / `GAIN_MAX_DB` | `-72` / `12` | Allowed range for channel and routing gains |
 | `GAIN_STEP_CONFIRM_DB` | `6` | Raising a level by more than this in one step asks for confirmation |
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices |
+| `WRITE_COALESCE_MS` | `50` | Gather window for edits before they are written to the device |
+| `MUTE_WRAP_BULK_APPLY` | `true` | Mute the affected outputs while a bulk apply (push, import, profile load) runs |
+| `REAPPLY_ON_RECONNECT` | `false` | Push the active preset again after the device reconnects (e.g. after a power cycle) |
+| `PUBLIC_URL` | _(empty)_ | The UI's external URL, used for Home Assistant's "visit device" link |
+| `MQTT_ENABLED` | `false` | Publish Home Assistant entities over MQTT discovery |
+| `MQTT_HOST` / `MQTT_PORT` | _(empty)_ / `1883` | MQTT broker, e.g. `mqtt.example.lan` |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | _(empty)_ | Broker credentials |
+| `MQTT_DISCOVERY_PREFIX` | `homeassistant` | Home Assistant discovery prefix |
+| `MQTT_BASE_TOPIC` | `minidsp-webui` | Prefix for state, command and availability topics |
+| `MQTT_VOLUME_FLOOR_DB` | `-127` | Lowest master volume the Home Assistant slider offers |
+
+Gain-step confirmation, the gather window, mute-wrap and reapply-on-reconnect can also be changed on the Settings
+page; values saved there take precedence over the environment.
 
 ## Development
 

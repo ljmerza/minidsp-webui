@@ -1,0 +1,15 @@
+{#- Shown instead of an editing page's content when there is nothing to edit. Sets nothing; callers check
+    ``edit_ready`` themselves (session present, state loaded, valid preset/channel). -#}
+{% if session is none %}
+  <section class="card empty-state">
+    <h2>No device</h2>
+    <p>{{ conn_label }}. This page fills in as soon as minidspd reports a supported device.</p>
+  </section>
+{% elif state_error %}
+  {% include "partials/state_error.html" %}
+{% elif page_error %}
+  <section class="card empty-state">
+    <h2>Not found</h2>
+    <p>{{ page_error }} <a href="{{ root }}/">Back to the dashboard</a>.</p>
+  </section>
+{% endif %}

@@ -157,11 +157,12 @@ def post_config(raw: httpx.AsyncClient) -> Callable:
 
 
 @pytest.fixture(scope="module")
-def app_url(daemon_url: str) -> Iterator[str]:
+def app_url(daemon_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """The app, pointed at the mock, served by uvicorn in a background thread on an ephemeral loopback port."""
     settings = Settings(
         _env_file=None,
         minidspd_url=daemon_url,
+        db_path=str(tmp_path_factory.mktemp("app") / "state.sqlite3"),
         preset_switch_timeout_s=5.0,
         levels_idle_grace_s=0.2,
         monitor_backoff_min_s=0.1,
