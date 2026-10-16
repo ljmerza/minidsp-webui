@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="visually-hidden">Dashboard</h1>
+
+{% if session is none %}
+  <section class="card empty-state">
+    <h2>No device</h2>
+    <p>{{ conn_label }}. This page fills in as soon as minidspd reports a supported device.</p>
+  </section>
+{% else %}
+{%- set channels = [] -%}
+{%- for name in input_names %}{% set _ = channels.append(("i" ~ loop.index0, name)) %}{% endfor -%}
+{%- for name in output_names %}{% set _ = channels.append(("o" ~ loop.index0, name)) %}{% endfor -%}
+<div class="dashboard"
+     x-data='levelMeters({{ {"inputs": input_names, "outputs": output_names, "initial": initial_levels}|tojson }})'
+     hx-trigger="sse:levels">
+
+  <section class="card meters-card" aria-labelledby="levels-title">
+    <div class="card-head">
+      <h2 id="levels-title">Levels</h2>
+      <span class="meters-state" x-show="stale" x-cloak>no signal data</span>
+      <button type="button" class="btn-small" @click="resetAllClips()" :disabled="!anyClip()">Reset clip</button>
+    </div>
+    <div class="meters" :class="{ 'is-stale': stale }">
+      <div class="meter-scale" aria-hidden="true">
+        {% for t in meter_ticks %}
+          <span style="bottom: {{ t|meter_pct }}">{{ t|num(0) }}</span>
+        {% endfor %}
+      </div>
+      {% for key, name in channels %}
+        <div class="meter{% if key.startswith('o') %} meter-out{% endif %}" role="group" aria-label="{{ name }} level">
+          <button type="button" class="clip-led" :class="{ 'is-on': clip.{{ key }} }"
+                  @click="resetClip('{{ key }}')"
+                  :aria-label="clipLabel('{{ key }}')">
+            <span x-text="clip.{{ key }} ? 'CLIP' : '–'">&ndash;</span>
+          </button>
+          <div class="meter-track">
+            <div class="meter-bar" :style="barStyle('{{ key }}')"></div>
+            <div class="meter-peak" :style="peakStyle('{{ key }}')" x-show="peak.{{ key }} !== null"></div>
+          </div>
+          <div class="meter-name">{{ name }}</div>
+          <div class="meter-value" aria-live="off"><span x-text="readout('{{ key }}')">&mdash;</span></div>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="hint">dBFS, peak hold 1.5 s. The clip light latches at &minus;1 dBFS or above; press it to reset.</p>
+  </section>
+
+  <section class="card outputs-card" aria-labelledby="outputs-title">
+    <h2 id="outputs-title">Outputs</h2>
+    <ul class="output-cards">
+      {% for name in output_names %}
+        {%- set key = "o" ~ loop.index0 -%}
+        {%- set edit_path = output_links[loop.index0] -%}
+        <li class="output-card">
+          <div class="output-head">
+            <h3>{{ name }}</h3>
+            <span class="output-level" :class="{ 'is-clip': clip.{{ key }} }">
+              <span x-text="readout('{{ key }}')">&mdash;</span>
+            </span>
+          </div>
+          <dl class="output-params">
+            <div><dt>Gain</dt><dd>&mdash;</dd></div>
+            <div><dt>Delay</dt><dd>&mdash;</dd></div>
+            <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+          </dl>
+          <div class="output-foot">
+            <span class="sync-badge sync-unknown" title="Per-output settings and sync status arrive with the sync engine">
+              <span aria-hidden="true">&ndash;</span> not tracked yet
+            </span>
+            {% if edit_path %}<a href="{{ root }}{{ edit_path }}">edit &rarr;</a>{% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+{% endblock %}
