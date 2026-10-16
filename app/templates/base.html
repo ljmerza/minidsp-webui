@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}],"defaultSwapStyle":"innerHTML","scrollIntoViewOnBoost":false}'>
+  <title>{% block title %}{{ title }}{% endblock %} · minidsp-webui</title>
+  <link rel="stylesheet" href="{{ root }}/static/css/app.css?v={{ asset_version }}">
+  {% block head %}{% endblock %}
+</head>
+<body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header id="app-header" class="app-header"
+          hx-get="{{ header_url }}" hx-trigger="sse:master, sse:device, refresh"
+          hx-swap="innerHTML" hx-disinherit="*">
+    {% include "partials/header.html" %}
+  </header>
+  <div class="sse-offline" role="status" aria-live="polite" hidden data-sse-offline>
+    Live updates disconnected; reconnecting&hellip;
+  </div>
+
+  <div class="layout" x-data="{ navOpen: false }">
+    <button type="button" class="nav-toggle" @click="navOpen = !navOpen"
+            :aria-expanded="navOpen.toString()" aria-controls="sidenav">
+      <span aria-hidden="true">&#9776;</span> Menu
+    </button>
+    <nav id="sidenav" class="sidenav" :class="{ 'is-open': navOpen }" aria-label="Main">
+      <ul>
+        {% for item in nav %}
+          <li>
+            {% if item.enabled %}
+              <a href="{{ root }}{{ item.path }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>
+            {% else %}
+              <span class="nav-disabled"{% if not item.children %} title="Not available yet"{% endif %}>{{ item.label }}</span>
+            {% endif %}
+            {% if item.children %}
+              <ul>
+                {% for child in item.children %}
+                  <li>
+                    {% if child.enabled %}
+                      <a href="{{ root }}{{ child.path }}"{% if child.active %} aria-current="page"{% endif %}>{{ child.label }}</a>
+                    {% else %}
+                      <span class="nav-disabled" title="Not available yet">{{ child.label }}</span>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </nav>
+
+    <main id="main" class="content" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="assertive" aria-atomic="false"></div>
+
+  <script src="{{ root }}/static/vendor/htmx/htmx.min.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/vendor/htmx/sse.min.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/app.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/master.js?v={{ asset_version }}"></script>
+  {% block scripts %}{% endblock %}
+  <script defer src="{{ root }}/static/vendor/alpine/alpine.min.js?v={{ asset_version }}"></script>
+</body>
+</html>

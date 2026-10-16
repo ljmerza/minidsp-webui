@@ -7,7 +7,8 @@ minidsp-rs gives you a CLI and an HTTP API but no graphical interface. This proj
 per-output gain, mute, delay, polarity, routing, PEQ and crossover editing with live frequency-response
 graphs and level meters, plus Home Assistant entities via MQTT discovery.
 
-> **Status: early development.** Only the service skeleton exists so far.
+> **Status: early development.** Working so far: the live header with master volume, mute, source and preset
+> controls, a dashboard with live level meters, and a device info page. Per-channel editing comes next.
 
 ## How it works
 
@@ -35,7 +36,10 @@ services:
     restart: unless-stopped
 ```
 
-Then open `http://<host>:8480`.
+Then open `http://<host>:8480`. Every JavaScript and CSS library is vendored under `app/static/vendor`
+(versions in `VERSIONS.md` there), so the UI works without internet access.
+
+Works with minidspd 0.1.12, the current minidsp-rs release.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -44,12 +48,23 @@ Then open `http://<host>:8480`.
 | `WEBUI_PORT` | `8480` | Listen port |
 | `DB_PATH` | `/data/minidsp-webui.sqlite3` | SQLite database |
 | `LOG_LEVEL` | `info` | Log level |
+| `DAEMON_TIMEOUT_S` | `5` | Timeout for minidspd HTTP calls (seconds) |
+| `PRESET_SWITCH_TIMEOUT_S` | `15` | How long to wait for the device to report a new preset |
+| `GAIN_MIN_DB` / `GAIN_MAX_DB` | `-72` / `12` | Allowed range for channel and routing gains |
+| `GAIN_STEP_CONFIRM_DB` | `6` | Raising a level by more than this in one step asks for confirmation |
+| `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices |
 
 ## Development
 
 ```bash
 uv sync --group dev
-uv run ruff check . && uv run ruff format --check .
-uv run pytest
-uv run python -m app.main
+make lint                # ruff check + format check
+make test                # unit tests, no docker needed
+make dev-up              # mock minidspd on 127.0.0.1:15380 + the UI with hot reload on 127.0.0.1:8480
+make test-integration    # integration tests against the dev stack (starts and stops it as needed)
+make dev-down
 ```
+
+The dev stack runs the real `minidspd` 0.1.12 against its built-in mock device, so no hardware is needed.
+`tests/integration/MOCK_NOTES.md` lists what the mock does and doesn't simulate. The JSON API is under `/api/v1`
+(OpenAPI docs at `/docs`), and live updates are a Server-Sent Events stream at `/api/v1/events`.

@@ -1,0 +1,38 @@
+# Dev stack: the web UI (hot reload) against a mock minidspd. No hardware needed.
+#   make dev-up / make dev-down / make test-integration
+name: minidsp-webui-dev
+
+services:
+  minidspd-mock:
+    build: ./dev/minidspd-mock
+    image: minidsp-webui-dev/minidspd-mock:0.1.12
+    volumes:
+      - ./dev/minidspd-mock/config.toml:/etc/minidsp/config.toml:ro
+    command: ["minidspd", "--config", "/etc/minidsp/config.toml"]
+    ports:
+      # Loopback only: the daemon API is unauthenticated. Integration tests use MINIDSPD_MOCK_URL=http://127.0.0.1:15380.
+      - "127.0.0.1:${MOCK_PORT:-15380}:5380"
+
+  webui:
+    build: .
+    image: minidsp-webui-dev/webui:dev
+    environment:
+      MINIDSPD_URL: http://minidspd-mock:5380
+      DB_PATH: /data/dev.sqlite3
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./app:/app/app
+      - ./.devdata:/data
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8480", "--reload", "--reload-dir", "/app/app"]
+    ports:
+      # Loopback by default; WEBUI_DEV_BIND=0.0.0.0 to open it from a phone on the LAN.
+      - "${WEBUI_DEV_BIND:-127.0.0.1}:${WEBUI_DEV_PORT:-8480}:8480"
+    healthcheck:
+      # Same probe as the image, polled faster so `up --wait` returns quickly.
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8480/healthz', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      minidspd-mock:
+        condition: service_healthy

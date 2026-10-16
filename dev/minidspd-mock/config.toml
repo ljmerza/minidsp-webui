@@ -1,0 +1,12 @@
+# minidspd config for the dev/test mock. Mock devices default to hw_id=10, dsp_version=100, which probe as a 2x4HD.
+# Mock serials must be between 900000 and 965535.
+
+# Don't pick up real devices advertised on the LAN.
+ignore_advertisements = true
+
+[http_server]
+# Reachable inside the compose network only; docker-compose.dev.yml publishes it on loopback.
+bind_address = "0.0.0.0:5380"
+
+[[static_device]]
+url = "mock:?serial=911111"

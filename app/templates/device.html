@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Device</h1>
+<section id="device-info" class="card" aria-live="polite"
+         hx-get="{{ device_info_url }}" hx-trigger="sse:device" hx-swap="innerHTML">
+  {% include "partials/device_info.html" %}
+</section>
+{% endblock %}

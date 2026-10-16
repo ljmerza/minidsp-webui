@@ -5,16 +5,29 @@ description = "Web UI for miniDSP devices via the minidsp-rs daemon"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiomqtt>=2.3",
+    "aiosqlite>=0.20",
     "fastapi>=0.115",
+    "httpx>=0.28",
+    "jinja2>=3.1",
+    "numpy>=2.1",
+    "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "sse-starlette>=2.1",
     "uvicorn[standard]>=0.32",
+    "websockets>=13.1",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.28",
+    "hypothesis>=6.115",
+    "jsonschema>=4.23",
     "pytest>=8.3",
+    "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
+    "respx>=0.21",
     "ruff>=0.8",
 ]
 
@@ -32,3 +45,9 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not integration'"
+markers = [
+    "integration: needs docker (mock minidspd / mosquitto); run with -m integration",
+]

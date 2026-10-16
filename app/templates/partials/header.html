@@ -1,0 +1,120 @@
+{#- Persistent header. Rendered inside #app-header on page load and by every /ui/... master partial. -#}
+{%- set vol = master.volume if master is not none and master.volume is not none else none -%}
+{%- set muted = master is not none and master.mute -%}
+{%- set base = root ~ "/ui/devices/" ~ serial ~ "/master" if serial is not none else "" -%}
+<div class="hdr" data-serial="{{ serial if serial is not none else '' }}"
+     hx-target="#app-header" hx-swap="innerHTML">
+  <div class="hdr-row">
+    <div class="hdr-device">
+      <a class="hdr-product" href="{{ root }}/">{{ profile.product_name if profile else "miniDSP" }}</a>
+      {%- if serial is not none %} <span class="hdr-serial">#{{ serial }}</span>{% endif %}
+      <span class="conn conn-{{ conn_level }}" role="status">
+        <span class="conn-icon" aria-hidden="true">
+          {%- if conn_level == "ok" %}&#9679;{% elif conn_level == "busy" %}<span class="spinner"></span>{% elif conn_level == "warn" %}&#9680;{% else %}&#10005;{% endif -%}
+        </span>
+        {{ conn_label }}
+      </span>
+    </div>
+
+    {% if session is not none %}
+    <div class="hdr-presets" role="group" aria-label="Preset">
+      <span class="hdr-label" aria-hidden="true">Preset</span>
+      {% for p in presets %}
+        {%- set active = master is not none and master.preset == p %}
+        <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}"
+                aria-pressed="{{ 'true' if active else 'false' }}"
+                aria-label="Preset {{ p + 1 }}{% if active %} (active){% endif %}"
+                aria-keyshortcuts="{{ p + 1 }}"
+                data-preset-key="{{ p + 1 }}"
+                {%- if not controls_enabled or active %} disabled{% endif %}
+                hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
+                hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
+          {{- p + 1 -}}
+        </button>
+      {% endfor %}
+    </div>
+
+    <label class="hdr-source">
+      <span class="hdr-label">Source</span>
+      <select id="master-source" name="source" hx-post="{{ base }}/source" hx-trigger="change"
+              {%- if not controls_enabled %} disabled{% endif %}>
+        {% if master is none or master.source is none %}<option value="" selected disabled>&mdash;</option>{% endif %}
+        {% for s in sources %}
+          <option value="{{ s }}"{% if master is not none and master.source and master.source|lower == s|lower %} selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <button type="button" id="master-mute" class="mute{% if muted %} is-muted{% endif %}"
+            aria-pressed="{{ 'true' if muted else 'false' }}" aria-keyshortcuts="m"
+            {%- if not controls_enabled %} disabled{% endif %}
+            hx-post="{{ base }}/mute"
+            {%- if master is not none and master.mute is not none %} hx-vals='{"mute": "{{ "false" if muted else "true" }}"}'{% endif %}>
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>
+        {%- if muted %}<path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/>
+        {%- else %}<path d="M16 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none"/>{% endif %}
+      </svg>
+      <span>{{ "Muted" if muted else "Mute" }}</span>
+    </button>
+    {% endif %}
+  </div>
+
+  {% if session is not none %}
+  <div class="hdr-row">
+    {% if vol is not none %}
+    <div class="hdr-volume" x-data="masterVolume({{ vol }})">
+    {% else %}
+    <div class="hdr-volume">
+    {% endif %}
+      <label class="hdr-label" for="master-volume">Vol</label>
+      <button type="button" id="volume-down" class="step" aria-label="Volume down {{ profile.master_volume_step_db|num }} dB"
+              {%- if not controls_enabled or vol is none %} disabled{% endif %}
+              hx-post="{{ base }}/volume/down">&minus;</button>
+      <input type="range" id="master-volume" name="volume"
+             min="{{ profile.master_volume_min_db }}" max="{{ profile.master_volume_max_db }}"
+             step="{{ profile.master_volume_step_db }}"
+             value="{{ vol if vol is not none else profile.master_volume_min_db }}"
+             aria-valuetext="{{ vol|db }}"
+             {%- if vol is not none %} x-model.number="v" :aria-valuetext="fmt(v)"{% endif %}
+             {%- if not controls_enabled or vol is none %} disabled{% endif %}
+             data-volume-input data-current="{{ vol if vol is not none else '' }}"
+             data-confirm-raise-db="{{ volume_confirm_db }}"
+             hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
+      <span class="vol-value">
+        <input type="number" id="master-volume-num" name="volume" inputmode="decimal"
+               aria-label="Master volume in dB"
+               min="{{ profile.master_volume_min_db }}" max="{{ profile.master_volume_max_db }}"
+               step="{{ profile.master_volume_step_db }}"
+               value="{{ vol if vol is not none else '' }}"
+               {%- if vol is not none %} :value="v.toFixed(1)" @change="typed($event)"{% endif %}
+               {%- if not controls_enabled or vol is none %} disabled{% endif %}
+               data-volume-input data-current="{{ vol if vol is not none else '' }}"
+               data-confirm-raise-db="{{ volume_confirm_db }}"
+               hx-post="{{ base }}/volume" hx-trigger="change">
+        <span class="unit">dB</span>
+      </span>
+      <button type="button" id="volume-up" class="step" aria-label="Volume up {{ profile.master_volume_step_db|num }} dB"
+              {%- if not controls_enabled or vol is none %} disabled{% endif %}
+              hx-post="{{ base }}/volume/up">+</button>
+    </div>
+
+    <div class="hdr-sync" title="Per-parameter sync tracking arrives with the sync engine">
+      <span class="hdr-label">Sync</span>
+      <span class="sync-badge sync-unknown"><span aria-hidden="true">&ndash;</span> not tracked yet</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if conn_level in ("bad", "warn") %}
+  <div class="banner banner-{{ conn_level }}" role="alert">
+    {% if session is none and unsupported %}
+      {{ conn_label }}. minidspd lists unsupported device(s): {{ unsupported|join(", ") }}.
+    {% elif conn_level == "bad" %}
+      {{ conn_label }}. Controls are disabled until the device is back; the app keeps retrying.
+    {% else %}
+      {{ conn_label }}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
