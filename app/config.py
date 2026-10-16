@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     gain_min_db: float = Field(default=-72.0, ge=-100.0, lt=24.0)
     gain_max_db: float = Field(default=12.0, ge=-100.0, lt=24.0)
     gain_step_confirm_db: float = 6.0
+    # Most a single PEQ band or crossover group may boost (its peak gain over 5 Hz-24 kHz); larger boosts are refused.
+    peq_max_boost_db: float = Field(default=24.0, ge=0.0, le=60.0)
 
     # Monitor
     monitor_backoff_min_s: float = 0.5

@@ -113,6 +113,7 @@ class CrossoverDesign(BaseModel):
     order: int = Field(ge=1, le=8)
     freq: float = Field(gt=0)
     freq_hi: float | None = Field(default=None, gt=0)
+    bessel_norm: Literal["phase", "mag"] = "phase"  # Bessel only: phase-matched or -3 dB at freq
 
     @model_validator(mode="after")
     def _check(self) -> "CrossoverDesign":

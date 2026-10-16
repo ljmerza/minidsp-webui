@@ -1,0 +1,172 @@
+{#- Filter UI building blocks (docs 05 §4-5). Import with context:
+      {% import "components/peq_editor.html" as fx with context %}
+    - fx.assets(crossover=false): uPlot, dsp.js, graph.js and the editors' scripts (once per page, before Alpine).
+    - fx.editor(side, index, color, name, view): the PEQ editor of one input or output bank.
+    - fx.graph_toolbar(): view / fit buttons shared by the editors (uses the component's view, setView, autoFit, resetY).
+    - fx.warnings(): the graph's warnings list (float32 rounding, FIR plotted flat, muted output).
+    The components load their state from app/web/filters.py and talk to it as JSON. -#}
+
+{% macro assets(crossover=false) -%}
+  <link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
+  <script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/dsp.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/graph.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/peq_editor.js?v={{ asset_version }}"></script>
+  {%- if crossover %}
+  <script src="{{ root }}/static/js/crossover.js?v={{ asset_version }}"></script>
+  {%- endif %}
+{%- endmacro %}
+
+{% macro graph_toolbar(views=true) -%}
+  <div class="graph-toolbar" role="toolbar" aria-label="Graph">
+    {% if views %}
+    <span class="seg" role="group" aria-label="Frequency range">
+      <button type="button" class="btn-small" :class="{ 'is-current': view === 'sub' }" :aria-pressed="(view === 'sub').toString()"
+              @click="setView('sub')">5&ndash;300 Hz</button>
+      <button type="button" class="btn-small" :class="{ 'is-current': view === 'full' }" :aria-pressed="(view === 'full').toString()"
+              @click="setView('full')">10 Hz&ndash;20 kHz</button>
+    </span>
+    {% endif %}
+    <span class="seg" role="group" aria-label="Vertical scale">
+      <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Auto-fit</button>
+      <button type="button" class="btn-small" @click="resetY()" title="Back to the default scale">Reset</button>
+    </span>
+  </div>
+{%- endmacro %}
+
+{% macro warnings() -%}
+  <ul class="graph-warnings" x-show="warnings.length" x-cloak>
+    <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
+  </ul>
+{%- endmacro %}
+
+{% macro type_options() -%}
+  <option value="passthrough">&mdash; (flat)</option>
+  <option value="peaking">Peaking</option>
+  <option value="lowshelf">Low shelf</option>
+  <option value="highshelf">High shelf</option>
+  <option value="lp1">Low-pass 1st</option>
+  <option value="hp1">High-pass 1st</option>
+  <option value="lp2">Low-pass 2nd</option>
+  <option value="hp2">High-pass 2nd</option>
+  <option value="bandpass">Band-pass</option>
+  <option value="notch">Notch</option>
+  <option value="ap1">All-pass 1st</option>
+  <option value="ap2">All-pass 2nd</option>
+  <option value="lt">Linkwitz Transform</option>
+  <option value="gain">Gain</option>
+  <option value="raw">Raw</option>
+{%- endmacro %}
+
+{% macro editor(side, index, color, name, view="full") -%}
+{%- set base = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/" ~ side ~ "/" ~ index ~ "/peq" -%}
+{%- set cfg = {
+  "side": side, "channel": index, "preset": preset, "color": color, "name": name, "view": view,
+  "fs": session.profile.sample_rate, "stateUrl": base, "bandUrl": base ~ "/{band}", "bankUrl": base
+} -%}
+<div class="peq-editor" data-peq-editor="{{ side }}.{{ index }}" x-data='peqEditor({{ cfg|tojson }})'
+     hx-trigger="sse:sync, sse:desired">
+  {{ graph_toolbar() }}
+  <div class="graph-box peq-graph" x-ref="graph" aria-label="{{ name }} PEQ response; drag a band's handle to change it"></div>
+  {{ warnings() }}
+  <p class="hint">Drag a handle: sideways = frequency, up/down = gain. Mouse wheel over a handle or pinch = Q.
+    Hold Shift for fine steps. The curve is a preview until the server confirms the change.</p>
+  <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+
+  <div class="table-scroll">
+    <table class="data-table peq-table">
+      <caption class="visually-hidden">{{ name }} PEQ bands</caption>
+      <thead>
+        <tr>
+          <th scope="col">#</th><th scope="col">On</th><th scope="col">Type</th>
+          <th scope="col">Freq <span class="unit">Hz</span></th><th scope="col">Q</th>
+          <th scope="col">Gain <span class="unit">dB</span></th><th scope="col">Source</th><th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <template x-for="band in bands" :key="band.index">
+        <tbody :class="{ 'is-selected': selected === band.index, 'is-bypassed': !isActive(band), 'is-external': band.external }">
+          <tr @click="select(band.index)" :class="{ 'is-invalid': band.invalid }">
+            <th scope="row">
+              <span class="band-swatch" :style="`background: ${color(band.index)}`" aria-hidden="true"></span>
+              <span x-text="band.index + 1"></span>
+              <span x-show="band.external" class="lock" title="Managed by another tool (read-only)" aria-label="read-only">&#128274;</span>
+            </th>
+            <td>
+              <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
+                     :disabled="band.external || band.design.type === 'passthrough'"
+                     :aria-label="`Band ${band.index + 1} on`">
+            </td>
+            <td>
+              <select x-model="band.form.type" @change="onTypeChange(band)" :disabled="band.external"
+                      :aria-label="`Band ${band.index + 1} type`">{{ type_options() }}</select>
+            </td>
+            <td><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
+                       x-model.number="band.form.freq" @input="onFieldInput(band)" @change="commitForm(band)"
+                       :disabled="band.external || !uses(band, 'freq')" :aria-label="`Band ${band.index + 1} frequency in Hz`"></td>
+            <td><input type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
+                       x-model.number="band.form.q" @input="onFieldInput(band)" @change="commitForm(band)"
+                       :disabled="band.external || !uses(band, 'q')" :aria-label="`Band ${band.index + 1} Q`"></td>
+            <td><input type="number" class="num" inputmode="decimal" min="-30" max="20" step="0.1"
+                       x-model.number="band.form.gain_db" @input="onFieldInput(band)" @change="commitForm(band)"
+                       :disabled="band.external || !uses(band, 'gain')" :aria-label="`Band ${band.index + 1} gain in dB`"></td>
+            <td class="source"><span x-text="sourceText(band)" :title="band.label"></span></td>
+            <td class="row-actions">
+              <span class="sync-badge is-compact" :class="`sync-${status(band)}`" :title="statusTitle(band)">
+                <span class="sync-icon" aria-hidden="true" x-text="statusIcon(band)"></span>
+                <span class="sync-text visually-hidden" x-text="status(band)"></span>
+              </span>
+              <button type="button" class="btn-small" @click.stop="openDrawer(band)" :aria-expanded="(drawer === band.index).toString()"
+                      :aria-label="`Band ${band.index + 1} raw coefficients`">raw</button>
+              <button type="button" class="btn-small" @click.stop="resetBand(band)" :disabled="band.external || band.source === 'flat'"
+                      :aria-label="`Reset band ${band.index + 1}`" title="Reset to flat">&#10226;</button>
+            </td>
+          </tr>
+          <tr class="peq-drawer-row" x-show="drawer === band.index" x-cloak>
+            <td colspan="8">
+              <div class="drawer">
+                <template x-if="band.form.type === 'lt'">
+                  <fieldset class="helper">
+                    <legend>Linkwitz Transform</legend>
+                    <div class="helper-row">
+                      <label>F0 <input type="number" class="num" min="1" step="0.1" x-model.number="band.form.lt.f0" @input="previewLt(band)"> <span class="unit">Hz</span></label>
+                      <label>Q0 <input type="number" class="num" min="0.1" step="0.01" x-model.number="band.form.lt.q0" @input="previewLt(band)"></label>
+                      <label>Fp <input type="number" class="num" min="1" step="0.1" x-model.number="band.form.lt.fp" @input="previewLt(band)"> <span class="unit">Hz</span></label>
+                      <label>Qp <input type="number" class="num" min="0.1" step="0.01" x-model.number="band.form.lt.qp" @input="previewLt(band)"></label>
+                      <button type="button" @click="applyLt(band)" :disabled="band.external">Apply</button>
+                    </div>
+                    <p class="hint">The driver's resonance (F0, Q0) becomes the target (Fp, Qp). Low-frequency gain is (F0/Fp)&sup2;.</p>
+                  </fieldset>
+                </template>
+                <fieldset class="helper">
+                  <legend>Raw coefficients (device convention, a1/a2 negated)</legend>
+                  <div class="raw-grid">
+                    <template x-for="k in ['b0', 'b1', 'b2', 'a1', 'a2']" :key="k">
+                      <label><span x-text="k"></span>
+                        <input type="text" class="coef" inputmode="decimal" spellcheck="false" x-model="raw[k]" :disabled="band.external"></label>
+                    </template>
+                  </div>
+                  <p class="stability" :class="rawStability().ok ? 'is-ok' : 'is-bad'">
+                    <span aria-hidden="true" x-text="rawStability().ok ? '✓' : '⚠'"></span> <span x-text="rawStability().text"></span>
+                  </p>
+                  <div class="drawer-actions">
+                    <button type="button" @click="applyRaw(band)" :disabled="band.external || !rawStability().ok">Apply raw</button>
+                    <button type="button" class="btn-small" @click="closeDrawer()">Close</button>
+                  </div>
+                  <p class="hint">The server checks stability again (also after float32 rounding) and recognises known filters, so
+                    a standard peaking filter entered here shows as one.</p>
+                </fieldset>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </template>
+    </table>
+  </div>
+
+  <div class="peq-actions">
+    <button type="button" @click="bankAction('bypass_all')" :disabled="!loaded">Bypass all</button>
+    <button type="button" @click="bankAction('reset_all')" :disabled="!loaded">Reset all</button>
+    <span class="muted" x-show="!loaded && !error">Loading&hellip;</span>
+  </div>
+</div>
+{%- endmacro %}

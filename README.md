@@ -54,7 +54,8 @@ Works with minidspd 0.1.12, the current minidsp-rs release.
 | `DAEMON_TIMEOUT_S` | `5` | Timeout for minidspd HTTP calls (seconds) |
 | `PRESET_SWITCH_TIMEOUT_S` | `15` | How long to wait for the device to report a new preset |
 | `GAIN_MIN_DB` / `GAIN_MAX_DB` | `-72` / `12` | Allowed range for channel and routing gains |
-| `GAIN_STEP_CONFIRM_DB` | `6` | Raising a level by more than this in one step asks for confirmation |
+| `GAIN_STEP_CONFIRM_DB` | `6` | Raising a level by more than this in one step asks for confirmation (also a PEQ band's or crossover group's peak boost) |
+| `PEQ_MAX_BOOST_DB` | `24` | Most a single PEQ band or crossover group may boost; larger boosts are refused |
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices |
 | `WRITE_COALESCE_MS` | `50` | Gather window for edits before they are written to the device |
 | `MUTE_WRAP_BULK_APPLY` | `true` | Mute the affected outputs while a bulk apply (push, import, profile load) runs |
