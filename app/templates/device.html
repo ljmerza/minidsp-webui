@@ -7,6 +7,57 @@
   {% include "partials/device_info.html" %}
 </section>
 
+{#- The bundled minidspd process and USB visibility (docs/11), polled from /api/v1/health while the tab is visible. -#}
+<section id="daemon-process" class="card" aria-labelledby="daemon-process-title"
+         x-data="{
+           h: null, error: null, timer: null,
+           async load() {
+             if (document.hidden) return;
+             try {
+               const r = await fetch('{{ root }}/api/v1/health', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+               if (!r.ok) throw new Error('HTTP ' + r.status);
+               this.h = await r.json(); this.error = null;
+             } catch (e) { this.error = String(e.message || e); }
+           },
+           init() { this.load(); this.timer = setInterval(() => this.load(), 5000); },
+           destroy() { clearInterval(this.timer); },
+           usbText() {
+             const h = this.h;
+             if (h.usb_device_visible === null || h.usb_device_visible === undefined) return 'not checked';
+             if (h.usb_access === 'ok') return 'visible and openable';
+             return h.usb_device_visible ? 'visible but not openable' : 'not visible';
+           },
+         }">
+  <h2 id="daemon-process-title">minidspd process</h2>
+  <p class="muted" x-show="!h && !error">Loading&hellip;</p>
+  <p class="muted" x-show="error" x-text="'Could not load the health report: ' + error"></p>
+  <template x-if="h">
+    <dl class="info-grid">
+      <div><dt>Mode</dt>
+        <dd x-text="h.daemon_mode === 'embedded' ? ('embedded (bundled in this container' + (h.daemon_mock ? ', mock device' : '') + ')') : 'external (host daemon)'"></dd></div>
+      <div><dt>Process</dt><dd x-text="h.daemon_process"></dd></div>
+      <template x-if="h.daemon_mode === 'embedded'">
+        <div><dt>Restarts</dt><dd x-text="h.daemon_restarts"></dd></div>
+      </template>
+      <template x-if="h.daemon_pid">
+        <div><dt>PID</dt><dd x-text="h.daemon_pid"></dd></div>
+      </template>
+      <template x-if="h.daemon_last_exit">
+        <div><dt>Last exit</dt><dd x-text="h.daemon_last_exit"></dd></div>
+      </template>
+      <template x-if="h.daemon_process_error && h.daemon_process !== 'running'">
+        <div><dt>Process error</dt><dd x-text="h.daemon_process_error"></dd></div>
+      </template>
+      <template x-if="h.daemon_mode === 'embedded'">
+        <div><dt>miniDSP on USB</dt><dd x-text="usbText()"></dd></div>
+      </template>
+      <template x-if="h.daemon_mode === 'embedded' && h.usb_detail">
+        <div><dt>USB detail</dt><dd x-text="h.usb_detail"></dd></div>
+      </template>
+    </dl>
+  </template>
+</section>
+
 {% if session is not none and serial is not none %}
 {%- set ui = root ~ "/ui/devices/" ~ serial -%}
 {%- set q = request.query_params.get("preset") -%}

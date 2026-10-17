@@ -1,17 +1,22 @@
-# Example deployment. Copy it next to your other compose files, adjust it, then run `docker compose up -d`.
+# All-in-one example: the image bundles minidspd and talks to the miniDSP over USB itself, so the host needs no
+# minidsp-rs install. Copy this next to your other compose files, adjust it, then run `docker compose up -d` and open
+# http://<host>:8480. See the README ("All-in-one install") for rootless Docker and for using a host daemon instead.
 #
-# Run it on the machine that runs minidspd. minidspd's HTTP API listens on 127.0.0.1:5380 by default (and has no
-# authentication, so keep it that way), which is why the container uses host networking. The UI is then served on
-# http://<host>:8480.
+# This is the rootful-Docker variant: the app runs as uid 1000 and reaches the USB device through its group.
 
 services:
   minidsp-webui:
     image: ghcr.io/ljmerza/minidsp-webui:main # or a release tag, e.g. :v1.0.0
     container_name: minidsp-webui
-    network_mode: host
+    ports:
+      - "8480:8480"
+      # Optional: let the host's `minidsp` CLI reach the bundled daemon (also set MINIDSPD_HTTP_BIND below). The daemon
+      # API has no authentication, so publish it on loopback only.
+      # - "127.0.0.1:5380:5380"
     environment:
-      MINIDSPD_URL: http://127.0.0.1:5380
       WEBUI_PORT: "8480"
+      # MINIDSPD_HTTP_BIND: "0.0.0.0:5380"   # only with the loopback publish above
+      # MINIDSPD_MOCK: "true"                # demo without hardware: adds minidspd's mock 2x4HD
       # Home Assistant over MQTT (optional). Put credentials in an env file rather than here.
       # MQTT_ENABLED: "true"
       # MQTT_HOST: mqtt.example.lan
@@ -20,8 +25,18 @@ services:
       # VERIFY_AT: "04:15"
     # env_file: ./minidsp-webui.env
     volumes:
-      - ./data:/data # SQLite database and nightly backups
+      - ./data:/data # SQLite database and nightly backups; must be writable by uid 1000
+      - /dev/bus/usb:/dev/bus/usb # the whole tree, so the device is still there after a re-plug (new device number)
       - /etc/localtime:/etc/localtime:ro
+    # Rootful Docker: allow USB device nodes (major 189) in the container, and add the group that owns the node on the
+    # host (`getent group plugdev`; 46 on Debian and Raspberry Pi OS). See the README for the matching udev rule.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    group_add:
+      - "46"
+    # The generated minidspd config lives in RAM, never on the SD card.
+    tmpfs:
+      - /run/minidsp:mode=1777,size=1m
     restart: unless-stopped
     # Sized for a Raspberry Pi. All state is in /data, so an OOM kill followed by the automatic restart loses nothing.
     mem_limit: 256m

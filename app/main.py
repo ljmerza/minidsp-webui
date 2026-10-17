@@ -13,14 +13,16 @@ from app.api import v1
 from app.api.errors import register_exception_handlers
 from app.api.limits import BodyLimitMiddleware
 from app.api.v1 import verify as verify_api
+from app.api.v1.health import full_health_report
 from app.bus import Bus
 from app.config import Settings, get_settings
 from app.daemon.client import DaemonClient
+from app.daemon.embedded import DaemonSupervisor, EmbeddedOptions, UsbProbe
 from app.mqtt import create_bridge
 from app.state import Database, Repo
 from app.sync.backup import apply_staged_restore, start_nightly_backups
 from app.sync.fir import restore_fir_capability
-from app.sync.health import health_report, maintenance_loop
+from app.sync.health import maintenance_loop
 from app.sync.session import SessionManager
 from app.sync.verify import parse_at, start_nightly_verify
 from app.web import backup as backup_ui
@@ -51,6 +53,23 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Embedded mode (docs/11) starts the bundled minidspd first and stops it last, also when startup fails."""
+        supervisor = DaemonSupervisor(EmbeddedOptions.from_settings(settings)) if settings.embedded_daemon else None
+        app.state.daemon_supervisor = supervisor
+        app.state.usb_probe = UsbProbe() if supervisor else None
+        if supervisor:
+            await supervisor.start()  # the manager's discovery retries until the daemon answers
+        else:
+            log.info("using external minidspd at %s", settings.minidspd_url)
+        try:
+            async with services(app):
+                yield
+        finally:
+            if supervisor:
+                await supervisor.stop()  # after the sessions, so nothing is mid-write when the daemon goes
+
+    @asynccontextmanager
+    async def services(app: FastAPI) -> AsyncIterator[None]:
         bus = Bus()
         daemon = client or DaemonClient(
             settings.minidspd_url,
@@ -99,6 +118,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
 
     app = FastAPI(title="minidsp-webui", version=__version__, lifespan=lifespan)
     app.state.settings = settings
+    app.state.daemon_supervisor = None
+    app.state.usb_probe = None
     register_exception_handlers(app)
     app.add_middleware(BodyLimitMiddleware)  # caps upload/import bodies before they are spooled or parsed
     app.include_router(v1.build_router())
@@ -118,7 +139,7 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         """Liveness probe for Docker: always 200 while the process serves. ``health`` is the overall status (ok,
         degraded, starting); the details are in /api/v1/health. Degraded never means "restart me"."""
         manager = getattr(app.state, "manager", None)
-        health = health_report(manager)["status"] if manager is not None else "starting"
+        health = full_health_report(app, manager)["status"] if manager is not None else "starting"
         return {"status": "ok", "version": __version__, "health": health}
 
     return app
