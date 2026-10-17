@@ -1,0 +1,78 @@
+{#- Verify device (docs 03 §9, docs 05 §8). Rendered by /ui/devices/{serial}/verify and replaced by its own posts. -#}
+<div id="verify-panel" class="verify">
+  <div class="card-head">
+    <p class="hint">Reads the active preset back from the device and compares it with what the app last wrote.
+      Read-only: nothing is written. Bypass flags, routing, compressor ratio/attack/release and FIR can't be read.</p>
+    {% if supported %}
+      <button type="button" class="btn-small" hx-post="{{ verify_url }}" hx-target="#verify-panel" hx-swap="outerHTML"
+              hx-disabled-elt="this" hx-indicator="#verify-busy">Verify device</button>
+      <span id="verify-busy" class="htmx-indicator" role="status"><span class="spinner" aria-hidden="true"></span><span class="visually-hidden">Reading&hellip;</span></span>
+    {% endif %}
+  </div>
+
+  {% if not supported %}
+    <p class="muted">Readback isn't available for this device model.</p>
+  {% endif %}
+  {% if error %}<div class="form-errors" role="alert"><p>Verify failed: {{ error }}</p></div>{% endif %}
+  {% if message %}<p role="status">{{ message }}</p>{% endif %}
+
+  {% if report %}
+    {%- set c = counts -%}
+    {%- set status = report.status -%}
+    <div class="adopt-result{% if status != 'ok' %} is-warn{% endif %}" role="status">
+      <h3>Preset {{ report.preset + 1 }}:
+        {% if status == "drift" %}{{ c.drift }} setting(s) differ from what the app last wrote
+        {%- elif status == "mismatch" %}{{ mismatch_count }} never-confirmed setting(s) differ from the desired value
+        {%- elif status == "unverified" %}nothing verified: no setting is confirmed on the device
+        {%- else %}no drift found{% endif %}</h3>
+      <p>{{ c.ok }} match, {{ c.drift }} drifted, {{ c.unknown }} never confirmed ({{ mismatch_count }} of them differ
+        from the desired value), {{ c.unverifiable }} not readable.
+        Checked {{ report.checked_at|replace("T", " ")|truncate(19, true, "") }} UTC ({{ report.source }},
+        {{ report.reads }} read(s), {{ report.duration_ms|round|int }} ms).</p>
+      {% if status in ("mismatch", "unverified") %}
+        <p class="hint">Settings become confirmed when the app writes them or when you adopt with trust. Push the
+          ones that differ from the sync table.</p>
+      {% endif %}
+      {% if report.drifted %}
+        <form hx-post="{{ mark_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
+          <input type="hidden" name="preset" value="{{ report.preset }}">
+          {% for p in drift_paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+          <button type="submit" class="btn-small">Mark drifted settings unknown</button>
+          <span class="hint">They then show as unknown in the sync table, ready to push. Nothing is written now.</span>
+        </form>
+      {% endif %}
+    </div>
+
+    {% if rows %}
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th scope="col">Setting</th><th scope="col">App wrote</th><th scope="col">Device reads</th><th scope="col">Result</th></tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr{% if r.status == "drift" %} class="row-failed"{% endif %}>
+                <td><span class="param-name">{{ r.label }}</span><code class="param-path">{{ r.path }}</code></td>
+                <td class="val">{{ r.expected }}</td>
+                <td class="val">{{ r.actual }}</td>
+                <td><span class="sync-badge sync-{{ r.badge }}"><span class="sync-icon" aria-hidden="true">{{ r.icon }}</span><span class="sync-text">{{ r.text }}</span></span>
+                  {% if r.note %}<div class="{{ 'reason' if r.status == 'drift' else 'hint' }}">{{ r.note }}</div>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if unverifiable %}
+      <details>
+        <summary>{{ unverifiable|length }} setting(s) the device can't report</summary>
+        <ul class="issues">
+          {% for r in unverifiable %}<li>{{ r.label }}: {{ r.note }}</li>{% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  {% elif supported %}
+    <p class="muted">Not verified since the app started.</p>
+  {% endif %}
+</div>

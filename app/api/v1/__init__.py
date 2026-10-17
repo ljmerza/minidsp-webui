@@ -19,6 +19,7 @@ from app.api.v1 import (
     rew,
     status,
     system,
+    verify,
 )
 
 PREFIX = "/api/v1"
@@ -39,6 +40,7 @@ ROUTERS: list[APIRouter] = [
     system.router,
     profiles.router,
     backup.router,
+    verify.router,
 ]
 
 

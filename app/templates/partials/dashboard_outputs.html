@@ -1,0 +1,58 @@
+{#- The dashboard's output cards (active preset). Rendered by / and by /ui/dashboard/outputs, which the page re-fetches
+    on SSE sync / desired events and when the active preset changes. dashboard.js drives the quick controls; the
+    level readouts bind to the dashboard's levelMeters component. -#}
+<ul class="output-cards"{% if outputs_edit_url %} data-edit-url="{{ outputs_edit_url }}"{% endif %}
+    data-preset="{{ outputs_preset if outputs_preset is not none else '' }}">
+  {% for name in output_names %}
+    {%- set key = "o" ~ loop.index0 -%}
+    {%- set edit_path = output_links[loop.index0] -%}
+    {%- set card = output_state[loop.index0] if output_state else none -%}
+    <li class="output-card"{% if card %} data-output="{{ card.index }}" data-name="{{ name }}"
+        data-gain="{{ card.gain_db }}" data-mute="{{ card.mute|tojson }}" data-ceiling="{{ card.ceiling }}"
+        data-gain-min="{{ card.gain_min }}" data-never-synced="{{ card.never_synced|tojson }}"{% endif %}>
+      <div class="output-head">
+        <h3>{{ name }}</h3>
+        <span class="output-level" :class="{ 'is-clip': clip.{{ key }} }">
+          <span x-text="readout('{{ key }}')">&mdash;</span>
+        </span>
+      </div>
+      <dl class="output-params">
+        {% if card %}
+          <div><dt>Gain</dt><dd data-gain-text>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
+          <div><dt>Delay</dt><dd>{{ card.delay_ms|num(2) }} ms</dd></div>
+          <div><dt>Crossover</dt><dd>{{ card.crossover }}</dd></div>
+        {% else %}
+          <div><dt>Gain</dt><dd>&mdash;</dd></div>
+          <div><dt>Delay</dt><dd>&mdash;</dd></div>
+          <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+        {% endif %}
+      </dl>
+      {% if card and outputs_edit_url %}
+        <div class="output-quick" role="group" aria-label="{{ name }} quick controls">
+          <button type="button" class="btn-small mute{% if card.mute %} is-muted{% endif %}" data-action="mute"
+                  aria-pressed="{{ 'true' if card.mute else 'false' }}" aria-label="Mute {{ name }}">
+            {{- "Muted" if card.mute else "Mute" -}}
+          </button>
+          <button type="button" class="btn-small" data-action="nudge" data-step="-0.5"
+                  aria-label="{{ name }} gain down 0.5 dB"{% if card.gain_db <= card.gain_min %} disabled{% endif %}>&minus;0.5 dB</button>
+          <button type="button" class="btn-small" data-action="nudge" data-step="0.5"
+                  aria-label="{{ name }} gain up 0.5 dB"{% if card.gain_db >= card.ceiling %} disabled
+                  title="At this output's gain ceiling ({{ card.ceiling|db }})"{% endif %}>+0.5 dB</button>
+        </div>
+      {% endif %}
+      <div class="output-foot">
+        {% if card %}
+          <span class="sync-badge sync-{{ card.sync }}" data-sync-badge
+                title="Sync status of this output's settings (active preset)">
+            <span class="sync-icon" aria-hidden="true">{{ card.sync_icon }}</span> <span class="sync-text">{{ card.sync }}</span>
+          </span>
+        {% else %}
+          <span class="sync-badge sync-unknown" title="Preset state is not loaded">
+            <span aria-hidden="true">&ndash;</span> not tracked yet
+          </span>
+        {% endif %}
+        {% if edit_path %}<a href="{{ root }}{{ edit_path }}">edit &rarr;</a>{% endif %}
+      </div>
+    </li>
+  {% endfor %}
+</ul>

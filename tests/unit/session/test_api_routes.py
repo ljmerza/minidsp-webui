@@ -155,6 +155,10 @@ async def test_adopt_routes(api, fake):
 
     response = await api.post(f"{BASE}/adopt", json={"mode": "push"})
     assert response.status_code == 409
+    response = await api.post(f"{BASE}/adopt", json={"mode": "trust"})
+    assert response.status_code == 409 and response.json()["error"] == "confirmation_required"
+    assert "confirm_defaults" in response.json()["detail"]
+    assert (await api.get(f"{BASE}/adopt")).json()["adopted"] is False
 
     response = await api.post(f"{BASE}/adopt", json={"mode": "trust", "script": PI_NOTES})
     assert response.status_code == 200, response.text
@@ -168,6 +172,8 @@ async def test_adopt_routes(api, fake):
     response = await api.post(f"{BASE}/adopt", json={"mode": "unknown", "doc": doc})
     assert response.status_code == 422 and response.json()["problems"][0].startswith("outputs.3.gain_db")
     assert (await api.post(f"{BASE}/adopt", json={"mode": "trust", "bogus": 1})).status_code == 422
+    response = await api.post(f"{BASE}/adopt", json={"mode": "trust", "preset": 1, "confirm_defaults": True})
+    assert response.status_code == 200 and response.json()["unknown"] == 0 and fake.configs == []
 
 
 async def test_script_preview(api):

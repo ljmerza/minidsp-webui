@@ -75,21 +75,31 @@
     else el.value = value;
   }
 
-  // Raising the volume by more than the configured step in one go (a tap on the track, a typo) needs a confirmation.
+  // Raising the volume by more than the configured step in one go (a tap on the track, a typo) needs a confirmation,
+  // and so does lowering it by more than the drop step (a stray tap near the bottom of the track). A drag sends
+  // small steps, so it never asks.
+  function guardedChange(el, next, ref) {
+    const raise = Number(el.dataset.confirmRaiseDb);
+    const drop = Number(el.dataset.confirmDropDb);
+    if (raise > 0 && next - ref > raise) return 'Raise';
+    if (drop > 0 && ref - next > drop) return 'Lower';
+    return null;
+  }
+
   document.addEventListener('htmx:confirm', (e) => {
     const el = e.detail.elt;
     if (!isVolume(el)) return;
     const next = Number(el.value);
-    const limit = Number(el.dataset.confirmRaiseDb);
     const current = el.dataset.current === '' ? NaN : Number(el.dataset.current);
     const ref = state.lastSent !== null ? state.lastSent : current;
-    if (!Number.isFinite(next) || !Number.isFinite(ref) || !(limit > 0) || next - ref <= limit) {
+    const verb = Number.isFinite(next) && Number.isFinite(ref) ? guardedChange(el, next, ref) : null;
+    if (!verb) {
       if (Number.isFinite(next)) state.lastSent = next;
       return;
     }
     e.preventDefault();
     const { fmtNum, fmtDb } = window.mdsp;
-    if (window.confirm(`Raise the master volume by ${fmtNum(next - ref)} dB, to ${fmtDb(next)}?`)) {
+    if (window.confirm(`${verb} the master volume by ${fmtNum(Math.abs(next - ref))} dB, to ${fmtDb(next)}?`)) {
       state.lastSent = next;
       state.confirmed = el;
       e.detail.issueRequest(true);
@@ -98,7 +108,7 @@
     }
   });
 
-  // The server enforces the same guard (409 without confirm=true), so a confirmed raise carries the flag.
+  // The server enforces the same guards (409 without confirm=true), so a confirmed change carries the flag.
   document.addEventListener('htmx:configRequest', (e) => {
     if (state.confirmed && state.confirmed === e.detail.elt) {
       e.detail.parameters.confirm = 'true';

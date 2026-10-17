@@ -4,7 +4,10 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
+import pytest
+from pydantic import ValidationError
 
+from app.config import Settings
 from app.main import create_app
 from app.state import Repo
 
@@ -107,3 +110,47 @@ async def test_a_staged_database_restore_is_swapped_in_at_startup(settings, clie
         assert [p["name"] for p in (await http.get("/api/v1/profiles")).json()] == ["After", "Before"]
     async with running(settings, client, daemon) as (_, http):
         assert [p["name"] for p in (await http.get("/api/v1/profiles")).json()] == ["Before"]
+
+
+async def test_phase6_verify_devices_and_health_are_wired(settings, client, daemon):
+    async with running(settings, client, daemon) as (app, http):
+        verify = await http.get(f"/api/v1/devices/{SERIAL}/verify")
+        assert verify.status_code == 404 and verify.json()["error"] == "not_verified"  # wired; nothing run yet
+        panel = await http.get(f"/ui/devices/{SERIAL}/verify")
+        assert panel.status_code == 200 and 'id="verify-panel"' in panel.text
+        device = await http.get("/device")
+        assert f'hx-get="/ui/devices/{SERIAL}/verify"' in device.text
+        select = await http.get("/ui/devices/select", params={"serial": SERIAL, "next": "/routing"})
+        assert select.status_code == 303 and select.headers["location"] == f"/routing?serial={SERIAL}"
+        assert "mdsp_serial" in select.headers["set-cookie"]
+        settings_page = await http.get("/settings")
+        assert 'name="volume_drop_confirm_db"' in settings_page.text
+        health = (await http.get("/api/v1/health")).json()
+        assert health["status"] in ("ok", "degraded", "starting") and "problems" in health and "storage" in health
+        healthz = (await http.get("/healthz")).json()
+        assert healthz["status"] == "ok" and healthz["health"] == health["status"]
+        tasks = {t.get_name() for t in asyncio.all_tasks()}
+        assert "maintenance" in tasks and "nightly-verify" not in tasks, "nightly verify is opt-in"
+
+
+async def test_strict_health_answers_503_when_degraded(settings, client, daemon):
+    async with running(settings, client, daemon) as (app, http):
+        app.state.manager.daemon_up = False
+        assert (await http.get("/api/v1/health")).status_code == 200
+        strict = await http.get("/api/v1/health", params={"strict": "true"})
+        assert strict.status_code == 503 and strict.json()["status"] == "degraded"
+        assert (await http.get("/healthz")).status_code == 200, "liveness never fails on a degraded app"
+
+
+async def test_nightly_verify_starts_when_enabled(settings, client, daemon):
+    settings.verify_nightly = True
+    settings.verify_at = "03:30"
+    async with running(settings, client, daemon):
+        assert "nightly-verify" in {t.get_name() for t in asyncio.all_tasks()}
+    assert "nightly-verify" not in {t.get_name() for t in asyncio.all_tasks() if not t.done()}
+
+
+def test_verify_at_must_be_a_time():
+    assert Settings(_env_file=None, verify_at=" 05:00 ").verify_at == "05:00"
+    with pytest.raises(ValidationError, match="VERIFY_AT"):
+        Settings(_env_file=None, verify_at="late")

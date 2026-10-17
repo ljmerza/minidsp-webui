@@ -10,6 +10,7 @@ from app.bus import DEVICE, LOG, SYNC
 from app.model.device_profile import M2X4HD
 from app.model.master import DaemonDevice, MasterStatus
 from app.mqtt import MqttBridge, create_bridge
+from app.sync import verify
 from app.sync.session import DeviceSession, SessionManager, SessionState
 from tests.unit.conftest import DEVICE_JSON, MASTER_JSON, SERIAL
 
@@ -163,7 +164,8 @@ async def test_connect_publishes_discovery_availability_and_state(bridge, broker
     assert broker.retained[BRIDGE_AVAIL] == "online"
     assert broker.retained[AVAIL] == "online"
     discovery = {t: json.loads(v) for t, v in broker.retained.items() if t.startswith("homeassistant/")}
-    assert len(discovery) == 25  # 6 master/health + push-all + 4 x (gain, mute, delay) + 6 level sensors
+    # 6 master/health + push-all + 4 x (gain, mute, delay) + 6 level sensors + config drift
+    assert len(discovery) == 26
     volume = discovery[f"homeassistant/number/minidsp_{SERIAL}/volume/config"]
     assert volume["min"] == -80.0 and volume["device"]["sw_version"] == "fw 1.75"
     assert volume["device"]["configuration_url"] == "http://minidsp.invalid:8480"
@@ -326,13 +328,13 @@ async def test_preset_command_switches_and_waits(bridge, broker, daemon):
 async def test_preset_command_uses_activate_preset_when_available(bridge, session, monkeypatch):
     calls = []
 
-    async def activate(preset, *, flush=True):
-        calls.append(preset)
+    async def activate(preset, *, flush=True, source="api"):
+        calls.append((preset, source))
         return MasterStatus(preset=preset)
 
     monkeypatch.setattr(session, "activate_preset", activate)
     assert await bridge.handle_command(SERIAL, "preset", "2")
-    assert calls == [1]
+    assert calls == [(1, "ha")], "HA preset switches are audited as source ha"
 
 
 async def test_command_during_preset_switch_is_rejected(bridge, session, daemon):
@@ -365,10 +367,11 @@ async def test_commands_for_one_entity_coalesce(bridge, daemon, session):
     release = asyncio.Event()
     original = session.set_volume
 
-    async def slow_set_volume(volume, *, confirm=False):
+    async def slow_set_volume(volume, *, confirm=False, source="api"):
+        assert source == "ha"
         sent.append(volume)
         await release.wait()
-        return await original(volume, confirm=confirm)
+        return await original(volume, confirm=confirm, source=source)
 
     session.set_volume = slow_set_volume
     daemon.post("/devices/0").respond(json=MASTER_JSON)
@@ -482,3 +485,69 @@ async def test_state_changed_during_a_publish_is_published_afterwards(bridge, br
     await asyncio.sleep(0.05)
     gate.set()
     await until(lambda: broker.state()["volume"] == -35.0)
+
+
+# --- config drift sensor (Phase 6 verify) -------------------------------------------------------------------------
+
+DRIFT_CONFIG = f"homeassistant/sensor/minidsp_{SERIAL}/drift/config"
+DRIFT_STATE = f"{BASE}/{SERIAL}/verify"
+
+
+def _verify_event(status: str = "drift", paths: tuple[str, ...] = ("outputs.1.gain_db",)) -> dict[str, Any]:
+    return {
+        "serial": SERIAL,
+        "preset": 0,
+        "status": status,
+        "drift": len(paths),
+        "counts": {"ok": 3, "drift": len(paths), "unknown": 0, "unverifiable": 9},
+        "paths": list(paths),
+        "checked_at": "2026-10-17T04:15:00+00:00",
+        "source": "nightly",
+    }
+
+
+async def test_drift_sensor_is_announced_with_the_device(bridge, broker):
+    config = json.loads(broker.retained[DRIFT_CONFIG])
+    assert config["state_topic"] == DRIFT_STATE and config["options"] == [
+        "ok",
+        "drift",
+        "mismatch",
+        "unverified",
+        "error",
+    ]
+    assert config["device"]["identifiers"] == [f"minidsp_{SERIAL}"]
+    assert DRIFT_STATE not in broker.retained, "no state until a verify has run"
+
+
+async def test_verify_events_publish_retained_drift_state(bridge, broker, bus):
+    bus.publish(verify.VERIFY, _verify_event(), serial=SERIAL)
+    await until(lambda: DRIFT_STATE in broker.retained)
+    state = json.loads(broker.retained[DRIFT_STATE])
+    assert state["status"] == "drift" and state["paths"] == ["outputs.1.gain_db"] and state["preset"] == 1
+    bus.publish(verify.VERIFY, _verify_event("ok", ()), serial=SERIAL)
+    await until(lambda: json.loads(broker.retained[DRIFT_STATE])["status"] == "ok")
+
+
+async def test_last_verify_report_is_republished_on_reconnect(bridge, broker, monkeypatch):
+    report = verify.VerifyReport(
+        serial=SERIAL, preset=1, checked_at="2026-10-17T04:15:00+00:00", duration_ms=1, reads=1
+    )
+    monkeypatch.setitem(verify._last_reports, SERIAL, report)
+    broker.drop()
+    await until(lambda: DRIFT_STATE in broker.retained)
+    assert json.loads(broker.retained[DRIFT_STATE])["status"] == "unverified"  # an empty report confirms nothing
+
+
+async def test_remove_device_clears_the_drift_sensor(bridge, broker, bus):
+    bus.publish(verify.VERIFY, _verify_event(), serial=SERIAL)
+    await until(lambda: DRIFT_STATE in broker.retained)
+    assert await bridge.remove_device(SERIAL)
+    assert DRIFT_CONFIG not in broker.retained and DRIFT_STATE not in broker.retained
+
+
+async def test_big_ha_volume_drop_goes_through_and_is_attributed_to_ha(bridge, daemon, session):
+    """docs/08 Phase 6: the UI asks before a big drop, Home Assistant is never blocked (its change is audited)."""
+    route = daemon.post("/devices/0").respond(json={**MASTER_JSON, "volume": -70.0})
+    assert await bridge.handle_command(SERIAL, "volume", "-70")
+    assert json.loads(route.calls.last.request.content) == {"volume": -70.0}
+    assert session.audit.source_of("volume") == "ha"

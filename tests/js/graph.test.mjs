@@ -338,6 +338,37 @@ describe('ResponsePlot', () => {
       assert.equal(plot.handleAt(100 + pos.left, 50 + pos.top), null);
     }));
 
+  test("Settings' default graph range: the opening view and the ±dB scale", () =>
+    withFakeDom(() => {
+      assert.deepEqual(graph.pageDefaults(), { view: null, dbRange: [-24, 24] }); // no <body> (or nothing set)
+      assert.equal(graph.defaultView('full'), 'full');
+      assert.equal(graph.defaultView(undefined), 'sub');
+
+      globalThis.document.body = { dataset: { graphView: '', graphDb: '24' } }; // "auto"
+      assert.equal(graph.defaultView('full'), 'full');
+      assert.equal(graph.defaultView('sub'), 'sub');
+
+      globalThis.document.body = { dataset: { graphView: 'full', graphDb: '30' } };
+      assert.deepEqual(graph.pageDefaults(), { view: 'full', dbRange: [-30, 30] });
+      assert.equal(graph.defaultView('sub'), 'full');
+      const plot = graph.create(new FakeElement('div'), { view: graph.defaultView('sub') });
+      plot.setTraces(traces());
+      assert.deepEqual(plot.plot.opts.scales.x.range(), [10, 20000]);
+      assert.deepEqual(plot.plot.opts.scales.y.range(), [-30, 30]);
+      plot.setYRange([-6, 6]);
+      plot.resetY();
+      assert.deepEqual(plot.plot.scales.y, { min: -30, max: 30 });
+      plot.setMode('phase');
+      assert.deepEqual(plot.plot.opts.scales.y.range(), [-180, 180]); // only the magnitude scale follows it
+
+      const own = graph.create(new FakeElement('div'), { dbRange: [-12, 6] });
+      own.setTraces(traces());
+      assert.deepEqual(own.plot.opts.scales.y.range(), [-12, 6]);
+
+      globalThis.document.body = { dataset: { graphView: 'wide', graphDb: 'x' } }; // garbage: built-in defaults
+      assert.deepEqual(graph.pageDefaults(), { view: null, dbRange: [-24, 24] });
+    }));
+
   test('a missing uPlot is reported clearly', () =>
     withFakeDom(() => {
       globalThis.window.uPlot = undefined;

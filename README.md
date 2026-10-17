@@ -51,15 +51,19 @@ Home Assistant entities over MQTT discovery, so you don't need the Windows plugi
   whether it is synced, pending, failed or unknown.
 - **Staged edits:** changes to an inactive preset are written when that preset becomes active.
 - **Adopt an existing setup:** trust what's on the device, push a known config, or import a CLI script. Known filter
-  coefficients are recognised and shown as "LR4 LP 80 Hz" rather than raw numbers.
-- **Verify device:** reads the readable settings back from DSP memory and flags anything that changed behind the app's
-  back.
+  coefficients are recognised and shown as "LR4 LP 80 Hz" rather than raw numbers. Trusting the plain defaults (no
+  script) needs an explicit "my device really is at factory defaults" confirmation (`confirm_defaults` in the API).
+- **Verify device:** reads the active preset's readable settings back from DSP memory and flags anything that changed
+  behind the app's back. It never writes; drifted settings can be marked unknown and pushed from the sync table. It can
+  also run nightly (`VERIFY_NIGHTLY`). The result is `ok` only when settings were confirmed and none differ; `mismatch`
+  means never-confirmed settings (for example after a power cycle) differ from the desired config, and `unverified`
+  that nothing could be confirmed.
 - **Event log** of user actions, apply results, reconnects and every master change, with who made it
   (`ui`, `ha`, `api`, `external`).
 
 ### Home Assistant (MQTT discovery)
 - Master volume, mute, source and preset; per-output gain, mute and delay; a profile select; a push-all button; and
-  connectivity, sync and (optional) level sensors.
+  connectivity, sync, config drift (from Verify device) and (optional) level sensors.
 - Entities appear automatically under one "miniDSP" device. The app publishes availability, so they go unavailable when
   the app stops.
 
@@ -112,10 +116,12 @@ docker run --rm --user 0 --entrypoint chown -v "$PWD/data:/data" ghcr.io/ljmerza
 
 ### Health
 
-- `GET /healthz` is the liveness probe the image's `HEALTHCHECK` uses. It answers as long as the app is running.
+- `GET /healthz` is the liveness probe the image's `HEALTHCHECK` uses. It answers 200 as long as the app is running;
+  its `health` field carries the overall status below.
 - `GET /api/v1/health` reports `status` (`ok`, `degraded` or `starting`) and a readable `problems` list: minidspd
   unreachable, device missing, live stream reconnecting, settings that failed to write, or state that isn't being
-  saved. The app keeps retrying on its own in all of these cases, and the UI shows a banner meanwhile.
+  saved. The app keeps retrying on its own in all of these cases, and the UI shows a banner meanwhile. Add
+  `?strict=true` to get a 503 whenever the status isn't `ok` (for external monitoring).
 
 ### Upgrading
 
@@ -150,6 +156,8 @@ there take precedence over the environment.
 | `MUTE_WRAP_BULK_APPLY` † | `true` | Mute the affected outputs while a bulk apply (push, import, profile load) runs |
 | `REAPPLY_ON_RECONNECT` † | `false` | Push the active preset again after the device reconnects (e.g. after a power cycle) |
 | `PRESET_SWITCH_TIMEOUT_S` | `15` | How long to wait for the device to report a new preset |
+| `VERIFY_NIGHTLY` | `false` | Verify the active preset of each device once a night; drift shows in the event log and the Home Assistant drift sensor |
+| `VERIFY_AT` | `04:15` | Local time of the nightly verify (`HH:MM`) |
 
 #### Safety
 
@@ -160,6 +168,13 @@ there take precedence over the environment.
 | `VOLUME_DROP_CONFIRM_DB` † | `20` | In the UI, lowering the master volume by more than this in one action asks for confirmation. Home Assistant and the API are never blocked; their changes are logged |
 | `PEQ_MAX_BOOST_DB` | `24` | Most a single PEQ band or crossover group may boost; larger boosts are refused |
 | `FIR_EXPERIMENTAL` † | `false` | Show the FIR tab on models whose FIR support is unverified (the 2x4 HD). Loading taps mutes the device briefly |
+
+#### Graphs
+
+| Variable | Default | Description |
+|---|---|---|
+| `GRAPH_VIEW` † | `auto` | Frequency range graphs open in: `sub` (5–300 Hz), `full` (10 Hz–20 kHz) or `auto` (each page's own). A range picked on a page is remembered by the browser and wins |
+| `GRAPH_DB_RANGE` † | `24` | Default magnitude scale, ± this many dB (3 to 60); the Fit button still auto-scales |
 
 #### MQTT / Home Assistant
 

@@ -27,7 +27,7 @@ async def test_held_mutes_survive_a_restart(make_session, fake):
     s = await make_session()
     s.writer.max_attempts = 2
     s.writer.backoff_min_s = s.writer.backoff_max_s = 0.01
-    await s.adopt("trust")
+    await s.adopt("trust", confirm_defaults=True)
     fake.fail_when = lambda body: 500 if "peq" in json.dumps(body) else None
     result = await s.replace_desired(0, peq_doc(s), timeout=3)
     assert not result.flush.ok

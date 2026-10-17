@@ -20,7 +20,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -206,6 +206,26 @@ def parse_doc(data: Any) -> ConfigDoc:
         raise DesiredValidationError("invalid preset document", problems) from None
 
 
+def factory_defaults_summary(profile: DeviceProfile) -> list[str]:
+    """One line per channel saying what adopting the defaults with ``trust`` claims the device holds (docs 05 §8
+    adopt guard), e.g. ``Out 1: 0 dB, 0 ms, unmuted, normal polarity; PEQ, crossovers and compressor bypassed``."""
+    doc = default_config_doc(profile)
+    lines = []
+    for n, ch in enumerate(doc.inputs):
+        fed = [f"Out {o + 1}" for o, cell in enumerate(ch.routing) if cell.enabled]
+        routed = f"routed to {', '.join(fed)}" if fed else "routed nowhere"
+        mute = "muted" if ch.mute else "unmuted"
+        lines.append(f"In {n + 1}: {_fmt(ch.gain_db)} dB, {mute}, {routed}; PEQ bypassed")
+    bypassed = "PEQ, crossovers, compressor and FIR" if profile.fir_supported else "PEQ, crossovers and compressor"
+    for n, ch in enumerate(doc.outputs):
+        mute = "muted" if ch.mute else "unmuted"
+        polarity = "inverted" if ch.invert else "normal polarity"
+        lines.append(
+            f"Out {n + 1}: {_fmt(ch.gain_db)} dB, {_fmt(ch.delay_ms)} ms, {mute}, {polarity}; {bypassed} bypassed"
+        )
+    return lines
+
+
 def _fmt(value: Any) -> str:
     if isinstance(value, bool):
         return "on" if value else "off"
@@ -230,6 +250,144 @@ def describe_change(old: ConfigDoc | None, new: ConfigDoc, paths: Sequence[str])
 def _shape_problems(doc: ConfigDoc, profile: DeviceProfile) -> list[str]:
     """Only the length checks of `validate_doc`: a stored doc with the wrong shape can't be used at all."""
     return [p for p in validate_doc(doc, profile) if "expected" in p and "entries" in p]
+
+
+# --- master change audit (docs/02 §A) -------------------------------------------------------------------------------
+
+MASTER_SOURCES = ("ui", "ha", "api", "external")
+AUDIT_FIELDS = ("volume", "mute", "source", "preset")
+AUDIT_QUIET_S = 2.0  # an entry is written once its field has been still this long (a slider drag is one entry)
+# How long after one of our own master calls a change of that field is still attributed to it rather than to
+# "external": covers the 2 s status poll that may report the change instead of the call's response.
+AUDIT_INTENT_GRACE_S = 4.0
+DEFAULT_VOLUME_DROP_CONFIRM_DB = 20.0
+
+
+def _audit_value(field: str, value: Any) -> str:
+    if value is None:
+        return "unknown"
+    if field == "volume":
+        return f"{value:.1f}".replace("-", "−")
+    if field == "mute":
+        return "on" if value else "off"
+    if field == "preset":
+        return str(value + 1)
+    return str(value)
+
+
+def describe_master_change(source: str, field: str, old: Any, new: Any) -> str:
+    """Event-log text for one master change, e.g. "ui: volume −20.0 → −40.0 dB"."""
+    unit = " dB" if field == "volume" else ""
+    return f"{source}: {field} {_audit_value(field, old)} → {_audit_value(field, new)}{unit}"
+
+
+@dataclass
+class _AuditEntry:
+    source: str
+    old: Any
+    new: Any
+    timer: asyncio.TimerHandle | None = None
+
+
+class MasterAudit:
+    """Coalesces observed master changes into one event per completed change and attributes each to a source.
+
+    Every master status the session sees goes through `observe`. A change to a field opens an entry (old value,
+    source); further changes to that field from the same source only move its new value, and the entry is emitted
+    once the field has been still for ``quiet_s``. So a slider drag is one entry and nothing is written per tick. A
+    change from another source closes the open entry first. A drag that ends where it started emits nothing.
+
+    Attribution: our own calls are wrapped in `acting`, which marks their fields for the duration of the call plus
+    ``grace_s``. A change of a field nobody marked came from outside the app (IR remote, front panel, CLI). An outside
+    change landing inside that window is attributed to the app; that's the accepted cost of not tracking targets.
+    """
+
+    def __init__(
+        self,
+        emit: Callable[[str, str, Any, Any], None],
+        *,
+        quiet_s: float = AUDIT_QUIET_S,
+        grace_s: float = AUDIT_INTENT_GRACE_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._emit = emit
+        self.quiet_s = quiet_s
+        self.grace_s = grace_s
+        self._clock = clock
+        self.last: dict[str, Any] = {}
+        self._intents: dict[str, tuple[str, float]] = {}  # field -> (source, expiry)
+        self._open: dict[str, _AuditEntry] = {}
+
+    @contextlib.contextmanager
+    def acting(self, fields: Sequence[str], source: str) -> Iterator[None]:
+        if source not in MASTER_SOURCES or source == "external":
+            raise ValueError(f"unknown master change source {source!r}")
+        for name in fields:
+            self._intents[name] = (source, math.inf)
+        try:
+            yield
+        finally:
+            until = self._clock() + self.grace_s
+            for name in fields:
+                if self._intents.get(name, ("", 0.0))[0] == source:
+                    self._intents[name] = (source, until)
+
+    def source_of(self, name: str) -> str:
+        intent = self._intents.get(name)
+        if intent is not None and self._clock() <= intent[1]:
+            return intent[0]
+        return "external"
+
+    @staticmethod
+    def _same(name: str, a: Any, b: Any) -> bool:
+        if name == "volume" and isinstance(a, int | float) and isinstance(b, int | float):
+            return abs(a - b) < 1e-6
+        return a == b
+
+    def observe(self, master: Mapping[str, Any]) -> None:
+        """Feed a full (merged) master status. Unknown (None) fields are ignored; the first known value of a field is
+        its baseline, not a change."""
+        for name in AUDIT_FIELDS:
+            value = master.get(name)
+            if value is None:
+                continue
+            if name not in self.last:
+                self.last[name] = value
+                continue
+            previous = self.last[name]
+            if self._same(name, previous, value):
+                continue
+            self.last[name] = value
+            source = self.source_of(name)
+            entry = self._open.get(name)
+            if entry is not None and entry.source != source:
+                self._close(name)
+                entry = None
+            if entry is None:
+                entry = self._open[name] = _AuditEntry(source, previous, value)
+            else:
+                entry.new = value
+            if entry.timer is not None:
+                entry.timer.cancel()
+            entry.timer = asyncio.get_running_loop().call_later(self.quiet_s, self._close, name)
+
+    @property
+    def open_fields(self) -> list[str]:
+        return list(self._open)
+
+    def _close(self, name: str) -> None:
+        entry = self._open.pop(name, None)
+        if entry is None:
+            return
+        if entry.timer is not None:
+            entry.timer.cancel()
+        if not self._same(name, entry.old, entry.new):
+            self._emit(entry.source, name, entry.old, entry.new)
+
+    def flush(self) -> None:
+        """Emit every open entry now (shutdown)."""
+        for name in list(self._open):
+            self._close(name)
 
 
 class DeviceSession:
@@ -301,6 +459,7 @@ class DeviceSession:
         self._watcher: asyncio.Task | None = None
         self._seen_preset: int | None = None
         self._stopped = False
+        self.audit = MasterAudit(self._log_master_change)
 
     # --- lifecycle ------------------------------------------------------------------------------------------------
 
@@ -308,10 +467,13 @@ class DeviceSession:
         self._stopped = False
         self.monitor.start()
         self.writer.start()
+        if self.master is not None:
+            self.audit.observe(self.master.model_dump())  # the audit's baseline, if the status arrived before start
         if self._watcher is None:
             self._watcher = asyncio.create_task(self._watch_master(), name=f"session-master-{self.serial}")
 
     async def stop(self) -> None:
+        self.audit.flush()  # while log_event still persists
         self._stopped = True
         if self._watcher is not None:
             self._watcher.cancel()
@@ -388,6 +550,7 @@ class DeviceSession:
             "fw": version.fw if version else None,
             "state": str(self.state),
             "monitor_connected": self.monitor.connected,
+            "connected_for_s": self.monitor.uptime(),
             "last_error": self.monitor.last_error,
             "profile": self.profile.model_dump(),
             "state_loaded": self.loaded,
@@ -512,12 +675,12 @@ class DeviceSession:
             async for event in sub:
                 if event.serial != self.serial:
                     continue
-                preset = (event.data.get("master") or {}).get("preset")
+                master = event.data.get("master") or {}
+                self.audit.observe(master)  # also records preset changes made outside the app
+                preset = master.get("preset")
                 if preset is None or preset == self._seen_preset:
                     continue
-                previous, self._seen_preset = self._seen_preset, preset
-                if previous is not None and self.preset_switching is None:
-                    self.log_event("info", f"preset {preset + 1} is now active", kind="preset", preset=preset)
+                self._seen_preset = preset
                 if preset in self.writer.presets:
                     self.writer.kick(preset)
 
@@ -556,69 +719,88 @@ class DeviceSession:
             raise MasterValidationError(f"preset {update.preset} outside 0..{p.n_presets - 1}")
         return update.model_copy(update=changes)
 
-    async def set_master(self, update: MasterUpdate) -> MasterStatus:
-        """Apply any combination of volume/mute/source/preset. A preset change is done first, on the slow path."""
+    @property
+    def volume_drop_confirm_db(self) -> float:
+        """Lowering the master volume by more than this in one UI action needs a confirmation (0 = never)."""
+        return float(getattr(self.settings, "volume_drop_confirm_db", DEFAULT_VOLUME_DROP_CONFIRM_DB))
+
+    async def set_master(self, update: MasterUpdate, *, source: str = "api") -> MasterStatus:
+        """Apply any combination of volume/mute/source/preset. A preset change is done first, on the slow path.
+
+        ``source`` (ui / ha / api) is who asked; it attributes the change in the master audit. Big volume drops are
+        guarded for the UI only: automations (HA, API) may lower the volume legitimately.
+        """
         update = self.validate_master(update)
         if update.preset is not None:
-            await self.set_preset(update.preset)
+            await self.set_preset(update.preset, source=source)
         rest = MasterStatus(volume=update.volume, mute=update.mute, source=update.source)
-        if not rest.model_dump(exclude_none=True):
+        fields = list(rest.model_dump(exclude_none=True))
+        if not fields:
             return self.master or MasterStatus()
         self._check_not_switching()
-        async with self._master_lock:
-            if rest.volume is not None and not update.confirm:
-                await self._check_volume_raise(rest.volume)
-            result = await self._call(lambda i: self.client.post_master(i, rest))
-        return self._apply_master(result)
+        with self.audit.acting(fields, source):
+            async with self._master_lock:
+                if rest.volume is not None and not update.confirm:
+                    await self._check_volume_step(rest.volume, guard_drop=source == "ui")
+                result = await self._call(lambda i: self.client.post_master(i, rest))
+            return self._apply_master(result)
 
-    async def _check_volume_raise(self, target: float) -> None:
+    async def _check_volume_step(self, target: float, *, guard_drop: bool = False) -> None:
         """Gain-step guard (docs 03 §5): raising the master volume by more than ``gain_step_confirm_db`` in one change
-        needs ``confirm``. A volume we can't read counts as the bottom of the range."""
-        limit = self.settings.gain_step_confirm_db
-        if limit <= 0:
+        needs ``confirm``; with ``guard_drop`` so does lowering it by more than ``volume_drop_confirm_db`` (docs/02 §A).
+        A volume we can't read counts as the bottom of the range for raises; drops from it aren't guarded."""
+        raise_limit = self.settings.gain_step_confirm_db
+        drop_limit = self.volume_drop_confirm_db if guard_drop else 0.0
+        if raise_limit <= 0 and drop_limit <= 0:
             return
         current = self._live_master().volume
         if current is None:
             current = (await self.refresh_status()).master.volume
         reference = current if current is not None else self.profile.master_volume_min_db
-        if target - reference > limit:
+        if raise_limit > 0 and target - reference > raise_limit:
             raise ConfirmationRequired(
                 f"raising the master volume by {target - reference:g} dB (to {target:g} dB) needs confirmation"
             )
+        if drop_limit > 0 and current is not None and current - target > drop_limit:
+            raise ConfirmationRequired(
+                f"lowering the master volume by {current - target:g} dB (to {target:g} dB) needs confirmation"
+            )
 
-    async def set_volume(self, volume_db: float, *, confirm: bool = False) -> MasterStatus:
-        return await self.set_master(MasterUpdate(volume=volume_db, confirm=confirm))
+    async def set_volume(self, volume_db: float, *, confirm: bool = False, source: str = "api") -> MasterStatus:
+        return await self.set_master(MasterUpdate(volume=volume_db, confirm=confirm), source=source)
 
-    async def set_mute(self, mute: bool) -> MasterStatus:
-        return await self.set_master(MasterUpdate(mute=mute))
+    async def set_mute(self, mute: bool, *, source: str = "api") -> MasterStatus:
+        return await self.set_master(MasterUpdate(mute=mute), source=source)
 
-    async def set_source(self, source: str) -> MasterStatus:
-        return await self.set_master(MasterUpdate(source=source))
+    async def set_source(self, source_name: str, *, source: str = "api") -> MasterStatus:
+        return await self.set_master(MasterUpdate(source=source_name), source=source)
 
-    async def toggle_mute(self) -> MasterStatus:
+    async def toggle_mute(self, *, source: str = "api") -> MasterStatus:
         self._check_not_switching()
-        async with self._master_lock:
-            current = self._live_master().mute
-            result = await self._call(lambda i: self.client.toggle_mute(i, current=current))
-        return self._apply_master(result)
+        with self.audit.acting(["mute"], source):
+            async with self._master_lock:
+                current = self._live_master().mute
+                result = await self._call(lambda i: self.client.toggle_mute(i, current=current))
+            return self._apply_master(result)
 
-    async def volume_step(self, direction: int) -> MasterStatus:
+    async def volume_step(self, direction: int, *, source: str = "api") -> MasterStatus:
         """±0.5 dB as an absolute write from the current volume, clamped to the profile's range."""
         if direction not in (1, -1):
             raise MasterValidationError("direction must be +1 or -1")
         self._check_not_switching()
         p = self.profile
-        async with self._master_lock:
-            current = self._live_master().volume
-            if current is None:
-                current = (await self.refresh_status()).master.volume
-            if current is None:
-                raise DaemonError("minidspd did not report the master volume")
-            target = min(
-                p.master_volume_max_db, max(p.master_volume_min_db, current + direction * p.master_volume_step_db)
-            )
-            result = await self._call(lambda i: self.client.post_master(i, MasterStatus(volume=target)))
-        return self._apply_master(result)
+        with self.audit.acting(["volume"], source):
+            async with self._master_lock:
+                current = self._live_master().volume
+                if current is None:
+                    current = (await self.refresh_status()).master.volume
+                if current is None:
+                    raise DaemonError("minidspd did not report the master volume")
+                target = min(
+                    p.master_volume_max_db, max(p.master_volume_min_db, current + direction * p.master_volume_step_db)
+                )
+                result = await self._call(lambda i: self.client.post_master(i, MasterStatus(volume=target)))
+            return self._apply_master(result)
 
     def _live_master(self) -> MasterStatus:
         """The cached master status if the monitor is connected (poll frames keep it current), else an empty one so
@@ -627,7 +809,7 @@ class DeviceSession:
             return self.master
         return MasterStatus()
 
-    async def set_preset(self, preset: int) -> MasterStatus:
+    async def set_preset(self, preset: int, *, source: str = "api") -> MasterStatus:
         """Switch preset and wait until the device reports it. Writes are blocked meanwhile; afterwards the writer
         flushes whatever is staged for the now-active preset."""
         self.validate_master(MasterUpdate(preset=preset))
@@ -640,16 +822,17 @@ class DeviceSession:
         try:
             # Wait for a config call already past the writer's preset guard, and send none until the device reports
             # the new preset: a write cleared for the old preset must not land on the new one (docs 03 §2).
-            async with self.writer.paused(), self._master_lock:
-                result = await self._call(lambda i: self.client.set_preset(i, preset))
-                self._apply_master(result)
-                while self.master is None or self.master.preset != preset:
-                    if time.monotonic() >= deadline:
-                        raise PresetSwitchTimeout(f"device did not report preset {preset} within {timeout:g} s")
-                    await asyncio.sleep(0.5)
-                    # The device can be briefly unresponsive while it resets.
-                    with contextlib.suppress(DaemonError):
-                        await self.refresh_status()
+            with self.audit.acting(["preset"], source):
+                async with self.writer.paused(), self._master_lock:
+                    result = await self._call(lambda i: self.client.set_preset(i, preset))
+                    self._apply_master(result)
+                    while self.master is None or self.master.preset != preset:
+                        if time.monotonic() >= deadline:
+                            raise PresetSwitchTimeout(f"device did not report preset {preset} within {timeout:g} s")
+                        await asyncio.sleep(0.5)
+                        # The device can be briefly unresponsive while it resets.
+                        with contextlib.suppress(DaemonError):
+                            await self.refresh_status()
         finally:
             self.preset_switching = None
             self.bus.publish(DEVICE, self.device_event(), serial=self.serial)
@@ -657,6 +840,18 @@ class DeviceSession:
             if active is not None:
                 self.writer.kick(active)  # staged during the switch
         return self.master or MasterStatus(preset=preset)
+
+    def _log_master_change(self, source: str, field: str, old: Any, new: Any) -> None:
+        """One persisted event per completed master change (the audit's emitter)."""
+        self.log_event(
+            "info",
+            describe_master_change(source, field, old, new),
+            kind="master",
+            source=source,
+            field=field,
+            old=old,
+            new=new,
+        )
 
     def _check_not_switching(self) -> None:
         if self.preset_switching is not None:
@@ -1414,8 +1609,11 @@ class DeviceSession:
                 failed=sorted(result.failed),
             )
 
-    async def activate_preset(self, preset: int, *, flush: bool = True, timeout: float | None = None) -> MasterStatus:
-        """Switch preset ("switch & apply now"), then wait for its staged edits to be written (``flush``)."""
+    async def activate_preset(
+        self, preset: int, *, flush: bool = True, timeout: float | None = None, source: str = "api"
+    ) -> MasterStatus:
+        """Switch preset ("switch & apply now"), then wait for its staged edits to be written (``flush``). ``source``
+        attributes the switch in the master audit."""
         await self._ready(preset)
         if self._persister is not None:
             await self._persister.flush([(self.serial, preset)])
@@ -1423,7 +1621,10 @@ class DeviceSession:
             current = await self.active_preset()
         except DaemonError:
             current = None
-        master = await self.set_preset(preset) if current != preset else (self.master or MasterStatus(preset=preset))
+        if current != preset:
+            master = await self.set_preset(preset, source=source)
+        else:
+            master = self.master or MasterStatus(preset=preset)
         self.writer.kick(preset)
         if flush:
             limit = timeout if timeout is not None else self.settings.preset_switch_timeout_s
@@ -1443,6 +1644,7 @@ class DeviceSession:
         script: str | None = None,
         doc: ConfigDoc | None = None,
         confirm: bool = False,
+        confirm_defaults: bool = False,
         trust_all: bool = False,
         timeout: float | None = BULK_TIMEOUT_S,
     ) -> AdoptResult:
@@ -1450,7 +1652,9 @@ class DeviceSession:
         doc, or the defaults. Then:
 
         - ``trust``: the shadow says the device holds it, nothing is written. For a script only the paths the script
-          sets are trusted (everything else stays unknown) unless ``trust_all``.
+          sets are trusted (everything else stays unknown) unless ``trust_all``. Trusting the defaults (no script, no
+          doc) claims the device is flat, which is rarely true and later un-bypasses whatever is really there, so it
+          needs ``confirm_defaults`` (docs 05 §8 adopt guard).
         - ``push``: write all of it, mute-wrapped. Destructive, so it needs ``confirm``.
         - ``unknown``: nothing is known and nothing is written.
 
@@ -1487,6 +1691,13 @@ class DeviceSession:
         new = await asyncio.to_thread(annotate_designs, new)
         if mode == AdoptMode.PUSH and not confirm:
             raise ConfirmationRequired(f"pushing overwrites every setting of preset {preset + 1}; repeat with confirm")
+        trusting_defaults = mode == AdoptMode.TRUST and script is None and doc is None
+        if trusting_defaults and not confirm_defaults:
+            raise ConfirmationRequired(
+                f"trusting the defaults claims preset {preset + 1} on the device is at factory defaults "
+                "(unity gains, no delay, every filter bypassed); import a script instead, or repeat with "
+                "confirm_defaults if the device really is at factory defaults"
+            )
 
         async with self._edit_lock:
             old = self.writer.state(preset).desired
@@ -1531,6 +1742,16 @@ class DeviceSession:
             mode=str(mode),
             writes=writes,
         )
+        if trusting_defaults:
+            self.log_event(
+                "warning",
+                f"adopt: confirmed that preset {preset + 1} on the device is at factory defaults; trusted without "
+                "reading it",
+                kind="adopt",
+                preset=preset,
+                mode=str(mode),
+                confirm_defaults=True,
+            )
         if flush is not None:
             self._log_flush(f"adopt push preset {preset + 1}", flush, writes, kind="adopt")
         return AdoptResult(
@@ -1614,6 +1835,8 @@ class SessionManager:
         self.devices: list[DaemonDevice] = []
         self.unsupported: list[DaemonDevice] = []
         self.daemon_up: bool | None = None
+        self.daemon_version: str | None = None
+        self._version_read = False
         self.last_error: str | None = None
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
@@ -1646,6 +1869,9 @@ class SessionManager:
         self.last_error = error
         if up != self.daemon_up:
             self.daemon_up = up
+            if not up:  # it may come back upgraded
+                self.daemon_version = None
+                self._version_read = False
             message = "minidspd reachable" if up else f"minidspd unreachable: {error}"
             self.bus.publish(LOG, {"serial": None, "level": "info" if up else "warning", "message": message})
             self.bus.publish(DEVICE, {"serial": None, "daemon": "up" if up else "down"})
@@ -1660,6 +1886,8 @@ class SessionManager:
                 session.set_state(SessionState.DAEMON_DOWN)
             return []
         self._set_daemon_up(True)
+        if not self._version_read:
+            await self._read_daemon_version()
         self.devices = devices
         self.unsupported = []
         seen: set[int] = set()
@@ -1705,6 +1933,14 @@ class SessionManager:
                 session.set_state(SessionState.ABSENT)
         return devices
 
+    async def _read_daemon_version(self) -> None:
+        """Once per daemon start seen. The version is only shown on the Device page, so a failure is just logged."""
+        self._version_read = True
+        try:
+            self.daemon_version = await self.client.daemon_version()
+        except Exception as exc:  # older daemons, proxies that hide /openapi.json, test fakes without it
+            log.debug("could not read the minidspd version: %s", exc)
+
     async def _run(self) -> None:
         retry_cap = max(1.0, min(10.0, self.settings.discovery_interval_s))
         backoff = 1.0
@@ -1737,6 +1973,7 @@ __all__ = [
     "DeviceSession",
     "EditResult",
     "ImportResult",
+    "MasterAudit",
     "MasterValidationError",
     "PresetSwitchInProgress",
     "PresetSwitchTimeout",
@@ -1745,6 +1982,8 @@ __all__ = [
     "SessionState",
     "StateUnavailable",
     "UnknownPreset",
+    "describe_master_change",
+    "factory_defaults_summary",
     "flush_json",
     "merge_patch",
     "parse_doc",

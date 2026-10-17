@@ -79,8 +79,8 @@ async def test_push_all_on_an_inactive_preset_is_staged(session, fake):
 
 
 async def test_reconnect_marks_the_active_preset_unknown(session, fake, repo):
-    await session.adopt("trust")
-    await session.adopt("trust", preset=1)
+    await session.adopt("trust", confirm_defaults=True)
+    await session.adopt("trust", preset=1, confirm_defaults=True)
     assert set(session.sync_status(0).values()) == {"synced"}
     await session._on_monitor_connected(True)
     await drain(session)
@@ -93,7 +93,7 @@ async def test_reconnect_marks_the_active_preset_unknown(session, fake, repo):
 
 async def test_reconnect_reapplies_when_configured(make_session, fake):
     s = await make_session(reapply_on_reconnect=True)
-    await s.adopt("trust")
+    await s.adopt("trust", confirm_defaults=True)
     await s._on_monitor_connected(True)
     await drain(s)
     assert set(s.sync_status(0).values()) == {"synced"}
@@ -136,7 +136,7 @@ async def test_daemon_down_mid_edit_then_reconnect_converges(session, fake):
 
 async def test_drag_is_coalesced(make_session, fake):
     s = await make_session(write_coalesce_ms=50)
-    await s.adopt("trust")
+    await s.adopt("trust", confirm_defaults=True)
     for step in range(1, 21):
         await s.edit(0, {"outputs": {"0": {"gain_db": step * 0.1}}}, source="ui")
         await asyncio.sleep(0.005)

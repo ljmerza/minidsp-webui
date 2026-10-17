@@ -22,8 +22,9 @@ async def test_device_page_loads_the_new_sections(ctx):
     assert f'hx-get="/ui/devices/{SERIAL}/sync-panel?preset=2"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/events"' in html
-    assert 'sse-connect="/api/v1/events?topics=sync%2Clog%2Cmaster&amp;serial=' in html
+    assert 'sse-connect="/api/v1/events?topics=sync%2Clog%2Cmaster%2Cverify&amp;serial=' in html
     assert 'id="sync"' in html and 'id="adopt"' in html
+    assert f'hx-get="/ui/devices/{SERIAL}/verify"' in html and 'id="verify"' in html
 
 
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
@@ -31,7 +32,7 @@ async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
     assert 'id="syncbar"' in html and 'id="sync-table"' in html
     assert "outputs.0.gain_db" in html and "Out 1 · gain" in html
     assert "sync-unknown" in html
-    await ctx.session.adopt(AdoptMode.TRUST, preset=0)
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
     assert "Every setting of preset 1 is synced" in html
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0, "show": "all"})).text
@@ -47,7 +48,7 @@ async def test_sync_panel_preset_and_errors(ctx):
 
 
 async def test_per_row_push_writes_one_path_again(ctx):
-    await ctx.session.adopt(AdoptMode.TRUST, preset=0)
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     response = await ctx.http.post(f"{UI}/presets/0/paths/push", data={"path": "outputs.2.mute"}, headers=HX)
     assert response.status_code == 200
     await ctx.settle()
@@ -93,6 +94,22 @@ async def test_push_adopt_needs_the_confirm_box(ctx):
     assert response.status_code == 200, response.text
     assert "Adopted preset 1 (push)" in response.text
     assert ctx.fake.configs and all(o.get("mute") is True for o in ctx.fake.configs[0]["outputs"])
+
+
+async def test_trusting_the_defaults_needs_the_confirm_box(ctx):
+    html = (await ctx.http.get(f"{UI}/adopt")).text
+    assert "My device really is at factory defaults" in html and 'name="confirm_defaults"' in html
+    assert (
+        "Out 1: 0 dB, 0 ms, unmuted, normal polarity" in html and "In 2: 0 dB, unmuted, routed to Out 2, Out 4" in html
+    )
+    form = {"preset": "0", "source": "defaults", "mode": "trust"}
+    response = await ctx.http.post(f"{UI}/adopt", data=form, headers=HX)
+    assert response.status_code == 409 and "Nothing was adopted" in response.text
+    assert ctx.session.needs_adoption
+    response = await ctx.http.post(f"{UI}/adopt", data={**form, "confirm_defaults": "on"}, headers=HX)
+    assert response.status_code == 200, response.text
+    assert "Adopted preset 1 (trust)" in response.text and not ctx.session.needs_adoption
+    assert ctx.fake.configs == []
 
 
 async def test_adopt_from_an_uploaded_file(ctx):

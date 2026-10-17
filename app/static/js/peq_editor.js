@@ -162,9 +162,12 @@
     return { freq: u.posToVal(x, 'x'), value: u.posToVal(y, 'y') };
   }
 
+  // The view a graph opens in when none was remembered for it: Settings' default range, else the page's own.
+  const pageView = (fallback) => (mdsp().graph ? mdsp().graph.defaultView(fallback) : fallback);
+
   const helpers = {
     ICON, RANK, BAND_COLORS, request, send, errorText, parseEvent, worst, applySync, remember, biquadFromForm,
-    stability, fullPrecision, createPlot, pointerData, roundFreq, roundQ, roundGain, clamp,
+    stability, fullPrecision, createPlot, pageView, pointerData, roundFreq, roundQ, roundGain, clamp,
   };
   window.mdsp = Object.assign(window.mdsp || {}, { filters: helpers });
 
@@ -215,7 +218,7 @@
       selected: null,
       drawer: null,
       raw: { b0: '', b1: '', b2: '', a1: '', a2: '' },
-      view: remember(`peq.view.${cfg.side}`) || cfg.view || 'full',
+      view: remember(`peq.view.${cfg.side}`) || pageView(cfg.view || 'full'),
       prefix: `${cfg.side}.${cfg.channel}.peq`,
 
       init() {
@@ -716,7 +719,7 @@
 
     return {
       title: cfg.title || '',
-      view: stored('view', cfg.view || 'full'),
+      view: stored('view', pageView(cfg.view || 'full')),
       mode: stored('mode', 'magnitude'),
       unwrap: stored('unwrap', 'false') === 'true',
       parts: stored('parts', 'false') === 'true',

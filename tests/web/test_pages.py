@@ -3,6 +3,7 @@ import re
 import httpx
 import pytest
 
+from app.config import Settings
 from app.model.master import DaemonDevice, MasterStatus, StatusSummary
 from app.sync.session import SessionState
 
@@ -46,8 +47,17 @@ async def test_dashboard_renders_header_meters_and_cards(http):
         assert f'aria-label="{name} level"' in html
     assert html.count('class="output-card"') == 4
 
+    # output cards: re-fetched on sync / desired events; dashboard.js handles preset switches and the quick controls
+    box = re.search(r"<div[^>]*data-output-cards[^>]*>", html, re.S).group(0)
+    assert f'hx-get="/ui/dashboard/outputs?serial={SERIAL}"' in box
+    assert 'hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh"' in box
+    assert 'x-data="outputCards" hx-trigger="sse:master"' in html
+    assert "/static/js/dashboard.js" in html
+    assert 'data-action="mute"' not in html  # no preset state loaded: no quick controls
+
     # live feed + vendored assets only
-    assert f'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync&amp;serial={SERIAL}"' in html
+    topics = "levels%2Cmaster%2Cdevice%2Csync%2Cdesired"
+    assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
     assert f'hx-get="/ui/header?serial={SERIAL}"' in html
     for src in re.findall(r'<script[^>]*src="([^"]+)"', html):
         assert src.startswith("/static/"), src
@@ -69,7 +79,7 @@ async def test_dashboard_without_device_when_daemon_is_down():
     assert "minidspd unreachable" in html and 'role="alert"' in html
     assert 'id="master-volume"' not in html and 'id="preset-1"' not in html
     assert 'data-serial=""' in html
-    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync"' in html
+    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync%2Cdesired"' in html
 
 
 async def test_unsupported_device_names_are_listed_and_escaped():
@@ -154,6 +164,59 @@ async def test_device_info_fragment(http):
     assert "<html" not in response.text and "Firmware" in response.text
 
 
+async def test_device_page_shows_daemon_version_and_connection_uptime(session, manager, http):
+    html = (await http.get("/ui/device-info")).text
+    assert re.search(r"<dt>minidspd version</dt><dd>—</dd>", html)  # not read (yet)
+    assert "Connection uptime" not in html  # the fake session doesn't report it
+
+    manager.daemon_version = "0.1.12"
+    info = session.info()
+    session.info = lambda: {**info, "connected_for_s": 3 * 3600 + 12 * 60 + 5}
+    html = (await http.get("/ui/device-info")).text
+    assert re.search(r"<dt>minidspd version</dt><dd>0\.1\.12</dd>", html)
+    assert re.search(r"<dt>Connection uptime</dt><dd>connected for 3 h 12 min</dd>", html)
+
+    session.monitor_connected = False
+    session.info = lambda: {**info, "monitor_connected": False, "connected_for_s": None}
+    assert "Connection uptime" not in (await http.get("/ui/device-info")).text
+
+
+async def test_daemon_version_without_a_device():
+    manager = FakeManager(daemon_up=True)
+    manager.daemon_version = "0.1.12"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=make_app(manager)), base_url="http://t") as http:
+        html = (await http.get("/device")).text
+    assert "No device" in html and re.search(r"<dt>minidspd version</dt><dd>0\.1\.12</dd>", html)
+
+
+async def test_dashboard_outputs_fragment(http):
+    response = await http.get("/ui/dashboard/outputs", params={"serial": SERIAL})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    html = response.text
+    assert "<html" not in html and html.count('class="output-card"') == 4
+    assert "<h3>Out 1</h3>" in html and "not tracked yet" in html
+    assert 'data-preset=""' in html and "data-edit-url" not in html
+
+
+async def test_graph_defaults_reach_every_page(manager):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=make_app(manager)), base_url="http://t") as http:
+        html = (await http.get("/")).text
+    body = re.search(r"<body[^>]*>", html, re.S).group(0)
+    assert 'data-graph-view=""' in body and 'data-graph-db="24"' in body  # "auto": each page keeps its own view
+    assert '"view": "sub"' in html and "5–300 Hz, active preset" in html
+
+    settings = Settings(_env_file=None, minidspd_url="http://daemon.invalid:5380", graph_view="full", graph_db_range=30)
+    app = make_app(manager, settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as http:
+        html = (await http.get("/")).text
+        device = (await http.get("/device")).text
+    body = re.search(r"<body[^>]*>", html, re.S).group(0)
+    assert 'data-graph-view="full"' in body and 'data-graph-db="30"' in body
+    assert '"view": "full"' in html and "10 Hz–20 kHz, active preset" in html
+    assert 'data-graph-view="full"' in device
+
+
 async def test_device_page_without_device():
     manager = FakeManager(daemon_up=None)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=make_app(manager)), base_url="http://t") as http:
@@ -201,6 +264,7 @@ async def test_static_assets_are_served(http):
         "/static/js/app.js",
         "/static/js/master.js",
         "/static/js/meters.js",
+        "/static/js/dashboard.js",
         "/static/vendor/htmx/htmx.min.js",
         "/static/vendor/htmx/sse.min.js",
         "/static/vendor/alpine/alpine.min.js",

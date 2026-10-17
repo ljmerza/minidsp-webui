@@ -41,6 +41,7 @@ class FakeSession:
     calls: list[tuple[str, Any]] = field(default_factory=list)
     events: list[tuple[str, str]] = field(default_factory=list)
     confirmed: bool | None = None  # ``confirm`` of the last set_volume call
+    source: str | None = None  # ``source`` of the last set_volume call (ui / ha / api)
 
     def __post_init__(self) -> None:
         self.monitor = FakeMonitor()
@@ -78,25 +79,26 @@ class FakeSession:
         self.master = (self.master or MasterStatus()).model_copy(update=changes)
         return self.master
 
-    async def set_volume(self, volume_db: float, *, confirm: bool = False) -> MasterStatus:
+    async def set_volume(self, volume_db: float, *, confirm: bool = False, source: str = "api") -> MasterStatus:
         self.confirmed = confirm
+        self.source = source
         return await self._record("set_volume", volume_db, volume=volume_db)
 
-    async def volume_step(self, direction: int) -> MasterStatus:
+    async def volume_step(self, direction: int, **_: Any) -> MasterStatus:
         current = self.master.volume if self.master and self.master.volume is not None else 0.0
         return await self._record("volume_step", direction, volume=current + 0.5 * direction)
 
-    async def set_mute(self, mute: bool) -> MasterStatus:
+    async def set_mute(self, mute: bool, **_: Any) -> MasterStatus:
         return await self._record("set_mute", mute, mute=mute)
 
-    async def toggle_mute(self) -> MasterStatus:
+    async def toggle_mute(self, **_: Any) -> MasterStatus:
         muted = bool(self.master and self.master.mute)
         return await self._record("toggle_mute", None, mute=not muted)
 
-    async def set_source(self, source: str) -> MasterStatus:
-        return await self._record("set_source", source, source=source)
+    async def set_source(self, source_name: str, **_: Any) -> MasterStatus:
+        return await self._record("set_source", source_name, source=source_name)
 
-    async def set_preset(self, preset: int) -> MasterStatus:
+    async def set_preset(self, preset: int, **_: Any) -> MasterStatus:
         return await self._record("set_preset", preset, preset=preset)
 
 
@@ -106,6 +108,7 @@ class FakeManager:
     daemon_up: bool | None = True
     last_error: str | None = None
     unsupported: list[DaemonDevice] = field(default_factory=list)
+    repo: Any = field(default_factory=object)  # a stand-in: "state is persisted" (no storage banner)
 
     def get(self, serial: int) -> FakeSession | None:
         return self.sessions.get(serial)

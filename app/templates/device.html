@@ -10,8 +10,9 @@
 {% if session is not none and serial is not none %}
 {%- set ui = root ~ "/ui/devices/" ~ serial -%}
 {%- set q = request.query_params.get("preset") -%}
-{#- This page's main feed carries master/device only; sync status and the event log come over a second one. -#}
-<div class="device-live" sse-connect="{{ root }}/api/v1/events?topics=sync%2Clog%2Cmaster&amp;serial={{ serial }}">
+{#- This page's main feed carries master/device only; sync status, verify results and the event log come
+     over a second one. -#}
+<div class="device-live" sse-connect="{{ root }}/api/v1/events?topics=sync%2Clog%2Cmaster%2Cverify&amp;serial={{ serial }}">
   {#- Until the device is adopted the wizard comes first; afterwards it sits below the sync table. -#}
   {%- set adopt_first = session.needs_adoption is defined and session.needs_adoption %}
   {% if adopt_first %}
@@ -27,6 +28,13 @@
     </div>
   </section>
 
+  <section id="verify" class="card" aria-labelledby="verify-title">
+    <h2 id="verify-title">Verify device</h2>
+    {#- The partial (#verify-panel) replaces itself on its own posts; a nightly or API run re-renders it here. -#}
+    <div class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
+      <p class="muted">Loading&hellip;</p>
+    </div>
+  </section>
 
   {% if not adopt_first %}
   <section id="adopt" class="card" aria-labelledby="adopt-title">

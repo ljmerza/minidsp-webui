@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 
 import httpx
@@ -147,3 +148,17 @@ async def test_app_levels_start_promptly(api: httpx.AsyncClient):
         pytest.fail("monitor never went back to a poll-only socket")
     elapsed, _ = await _sse_levels(api, first_timeout=3, count=1)
     assert elapsed < 3
+
+
+async def test_device_page_shows_daemon_version_and_uptime(api: httpx.AsyncClient):
+    html = (await api.get("/ui/device-info", params={"serial": MOCK_SERIAL})).text
+    assert re.search(r"<dt>minidspd version</dt><dd>\d+\.\d+\.\d+</dd>", html), html
+    assert re.search(r"<dt>Connection uptime</dt><dd>connected for \d+ (s|min|h|d)", html), html
+
+
+async def test_dashboard_cards_offer_quick_controls(api: httpx.AsyncClient):
+    status = (await api.get(f"{DEVICE}/status")).json()
+    preset = status["master"]["preset"]
+    html = (await api.get("/ui/dashboard/outputs", params={"serial": MOCK_SERIAL})).text
+    assert f'data-edit-url="/ui/devices/{MOCK_SERIAL}/presets/{preset}/edit"' in html
+    assert html.count('data-action="mute"') == 4 and html.count('data-action="nudge"') == 8

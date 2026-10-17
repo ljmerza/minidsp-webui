@@ -90,9 +90,12 @@ async def test_runtime_settings_apply_now_and_persist(ctx):
     assert ctx.session.writer.coalesce_s == pytest.approx(0.12)
     assert await ctx.repo.get_setting(RUNTIME_KEY) == {
         "gain_step_confirm_db": 3.0,
+        "volume_drop_confirm_db": 20.0,  # not in this form: the current value is kept
         "write_coalesce_ms": 120,
         "mute_wrap_bulk_apply": False,
         "reapply_on_reconnect": True,
+        "graph_view": "auto",
+        "graph_db_range": 24.0,
     }
     # the session uses the new threshold at once
     response = await ctx.edit(0, {"outputs.0.gain_db": 4.0})
@@ -101,6 +104,39 @@ async def test_runtime_settings_apply_now_and_persist(ctx):
     fresh = make_settings()
     assert await apply_stored_runtime_settings(ctx.repo, fresh)
     assert fresh.gain_step_confirm_db == 3.0 and fresh.write_coalesce_ms == 120
+
+
+async def test_default_graph_range_is_saved_and_reaches_the_pages(ctx):
+    html = (await ctx.http.get("/settings")).text
+    assert '<option value="auto" selected>' in html and 'name="graph_db_range"' in html and 'value="24"' in html
+
+    form = {"gain_step_confirm_db": "6", "write_coalesce_ms": "50", "graph_view": "full", "graph_db_range": "36"}
+    response = await ctx.http.post("/ui/settings/runtime", data=form, headers=HX)
+    assert response.status_code == 200, response.text
+    assert '<option value="full" selected>' in response.text and 'value="36"' in response.text
+    assert ctx.settings.graph_view == "full" and ctx.settings.graph_db_range == 36.0
+    stored = await ctx.repo.get_setting(RUNTIME_KEY)
+    assert stored["graph_view"] == "full" and stored["graph_db_range"] == 36.0
+
+    for page in ("/", "/outputs/1?tab=peq", "/routing", "/settings"):
+        html = (await ctx.http.get(page)).text
+        assert 'data-graph-view="full" data-graph-db="36"' in html, page
+
+    fresh = make_settings()
+    assert await apply_stored_runtime_settings(ctx.repo, fresh)
+    assert fresh.graph_view == "full" and fresh.graph_db_range == 36.0
+
+    # a form from before the graph fields existed keeps them
+    response = await ctx.http.post(
+        "/ui/settings/runtime", data={"gain_step_confirm_db": "6", "write_coalesce_ms": "50"}, headers=HX
+    )
+    assert response.status_code == 200
+    assert ctx.settings.graph_view == "full" and ctx.settings.graph_db_range == 36.0
+
+    for bad in ({"graph_view": "wide"}, {"graph_db_range": "1"}, {"graph_db_range": "100"}):
+        form = {"gain_step_confirm_db": "6", "write_coalesce_ms": "50", **bad}
+        assert (await ctx.http.post("/ui/settings/runtime", data=form, headers=HX)).status_code == 422, bad
+    assert ctx.settings.graph_view == "full" and ctx.settings.graph_db_range == 36.0
 
 
 async def test_runtime_settings_validation(ctx):

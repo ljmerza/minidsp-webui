@@ -12,6 +12,7 @@ from app import __version__, web
 from app.api import v1
 from app.api.errors import register_exception_handlers
 from app.api.limits import BodyLimitMiddleware
+from app.api.v1 import verify as verify_api
 from app.bus import Bus
 from app.config import Settings, get_settings
 from app.daemon.client import DaemonClient
@@ -19,8 +20,11 @@ from app.mqtt import create_bridge
 from app.state import Database, Repo
 from app.sync.backup import apply_staged_restore, start_nightly_backups
 from app.sync.fir import restore_fir_capability
+from app.sync.health import health_report, maintenance_loop
 from app.sync.session import SessionManager
+from app.sync.verify import parse_at, start_nightly_verify
 from app.web import backup as backup_ui
+from app.web import devices as devices_ui
 from app.web import filters as filters_ui
 from app.web import profiles as profiles_ui
 from app.web import state_ui
@@ -28,7 +32,6 @@ from app.web import system as system_ui
 from app.web.settings_ui import apply_stored_runtime_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
-MAINTENANCE_INTERVAL_S = 24 * 3600
 
 log = logging.getLogger(__name__)
 
@@ -40,17 +43,6 @@ async def _open_db(path: str) -> Database | None:
     except Exception:
         log.exception("cannot open the state database at %s; preset state will not be kept", path)
         return None
-
-
-async def _maintenance(repo: Repo) -> None:
-    """Daily housekeeping: keep the event log bounded (runs once shortly after startup, then every 24 h)."""
-    while True:
-        await asyncio.sleep(60)
-        try:
-            await repo.trim_events()
-        except Exception:
-            log.exception("event log trim failed")
-        await asyncio.sleep(MAINTENANCE_INTERVAL_S - 60)
 
 
 def create_app(settings: Settings | None = None, *, client: DaemonClient | None = None) -> FastAPI:
@@ -85,12 +77,14 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         manager.start()  # discovery retries in the background, so the app serves even when the daemon is down
         if mqtt:
             mqtt.start()
-        maintenance = asyncio.create_task(_maintenance(repo), name="maintenance") if repo else None
+        maintenance = asyncio.create_task(maintenance_loop(repo), name="maintenance") if repo else None
         backups = start_nightly_backups(settings.db_path) if db else None
+        verify_at = parse_at(settings.verify_at)
+        verify_task = start_nightly_verify(manager, at=verify_at) if settings.verify_nightly else None
         try:
             yield
         finally:
-            for task in (maintenance, backups):
+            for task in (maintenance, backups, verify_task):
                 if task:
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
@@ -114,13 +108,18 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.include_router(system_ui.router)
     app.include_router(profiles_ui.router)
     app.include_router(backup_ui.router)
+    app.include_router(devices_ui.router)
+    app.include_router(verify_api.ui_router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/healthz", tags=["health"])
     async def healthz() -> dict[str, str]:
-        """Liveness probe for Docker: the app process is up (daemon state is in /api/v1/health)."""
-        return {"status": "ok", "version": __version__}
+        """Liveness probe for Docker: always 200 while the process serves. ``health`` is the overall status (ok,
+        degraded, starting); the details are in /api/v1/health. Degraded never means "restart me"."""
+        manager = getattr(app.state, "manager", None)
+        health = health_report(manager)["status"] if manager is not None else "starting"
+        return {"status": "ok", "version": __version__, "health": health}
 
     return app
 

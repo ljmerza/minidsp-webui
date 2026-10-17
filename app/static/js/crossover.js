@@ -71,7 +71,7 @@
       drawer: null,
       rows: [],
       orders: ORDERS,
-      view: F().remember('xover.view') || 'sub',
+      view: F().remember('xover.view') || F().pageView('sub'),
       prefix: `outputs.${cfg.channel}.crossover`,
 
       init() {

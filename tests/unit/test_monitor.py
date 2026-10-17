@@ -180,6 +180,29 @@ async def test_reconnects_after_drop(fake_ws):
     assert not monitor.connected
 
 
+async def test_uptime_survives_demand_reconnects_but_not_drops(fake_ws):
+    bus = Bus()
+    monitor = make_monitor(bus, fake_ws.base)
+    assert monitor.uptime() is None
+    levels_sub = bus.subscribe([LEVELS])
+    monitor.start()
+    try:
+        await wait_for(lambda: monitor.connected)
+        since = monitor.connected_since
+        assert since is not None and monitor.uptime() >= 0
+
+        levels_sub.close()  # our own reconnect without levels: the same connection as far as uptime goes
+        await wait_for(lambda: len(fake_ws.paths) >= 2 and monitor.connected)
+        assert monitor.connected_since == since
+
+        await fake_ws.connections[-1].close()  # a real drop starts the clock again
+        await wait_for(lambda: len(fake_ws.paths) >= 3 and monitor.connected)
+        assert monitor.connected_since > since
+    finally:
+        await monitor.stop()
+    assert monitor.uptime() is None and monitor.connected_since is None
+
+
 async def test_keeps_retrying_when_unreachable():
     bus = Bus()
     monitor = make_monitor(bus)  # port 1: connection refused
@@ -187,6 +210,7 @@ async def test_keeps_retrying_when_unreachable():
     await asyncio.sleep(0.2)
     assert not monitor.connected
     assert monitor.last_error
+    assert monitor.uptime() is None
     await monitor.stop()
 
 

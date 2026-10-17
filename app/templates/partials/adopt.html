@@ -86,6 +86,18 @@
       <label class="radio sub" x-show="mode === 'trust' && source === 'script'">
         <input type="checkbox" name="trust_all"{% if form.trust_all %} checked{% endif %}>
         Also trust the defaults for everything the script doesn't set (otherwise those stay unknown)</label>
+      <div class="radio sub confirm-defaults" x-show="mode === 'trust' && source === 'defaults'">
+        <p class="field-error">Trusting the defaults tells the app the device is flat without reading it. That is
+          rarely true for a device that was set up before: import the command script you used instead. If it's wrong,
+          later edits (un-bypassing a filter, for example) act on whatever the device really holds.</p>
+        <details open>
+          <summary>What will be trusted on the chosen preset</summary>
+          <ul class="issues">{% for line in defaults_summary %}<li>{{ line }}</li>{% endfor %}</ul>
+        </details>
+        <label class="confirm"><input type="checkbox" name="confirm_defaults"
+                                      :required="mode === 'trust' && source === 'defaults'">
+          My device really is at factory defaults.</label>
+      </div>
       <label class="radio"><input type="radio" name="mode" value="push" x-model="mode"{% if f_mode == "push" %} checked{% endif %}>
         <strong>Push</strong>: write all of it to the device{% if mute_wrap %}, with the outputs muted while it runs{% endif %}.</label>
       <label class="radio sub confirm" x-show="mode === 'push'">

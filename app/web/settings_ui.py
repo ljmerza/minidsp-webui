@@ -1,5 +1,5 @@
-"""Settings page (docs 05 §9): channel names and colours, per-output gain ceilings, the big-step threshold and the
-sync options.
+"""Settings page (docs 05 §9): channel names and colours, per-output gain ceilings, the big-step threshold, the
+sync options and the default graph range.
 
 Sync options and the threshold are app-wide runtime settings. They start from the environment (``app.config``);
 values saved here are stored in the ``setting`` table under `RUNTIME_KEY` and override the environment, both
@@ -9,7 +9,7 @@ start through `apply_stored_runtime_settings`.
 
 import logging
 import math
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
@@ -51,9 +51,12 @@ class RuntimeSettings(BaseModel):
     """The app-wide settings the Settings page can change at runtime."""
 
     gain_step_confirm_db: float = Field(ge=1.0, le=24.0)
+    volume_drop_confirm_db: float = Field(default=20.0, ge=0.0, le=127.0)  # 0 = never ask
     write_coalesce_ms: int = Field(ge=0, le=1000)
     mute_wrap_bulk_apply: bool
     reapply_on_reconnect: bool
+    graph_view: Literal["auto", "sub", "full"] = "auto"
+    graph_db_range: float = Field(default=24.0, ge=3.0, le=60.0)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RuntimeSettings":
@@ -306,16 +309,23 @@ async def rename_channel(request: Request, serial: int, kind: str, idx: int) -> 
 # --- runtime settings -------------------------------------------------------------------------------------------------
 
 
-def _runtime_from_form(form: FormData) -> RuntimeSettings:
+def _runtime_from_form(form: FormData, current: RuntimeSettings) -> RuntimeSettings:
     def number(name: str) -> str:
         return _form_text(form, name)
+
+    def newer(name: str) -> Any:
+        # Older forms (a page loaded before an upgrade) don't send newer fields: keep the current value.
+        return _form_text(form, name) if name in form else getattr(current, name)
 
     return RuntimeSettings.model_validate(
         {
             "gain_step_confirm_db": number("gain_step_confirm_db"),
+            "volume_drop_confirm_db": newer("volume_drop_confirm_db"),
             "write_coalesce_ms": number("write_coalesce_ms"),
             "mute_wrap_bulk_apply": form.get("mute_wrap_bulk_apply") in ("on", "true", "1"),
             "reapply_on_reconnect": form.get("reapply_on_reconnect") in ("on", "true", "1"),
+            "graph_view": newer("graph_view"),
+            "graph_db_range": newer("graph_db_range"),
         }
     )
 
@@ -325,14 +335,15 @@ async def save_runtime(request: Request) -> Response:
     if not is_htmx(request):
         return PlainTextResponse("HTMX request expected", status_code=400)
     form = await request.form()
+    settings: Settings = request.app.state.settings
+    current = RuntimeSettings.from_settings(settings)
     try:
-        values = _runtime_from_form(form)
+        values = _runtime_from_form(form, current)
     except ValidationError as exc:
         errors = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
         ctx = {"runtime": runtime_context(request, errors=errors)}
         return render(request, "partials/settings_runtime.html", ctx, status_code=422, error="; ".join(errors))
-    settings: Settings = request.app.state.settings
-    before = RuntimeSettings.from_settings(settings).model_dump()
+    before = current.model_dump()
     repo = repo_of(request)
     if repo is not None:
         try:

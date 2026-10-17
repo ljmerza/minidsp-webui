@@ -115,7 +115,7 @@ async def test_sync_badges_and_initial_state(ctx):
     assert "sync-unknown" in badge
     state = re.search(r"<script type=\"application/json\" data-sync-state>(.*?)</script>", html, re.S).group(1)
     assert '"outputs.0.gain_db": "unknown"' in state
-    await ctx.session.adopt(AdoptMode.TRUST, preset=0)
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     html = (await ctx.http.get("/outputs/1")).text
     assert "sync-synced" in _tag(html, r'data-sync-for="outputs\.0\.gain_db"')
 
@@ -125,7 +125,7 @@ async def test_header_sync_summary_and_staged_dots(ctx):
     assert "not tracked yet" not in html
     assert re.search(r'class="hdr-sync" href="/device\?preset=1#sync"', html)
     assert 'hx-trigger="sse:sync delay:500ms"' in html
-    await ctx.session.adopt(AdoptMode.TRUST, preset=0)
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     assert "all synced" in (await ctx.http.get("/ui/header")).text
     # an edit to inactive preset 2 is staged: its header button and its editing tab get a dot
     await ctx.session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})

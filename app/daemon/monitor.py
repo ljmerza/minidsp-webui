@@ -64,6 +64,8 @@ class DeviceMonitor:
         self.connected = False
         self.levels_enabled = False
         self.last_message_at: float | None = None  # time.monotonic()
+        # time.monotonic() when the stream came up; kept across our own reconnects (levels on/off, a new daemon index)
+        self.connected_since: float | None = None
         self.last_error: str | None = None
         self.connect_count = 0
 
@@ -96,6 +98,7 @@ class DeviceMonitor:
                 await self._task
             self._task = None
         self.connected = False
+        self.connected_since = None
 
     def kick(self) -> None:
         """Drop the current connection and reconnect right away (e.g. after the device was re-discovered)."""
@@ -108,6 +111,12 @@ class DeviceMonitor:
 
     def status_age(self) -> float | None:
         return None if self.last_message_at is None else time.monotonic() - self.last_message_at
+
+    def uptime(self) -> float | None:
+        """Seconds the device stream has been up; None while it is down."""
+        if not self.connected or self.connected_since is None:
+            return None
+        return time.monotonic() - self.connected_since
 
     # --- levels demand --------------------------------------------------------------------------------------------
 
@@ -208,6 +217,8 @@ class DeviceMonitor:
         recovered, self._recovering = self._recovering, False
         self.connect_count += 1
         self.connected = True
+        if self.connected_since is None:
+            self.connected_since = time.monotonic()
         self.levels_enabled = levels
         self._first_message = True
         self.last_error = None
@@ -222,6 +233,8 @@ class DeviceMonitor:
         was_connected = self.connected
         self.connected = False
         self.levels_enabled = False
+        if not self._reconnect_now:
+            self.connected_since = None
         self._cancel_grace()
         if was_connected and not self._reconnect_now:
             self._recovering = True
