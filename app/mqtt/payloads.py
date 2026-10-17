@@ -12,8 +12,9 @@ Every entity reads the one retained ``state`` JSON through a ``value_template``.
 
 import json
 import math
+import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,8 +33,21 @@ PRESET = "preset"
 CONNECTED = "connected"
 SYNC = "sync"
 
-COMMAND_ENTITIES = (VOLUME, MUTE, SOURCE, PRESET)
+PROFILE = "profile"
+PUSH_ALL = "push_all"
+PRESS = "PRESS"
+
+# Per-output entities: ``output_<n>_<kind>`` (1-based like the UI).
+GAIN = "gain"
+DELAY = "delay"
+OUTPUT_KINDS = (GAIN, MUTE, DELAY)
+
+COMMAND_ENTITIES = (VOLUME, MUTE, SOURCE, PRESET, PROFILE, PUSH_ALL)
 SYNC_STATES = ("synced", "pending", "failed", "unknown")
+
+GAIN_STEP_DB = 0.1
+DELAY_STEP_MS = 0.01
+LEVELS_EXPIRE_S = 10  # level sensors go unavailable when the (1 Hz) level stream stops
 
 ORIGIN = {
     "name": "minidsp-webui",
@@ -44,6 +58,31 @@ ORIGIN = {
 
 def _is_int(text: str) -> bool:
     return text.isascii() and text.isdigit()
+
+
+_OUTPUT_ENTITY = re.compile(r"output_([1-9][0-9]{0,2})_(gain|mute|delay)")
+
+
+def output_entity(index: int, kind: str) -> str:
+    """Object id / command entity of a per-output control: ``output_1_gain`` for output index 0."""
+    return f"output_{index + 1}_{kind}"
+
+
+def parse_output_entity(entity: str) -> tuple[int, str] | None:
+    """``(0-based output index, kind)`` for ``output_<n>_<kind>``, None for anything else."""
+    match = _OUTPUT_ENTITY.fullmatch(entity)
+    if match is None:
+        return None
+    return int(match.group(1)) - 1, match.group(2)
+
+
+def level_entity(kind: str, index: int) -> str:
+    return f"{kind}_{index + 1}_level"
+
+
+def default_label(kind: str, index: int) -> str:
+    """The UI's fallback channel name: "In 1" / "Out 1"."""
+    return f"{'In' if kind == 'input' else 'Out'} {index + 1}"
 
 
 class CommandError(ValueError):
@@ -69,6 +108,9 @@ class Topics:
     def state(self, serial: int) -> str:
         return f"{self.base}/{serial}/state"
 
+    def levels(self, serial: int) -> str:
+        return f"{self.base}/{serial}/levels"
+
     def command(self, serial: int, entity: str) -> str:
         return f"{self.base}/{serial}/cmd/{entity}"
 
@@ -91,14 +133,38 @@ class Topics:
 
 
 @dataclass(frozen=True, slots=True)
+class OutputInfo:
+    """Name (from Settings) and gain ceiling of one output; the HA gain slider's maximum is the ceiling."""
+
+    name: str
+    gain_max_db: float
+
+
+@dataclass(frozen=True, slots=True)
 class DeviceInfo:
-    """What the bridge needs to describe one device to Home Assistant."""
+    """What the bridge needs to describe one device to Home Assistant.
+
+    ``outputs`` / ``inputs`` default to the profile's channels with their default names and the profile's gain
+    maximum. ``profiles`` are the saved profile names offered by the Profile select (no select without any)."""
 
     serial: int
     profile: DeviceProfile
     sources: tuple[str, ...]
     fw: str | None = None
     configuration_url: str | None = None
+    outputs: tuple[OutputInfo, ...] = ()
+    inputs: tuple[str, ...] = ()
+    profiles: tuple[str, ...] = ()
+
+    def output_channels(self) -> tuple[OutputInfo, ...]:
+        if self.outputs:
+            return self.outputs
+        return tuple(
+            OutputInfo(default_label("output", n), self.profile.gain_max_db) for n in range(self.profile.n_outputs)
+        )
+
+    def input_names(self) -> tuple[str, ...]:
+        return self.inputs or tuple(default_label("input", n) for n in range(self.profile.n_inputs))
 
 
 def preset_label(preset: int) -> str:
@@ -114,6 +180,16 @@ def volume_range(profile: DeviceProfile, floor_db: float) -> tuple[float, float]
     """Slider range: the profile's master range, raised to the configured floor so the HA slider is usable."""
     low = max(profile.master_volume_min_db, floor_db)
     return min(low, profile.master_volume_max_db), profile.master_volume_max_db
+
+
+def gain_range(profile: DeviceProfile, ceiling_db: float) -> tuple[float, float]:
+    """Per-output gain range: the profile minimum up to the channel's ceiling (Settings)."""
+    return profile.gain_min_db, max(profile.gain_min_db, min(ceiling_db, profile.gain_max_db))
+
+
+def delay_max_ms(profile: DeviceProfile) -> float:
+    """Largest delay HA may send, rounded down to the 0.01 ms step so it never exceeds the device maximum."""
+    return math.floor(profile.delay_max_ms * 100) / 100
 
 
 # --- discovery ----------------------------------------------------------------------------------------------------
@@ -154,13 +230,26 @@ def _nullable(field: str, *, true: str | None = None, false: str | None = None) 
     return f"{{% if {value} is none %}}None{{% elif {value} %}}{true}{{% else %}}{false}{{% endif %}}"
 
 
+def _item(
+    array: str, index: int, field: str | None = None, *, true: str | None = None, false: str | None = None
+) -> str:
+    """Like `_nullable` for ``value_json.<array>[index](.field)``, also rendering ``None`` when the array is missing
+    or too short (a state published before the preset state is loaded)."""
+    item = f"value_json.{array}[{index}]"
+    value = item if field is None else f"{item}.{field}"
+    guard = f"value_json.{array} is defined and value_json.{array} | length > {index} and {value} is not none"
+    if true is None:
+        return f"{{% if {guard} %}}{{{{ {value} }}}}{{% else %}}None{{% endif %}}"
+    return f"{{% if not ({guard}) %}}None{{% elif {value} %}}{true}{{% else %}}{false}{{% endif %}}"
+
+
 def discovery_configs(info: DeviceInfo, topics: Topics, *, volume_floor_db: float) -> dict[str, dict[str, Any]]:
     """Discovery topic -> retained config payload for the Phase 2 entities of one device."""
     serial = info.serial
     state = topics.state(serial)
 
-    def entity(object_id: str, name: str, *, needs_device: bool, **extra: Any) -> dict[str, Any]:
-        return {
+    def entity(object_id: str, name: str, *, needs_device: bool, stateless: bool = False, **extra: Any) -> dict:
+        config = {
             "name": name,
             "unique_id": f"minidsp_{serial}_{object_id}",
             "device": device_block(info),
@@ -171,6 +260,9 @@ def discovery_configs(info: DeviceInfo, topics: Topics, *, volume_floor_db: floa
             "qos": 1,
             **extra,
         }
+        if stateless:
+            del config["state_topic"]
+        return config
 
     low, high = volume_range(info.profile, volume_floor_db)
     configs = {
@@ -239,23 +331,115 @@ def discovery_configs(info: DeviceInfo, topics: Topics, *, volume_floor_db: floa
             entity_category="diagnostic",
             icon="mdi:sync",
         ),
+        topics.discovery("button", serial, PUSH_ALL): entity(
+            PUSH_ALL,
+            "Push all settings",
+            needs_device=True,
+            stateless=True,
+            command_topic=topics.command(serial, PUSH_ALL),
+            payload_press=PRESS,
+            entity_category="config",
+            icon="mdi:upload",
+        ),
     }
+    if info.profiles:
+        configs[topics.discovery("select", serial, PROFILE)] = entity(
+            PROFILE,
+            "Profile",
+            needs_device=True,
+            command_topic=topics.command(serial, PROFILE),
+            value_template=_nullable(PROFILE),
+            options=list(info.profiles),
+            icon="mdi:bookmark-music",
+        )
+
+    profile = info.profile
+    for n, output in enumerate(info.output_channels()):
+        gain_low, gain_high = gain_range(profile, output.gain_max_db)
+        gain, mute, delay = (output_entity(n, kind) for kind in OUTPUT_KINDS)
+        configs[topics.discovery("number", serial, gain)] = entity(
+            gain,
+            f"{output.name} gain",
+            needs_device=True,
+            command_topic=topics.command(serial, gain),
+            value_template=_item("outputs", n, "gain"),
+            min=gain_low,
+            max=gain_high,
+            step=GAIN_STEP_DB,
+            mode="slider",
+            unit_of_measurement="dB",
+            icon="mdi:knob",
+        )
+        configs[topics.discovery("switch", serial, mute)] = entity(
+            mute,
+            f"{output.name} mute",
+            needs_device=True,
+            command_topic=topics.command(serial, mute),
+            value_template=_item("outputs", n, "mute", true=ON, false=OFF),
+            payload_on=ON,
+            payload_off=OFF,
+            state_on=ON,
+            state_off=OFF,
+            icon="mdi:volume-off",
+        )
+        configs[topics.discovery("number", serial, delay)] = entity(
+            delay,
+            f"{output.name} delay",
+            needs_device=True,
+            command_topic=topics.command(serial, delay),
+            value_template=_item("outputs", n, "delay"),
+            min=0.0,
+            max=delay_max_ms(profile),
+            step=DELAY_STEP_MS,
+            mode="box",
+            unit_of_measurement="ms",
+            entity_category="config",
+            icon="mdi:timer-outline",
+        )
+
+    levels = topics.levels(serial)
+    channels = [("input", "i", n, name) for n, name in enumerate(info.input_names())]
+    channels += [("output", "o", n, o.name) for n, o in enumerate(info.output_channels())]
+    for kind, key, n, name in channels:
+        object_id = level_entity(kind, n)
+        configs[topics.discovery("sensor", serial, object_id)] = entity(
+            object_id,
+            f"{name} level",
+            needs_device=True,
+            state_topic=levels,
+            value_template=_item(key, n),
+            unit_of_measurement="dBFS",
+            state_class="measurement",
+            suggested_display_precision=1,
+            expire_after=LEVELS_EXPIRE_S,
+            enabled_by_default=False,
+            icon="mdi:waveform",
+        )
     return configs
 
 
-def removal_topics(serial: int, topics: Topics) -> list[str]:
-    """Discovery topics to clear (empty retained payload) to delete the device's entities from HA."""
-    return [
-        topics.discovery(component, serial, object_id)
-        for component, object_id in (
-            ("number", VOLUME),
-            ("switch", MUTE),
-            ("select", SOURCE),
-            ("select", PRESET),
-            ("binary_sensor", CONNECTED),
-            ("sensor", SYNC),
-        )
+def removal_topics(serial: int, topics: Topics, profile: DeviceProfile) -> list[str]:
+    """Every discovery topic the device can have, to clear (empty retained payload) when deleting its entities from
+    HA, or when an optional entity (the Profile select) goes away."""
+    entries = [
+        ("number", VOLUME),
+        ("switch", MUTE),
+        ("select", SOURCE),
+        ("select", PRESET),
+        ("binary_sensor", CONNECTED),
+        ("sensor", SYNC),
+        ("button", PUSH_ALL),
+        ("select", PROFILE),
     ]
+    for n in range(profile.n_outputs):
+        entries += [
+            ("number", output_entity(n, GAIN)),
+            ("switch", output_entity(n, MUTE)),
+            ("number", output_entity(n, DELAY)),
+        ]
+    entries += [("sensor", level_entity("input", n)) for n in range(profile.n_inputs)]
+    entries += [("sensor", level_entity("output", n)) for n in range(profile.n_outputs)]
+    return [topics.discovery(component, serial, object_id) for component, object_id in entries]
 
 
 # --- state --------------------------------------------------------------------------------------------------------
@@ -287,7 +471,11 @@ def build_state(
     preset: int | None,
     preset_switching: int | None = None,
     sync_counts: Mapping[str, int] | None = None,
+    outputs: Sequence[Mapping[str, Any]] = (),
+    profile: str | None = None,
 ) -> dict[str, Any]:
+    """The retained state document. ``outputs`` are the active preset's per-output ``gain`` / ``mute`` / ``delay``
+    (None when unknown); ``profile`` is the saved profile the active preset currently matches, if any."""
     return {
         "connected": connected,
         "state": state,
@@ -299,7 +487,26 @@ def build_state(
         "preset_switching": preset_label(preset_switching) if preset_switching is not None else None,
         "sync": overall_sync(sync_counts),
         "sync_counts": {s: int((sync_counts or {}).get(s, 0)) for s in SYNC_STATES},
+        "outputs": [{k: o.get(k) for k in (GAIN, MUTE, DELAY)} for o in outputs],
+        "profile": profile,
     }
+
+
+def output_state(gain: float | None, mute: bool | None, delay: float | None) -> dict[str, Any]:
+    return {GAIN: gain, MUTE: mute, DELAY: None if delay is None else round(delay, 3)}
+
+
+def build_levels(levels: Mapping[str, Any]) -> dict[str, list[float | None]]:
+    """``{"i": [...], "o": [...]}`` dBFS from a bus ``levels`` event, rounded to 0.1 dB (non-finite -> null)."""
+
+    def clean(values: Any) -> list[float | None]:
+        out: list[float | None] = []
+        for v in values if isinstance(values, list | tuple) else ():
+            ok = isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v)
+            out.append(round(float(v), 1) if ok else None)
+        return out
+
+    return {"i": clean(levels.get("i")), "o": clean(levels.get("o"))}
 
 
 def dumps(doc: Mapping[str, Any]) -> str:
@@ -310,17 +517,45 @@ def dumps(doc: Mapping[str, Any]) -> str:
 # --- commands -----------------------------------------------------------------------------------------------------
 
 
-def parse_volume(payload: str, profile: DeviceProfile, floor_db: float) -> float:
+def parse_number(payload: str, what: str, low: float, high: float, unit: str) -> float:
+    """A finite number inside ``low..high``; anything else is rejected (never clamped)."""
     try:
         value = float(payload.strip())
     except ValueError:
-        raise CommandError(f"volume {payload!r} is not a number") from None
+        raise CommandError(f"{what} {payload!r} is not a number") from None
     if not math.isfinite(value):
-        raise CommandError(f"volume {payload!r} is not a finite number")
-    low, high = volume_range(profile, floor_db)
+        raise CommandError(f"{what} {payload!r} is not a finite number")
     if not low <= value <= high:
-        raise CommandError(f"volume {value:g} dB outside {low:g}..{high:g}")
+        raise CommandError(f"{what} {value:g} {unit} outside {low:g}..{high:g}")
     return value
+
+
+def parse_volume(payload: str, profile: DeviceProfile, floor_db: float) -> float:
+    return parse_number(payload, "volume", *volume_range(profile, floor_db), "dB")
+
+
+def parse_gain(payload: str, profile: DeviceProfile, ceiling_db: float) -> float:
+    return parse_number(payload, "gain", *gain_range(profile, ceiling_db), "dB")
+
+
+def parse_delay(payload: str, profile: DeviceProfile) -> float:
+    return parse_number(payload, "delay", 0.0, profile.delay_max_ms, "ms")
+
+
+def parse_press(payload: str) -> None:
+    if payload.strip().upper() != PRESS:
+        raise CommandError(f"expected {PRESS}, got {payload[:32]!r}")
+
+
+def parse_profile(payload: str, names: Sequence[str]) -> str:
+    """One of the saved profile names: exact, else a unique case-insensitive match."""
+    text = payload.strip()
+    if text in names:
+        return text
+    matches = [n for n in names if n.casefold() == text.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    raise CommandError(f"unknown profile {text!r}")
 
 
 _TRUE = {"on", "true", "1"}

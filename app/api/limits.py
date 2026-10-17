@@ -21,6 +21,9 @@ JSON_BODY_LIMIT = 1 << 20  # a 100k-character REW text is at most ~600 kB as JSO
 BODY_LIMITS: tuple[tuple[re.Pattern[str], int], ...] = (
     (re.compile(r"/devices/[^/]+/presets/[^/]+/outputs/[^/]+/fir$"), MAX_UPLOAD_BYTES + MULTIPART_SLACK),
     (re.compile(r"/import/rew$"), JSON_BODY_LIMIT),
+    # The first match wins, so the multipart UI upload comes before the JSON API route its pattern also matches.
+    (re.compile(r"/ui/profiles/import$"), (1 << 20) + MULTIPART_SLACK),
+    (re.compile(r"/profiles/import$"), JSON_BODY_LIMIT),
 )
 
 

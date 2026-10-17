@@ -1,7 +1,7 @@
 {#- Home Assistant bridge status and the "Remove from HA" action. Rendered with ``mqtt``. -#}
 <div id="settings-mqtt">
   {% if not mqtt.mqtt_enabled %}
-    <p class="muted">Off. Set <code>MQTT_ENABLED=true</code> and <code>MQTT_HOST</code> to publish the master controls to
+    <p class="muted">Off. Set <code>MQTT_ENABLED=true</code> and <code>MQTT_HOST</code> to publish the master and output controls and the profiles to
       Home Assistant through MQTT discovery.</p>
   {% else %}
     <p>

@@ -1,5 +1,6 @@
 """FastAPI dependencies shared by the JSON API and the HTML pages."""
 
+from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
@@ -51,3 +52,13 @@ def require_same_origin(request: Request) -> None:
     hosts = {request.headers.get("host"), request.headers.get("x-forwarded-host")} - {None}
     if origin == "null" or urlsplit(origin).netloc not in hosts:
         raise HTTPException(status_code=403, detail="cross-origin request refused")
+
+
+async def refresh_mqtt_after_write(request: Request) -> AsyncIterator[None]:
+    """After a successful state-changing request, let the MQTT bridge re-read profiles and channel names right away
+    (it would otherwise notice within its periodic refresh). Only what actually changed is re-published."""
+    yield
+    if request.method not in _SAFE_METHODS:
+        bridge = getattr(request.app.state, "mqtt", None)
+        if bridge is not None:
+            bridge.refresh()

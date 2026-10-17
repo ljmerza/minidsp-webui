@@ -20,12 +20,12 @@ import aiomqtt
 import pytest
 import respx
 
-from app.bus import Bus
+from app.bus import LEVELS, Bus
 from app.config import Settings
 from app.daemon.client import DaemonClient
 from app.model.device_profile import M2X4HD
 from app.model.master import DaemonDevice, MasterStatus
-from app.mqtt import MqttBridge
+from app.mqtt import MqttBridge, remove_from_home_assistant
 from app.sync.session import DeviceSession, SessionManager, SessionState
 
 pytestmark = pytest.mark.integration
@@ -39,6 +39,8 @@ DEVICE_JSON = {
     "version": {"hw_id": 10, "dsp_version": 100, "serial": SERIAL, "fw_major": 1, "fw_minor": 75},
 }
 MASTER_JSON = {"preset": 0, "source": "Analog", "volume": -20.0, "mute": False, "dirac": False}
+
+N_ENTITIES = 25  # master/health (6) + push-all + 4 outputs x (gain, mute, delay) + 6 level sensors
 
 _ids = itertools.count()
 
@@ -161,6 +163,7 @@ async def stack(broker_port, prefixes, daemon) -> AsyncIterator[tuple[MqttBridge
         mqtt_discovery_prefix=discovery,
         mqtt_volume_floor_db=-80.0,
         preset_switch_timeout_s=2.0,
+        write_coalesce_ms=5,
     )
     bus = Bus()
     client = DaemonClient(DAEMON_URL, timeout=1.0, preset_timeout=2.0)
@@ -178,13 +181,16 @@ async def stack(broker_port, prefixes, daemon) -> AsyncIterator[tuple[MqttBridge
     session.monitor.connected = True
     session.monitor.update_master(MasterStatus.model_validate(MASTER_JSON))
     manager.sessions[SERIAL] = session
-    bridge = MqttBridge(manager, bus, settings, backoff_min_s=0.2, backoff_max_s=1.0)
+    daemon.get("/devices/0").respond(json={"master": MASTER_JSON, "input_levels": [], "output_levels": []})
+    session.writer.start()
+    bridge = MqttBridge(manager, bus, settings, backoff_min_s=0.2, backoff_max_s=1.0, levels=True)
     bridge.start()
     try:
         await asyncio.wait_for(bridge.connected.wait(), 10)
         yield bridge, session
     finally:
         await bridge.stop()
+        await session.stop()
         await client.aclose()
 
 
@@ -194,7 +200,7 @@ async def test_discovery_state_and_availability_are_retained(stack, broker_port,
     # A client connecting afterwards gets everything from the broker's retained store.
     async with Observer(broker_port, f"{base}/#", f"{discovery}/#") as late:
         await until(lambda: late.latest(f"{base}/{SERIAL}/state") is not None)
-        await until(lambda: len([t for t, *_ in late.messages if t.startswith(f"{discovery}/")]) == 6)
+        await until(lambda: len([t for t, *_ in late.messages if t.startswith(f"{discovery}/")]) == N_ENTITIES)
         assert all(retain for *_, retain in late.messages)
         assert late.latest(f"{base}/availability") == "online"
         assert late.latest(f"{base}/{SERIAL}/availability") == "online"
@@ -241,7 +247,7 @@ async def test_lwt_on_connection_loss_then_reconnect(stack, broker_port, prefixe
         paho.socket().shutdown(socket.SHUT_RDWR)  # drop the TCP connection without an MQTT DISCONNECT
         await until(lambda: obs.latest(f"{base}/availability") == "offline")  # the broker fired the LWT
         await until(lambda: obs.latest(f"{base}/availability") == "online", timeout=10)  # reconnected
-        assert bridge.connected.is_set()
+        await until(bridge.connected.is_set)  # set once the devices are published, just after "online"
 
 
 async def test_retained_command_is_not_replayed_on_reconnect(stack, broker_port, prefixes, daemon):
@@ -267,7 +273,8 @@ async def test_retained_command_is_not_replayed_on_reconnect(stack, broker_port,
 async def test_clean_stop_and_remove(stack, broker_port, prefixes):
     bridge, _ = stack
     base, discovery = prefixes
-    assert await bridge.remove_device(SERIAL)
+    result = await remove_from_home_assistant(bridge)
+    assert result.ok and result.removed == [SERIAL]
     await bridge.stop()
     async with Observer(broker_port, f"{base}/#", f"{discovery}/#") as late:
         await until(lambda: late.latest(f"{base}/availability") is not None)
@@ -275,3 +282,68 @@ async def test_clean_stop_and_remove(stack, broker_port, prefixes):
         assert late.latest(f"{base}/availability") == "offline"
         assert not [t for t, *_ in late.messages if t.startswith(f"{discovery}/")]
         assert late.latest(f"{base}/{SERIAL}/state") is None
+
+
+async def test_phase5_discovery(stack, broker_port, prefixes):
+    _, discovery = prefixes
+    prefix = f"{discovery}/{{}}/minidsp_{SERIAL}/{{}}/config"
+    async with Observer(broker_port, f"{discovery}/#") as late:
+        await until(lambda: len(late.messages) == N_ENTITIES)
+        gain = json.loads(late.latest(prefix.format("number", "output_1_gain")))
+        assert (gain["min"], gain["max"], gain["name"]) == (-72.0, 12.0, "Out 1 gain")
+        delay = json.loads(late.latest(prefix.format("number", "output_4_delay")))
+        assert delay["entity_category"] == "config" and delay["step"] == 0.01
+        assert json.loads(late.latest(prefix.format("switch", "output_2_mute")))["payload_on"] == "ON"
+        assert json.loads(late.latest(prefix.format("button", "push_all")))["payload_press"] == "PRESS"
+        level = json.loads(late.latest(prefix.format("sensor", "output_3_level")))
+        assert level["enabled_by_default"] is False and level["state_class"] == "measurement"
+        assert late.latest(prefix.format("select", "profile")) is None  # no saved profiles
+
+
+async def test_output_commands_round_trip(stack, broker_port, prefixes, daemon):
+    _, session = stack
+    base, _ = prefixes
+    state_topic = f"{base}/{SERIAL}/state"
+    route = daemon.post("/devices/0/config").respond(200, text="")
+    async with Observer(broker_port, f"{base}/#") as obs:
+        await until(lambda: obs.latest(state_topic) is not None)
+        await obs.publish(f"{base}/{SERIAL}/cmd/output_2_gain", "-4.5")
+        await until(lambda: json.loads(obs.latest(state_topic))["outputs"][1]["gain"] == -4.5)
+        await until(lambda: route.call_count == 1)
+        assert json.loads(route.calls.last.request.content) == {"outputs": [{"index": 1, "gain": -4.5}]}
+
+        await obs.publish(f"{base}/{SERIAL}/cmd/output_2_delay", "1.5")
+        await until(lambda: json.loads(obs.latest(state_topic))["outputs"][1]["delay"] == 1.5)
+        await until(lambda: route.call_count == 2)
+        assert json.loads(route.calls.last.request.content) == {
+            "outputs": [{"index": 1, "delay": {"secs": 0, "nanos": 1_500_000}}]
+        }
+
+        # A big raise is rejected (no write) and the unchanged state is re-published so HA snaps back.
+        seen = obs.count(state_topic)
+        await obs.publish(f"{base}/{SERIAL}/cmd/output_2_gain", "6")
+        await until(lambda: obs.count(state_topic) > seen)
+        await asyncio.sleep(0.1)
+        assert route.call_count == 2
+        assert json.loads(obs.latest(state_topic))["outputs"][1]["gain"] == -4.5
+        assert session.desired(0).outputs[1].gain_db == -4.5
+
+
+async def test_levels_are_throttled_and_not_retained(stack, broker_port, prefixes):
+    bridge, _ = stack
+    base, _ = prefixes
+    topic = f"{base}/{SERIAL}/levels"
+    async with Observer(broker_port, topic) as obs:
+        started = time.monotonic()
+        for k in range(25):  # 10 Hz for 2.5 s
+            bridge.bus.publish(LEVELS, {"i": [-20.0 - k, -30.0], "o": [-1.0, -2.0, -3.0, -4.0]}, serial=SERIAL)
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(1.1)
+        elapsed = time.monotonic() - started
+        received = [(payload, retain) for t, payload, retain in obs.messages if t == topic]
+        assert 2 <= len(received) <= elapsed + 1
+        assert not any(retain for _, retain in received)
+        assert json.loads(received[-1][0])["i"] == [-44.0, -30.0]
+    async with Observer(broker_port, topic) as late:
+        await asyncio.sleep(0.3)
+        assert late.latest(topic) is None  # nothing retained

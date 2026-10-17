@@ -17,9 +17,12 @@ from app.config import Settings, get_settings
 from app.daemon.client import DaemonClient
 from app.mqtt import create_bridge
 from app.state import Database, Repo
+from app.sync.backup import apply_staged_restore, start_nightly_backups
 from app.sync.fir import restore_fir_capability
 from app.sync.session import SessionManager
+from app.web import backup as backup_ui
 from app.web import filters as filters_ui
+from app.web import profiles as profiles_ui
 from app.web import state_ui
 from app.web import system as system_ui
 from app.web.settings_ui import apply_stored_runtime_settings
@@ -62,6 +65,10 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
             timeout=settings.daemon_timeout_s,
             preset_timeout=settings.preset_switch_timeout_s,
         )
+        try:
+            await asyncio.to_thread(apply_staged_restore, settings.db_path)  # a restore staged on the Settings page
+        except Exception:
+            log.exception("staged database restore failed")
         db = await _open_db(settings.db_path)
         repo = Repo(db) if db else None
         if repo:
@@ -79,13 +86,15 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         if mqtt:
             mqtt.start()
         maintenance = asyncio.create_task(_maintenance(repo), name="maintenance") if repo else None
+        backups = start_nightly_backups(settings.db_path) if db else None
         try:
             yield
         finally:
-            if maintenance:
-                maintenance.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await maintenance
+            for task in (maintenance, backups):
+                if task:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
             if mqtt:
                 await mqtt.stop()  # publishes "offline" while the sessions still exist
             await manager.stop()  # commits pending edits and flushes each session's persister
@@ -103,6 +112,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.include_router(state_ui.router)
     app.include_router(filters_ui.router)
     app.include_router(system_ui.router)
+    app.include_router(profiles_ui.router)
+    app.include_router(backup_ui.router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

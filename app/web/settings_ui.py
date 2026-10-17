@@ -18,9 +18,11 @@ from starlette.datastructures import FormData
 
 from app.api.deps import require_same_origin
 from app.config import Settings
+from app.mqtt import remove_from_home_assistant
 from app.state import Repo
 from app.sync import fir as fir_svc
 from app.sync.session import DesiredValidationError, DeviceSession, SessionManager
+from app.web.backup import backup_context
 from app.web.ui_common import (
     KINDS,
     channel_color,
@@ -166,7 +168,12 @@ async def settings_page(request: Request, serial: int | None = None) -> Response
     if serial is not None and session is None:
         return not_found_page(request, serial)
     ctx = edit_page_context(request, session, "Settings")
-    ctx.update(runtime=runtime_context(request), mqtt=mqtt_context(request, session), fir=fir_context(request))
+    ctx.update(
+        runtime=runtime_context(request),
+        mqtt=mqtt_context(request, session),
+        fir=fir_context(request),
+        backup=backup_context(request, session),
+    )
     if session is not None:
         error = await load_state(session)
         if error:
@@ -177,6 +184,13 @@ async def settings_page(request: Request, serial: int | None = None) -> Response
 
 
 # --- channel names / colours / ceilings -------------------------------------------------------------------------------
+
+
+def _refresh_mqtt(request: Request, serial: int) -> None:
+    """Names and ceilings are part of the Home Assistant entities; republish them now instead of within a minute."""
+    bridge = getattr(request.app.state, "mqtt", None)
+    if bridge is not None:
+        bridge.refresh(serial)
 
 
 def _form_text(form: FormData, name: str) -> str:
@@ -235,6 +249,7 @@ async def save_channels(request: Request, serial: int) -> Response:
                 await _save_channel(session, kind, idx, form)
             except DesiredValidationError as exc:
                 errors.extend(exc.problems)
+    _refresh_mqtt(request, serial)
     ctx = {"c": channels_context(request, session, errors=errors, saved=not errors)}
     if errors:
         return render(request, "partials/settings_channels.html", ctx, status_code=422, error="; ".join(errors))
@@ -270,6 +285,8 @@ async def rename_channel(request: Request, serial: int, kind: str, idx: int) -> 
                 )
         except DesiredValidationError as exc:
             error = str(exc)
+    if not error:
+        _refresh_mqtt(request, serial)
     meta = session.channel_meta.get((kind, idx))
     ctx = {
         "channel": {
@@ -371,14 +388,12 @@ async def mqtt_remove(request: Request, serial: int) -> Response:
     session = manager_of(request).get(serial)
     if session is None:
         return PlainTextResponse(f"Unknown device {serial}", status_code=404)
-    bridge = getattr(request.app.state, "mqtt", None)
     ctx = mqtt_context(request, session)
-    removed = bool(bridge is not None and await bridge.remove_device(serial))
-    if removed:
-        session.log_event("info", "removed the device's entities from Home Assistant", kind="mqtt")
+    result = await remove_from_home_assistant(getattr(request.app.state, "mqtt", None), serial)
+    if result.ok:
         ctx["mqtt_message"] = "Removed. The entities come back after the next MQTT reconnect or app restart."
         return render(request, "partials/settings_mqtt.html", {"mqtt": ctx})
-    message = "MQTT is disabled or not connected; nothing was removed."
+    message = f"Nothing was removed: {result.message}."
     ctx["mqtt_message"] = message
     return render(request, "partials/settings_mqtt.html", {"mqtt": ctx}, status_code=409, error=message)
 

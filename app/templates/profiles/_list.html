@@ -1,0 +1,75 @@
+{#- The saved profiles, rendered with ``l`` (app/web/profiles.py list_context). Re-rendered by every list action. -#}
+{% if l.message %}<p class="profile-msg" role="status">{{ l.message }}</p>{% endif %}
+{% if l.profiles_error %}
+  <p class="muted" role="alert">{{ l.profiles_error }}</p>
+{% elif not l.profiles %}
+  <p class="muted" data-profile-empty>No profiles yet. Save a preset as a profile, or import one.</p>
+{% else %}
+<ul class="profile-list">
+  {% for p in l.profiles %}
+  <li class="profile-item" data-profile-id="{{ p.id }}" data-profile-name="{{ p.name }}">
+    <div class="profile-head">
+      <h3>{{ p.name }}</h3>
+      {% if p.product_name %}<span class="muted">{{ p.product_name }}</span>{% endif %}
+    </div>
+    {% if p.description %}<p class="profile-desc">{{ p.description }}</p>{% endif %}
+    <p class="profile-meta">Created <time datetime="{{ p.created_at }}">{{ p.created_text }}</time>
+      {%- if p.edited %} · edited <time datetime="{{ p.updated_at }}">{{ p.updated_text }}</time>{% endif %}</p>
+    {% if p.loaded or p.matches %}
+    <ul class="profile-slots" aria-label="Preset slots">
+      {% for s in p.loaded %}
+        <li class="slot-badge {{ 'is-same' if s.same else 'is-edited' }}"
+            title="Loaded into preset {{ s.preset + 1 }} {{ s.at_text }}{{ '; unchanged since' if s.same else '; edited since' }}">
+          <span aria-hidden="true">{{ "✓" if s.same else "✎" }}</span> Preset {{ s.preset + 1 }}
+          <span class="muted">· loaded <time datetime="{{ s.at }}">{{ s.at_text }}</time>{{ "" if s.same else " · edited since" }}</span>
+        </li>
+      {% endfor %}
+      {% for m in p.matches %}
+        <li class="slot-badge is-same" title="Preset {{ m + 1 }} has exactly these settings">
+          <span aria-hidden="true">=</span> Preset {{ m + 1 }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if not p.valid %}<p class="field-error">This profile's document is not valid any more and can't be loaded.</p>
+    {% elif not p.model_ok %}<p class="field-error">This profile is for a {{ p.product_name }} and can't be loaded into this device.</p>{% endif %}
+
+    <div class="profile-actions" x-data="{ target: '{{ l.active_preset if l.active_preset is not none else 0 }}' }">
+      {% if p.loadable %}
+        <label class="visually-hidden" for="load-{{ p.id }}">Load {{ p.name }} into</label>
+        <select id="load-{{ p.id }}" x-model="target">
+          {% for o in l.preset_options %}
+            <option value="{{ o.index }}"{% if o.active %} selected{% endif %}>Preset {{ o.index + 1 }}{% if o.active %} (active){% endif %}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn-small" @click="load({{ p.id }}, Number(target), false)"
+                title="Load into the preset; an inactive preset is staged until it becomes active">Load</button>
+        <button type="button" class="btn-small" x-show="Number(target) !== {{ l.active_preset if l.active_preset is not none else -1 }}"
+                @click="load({{ p.id }}, Number(target), true)"
+                title="Load into the preset, switch the device to it and apply it">Load &amp; switch</button>
+        <span class="htmx-indicator spinner" aria-hidden="true" x-show="busy === {{ p.id }}" x-cloak></span>
+        <span class="sep"></span>
+      {% endif %}
+      {% if p.valid %}
+        <button type="button" class="btn-small" @click="diffWith('profile:{{ p.id }}')">Compare</button>
+      {% endif %}
+      <button type="button" class="btn-small" hx-post="{{ p.duplicate_url }}" hx-target="#profile-list" hx-disabled-elt="this">Duplicate</button>
+      <a class="btn-link btn-small" href="{{ p.export_url }}" download title="The profile as JSON, for importing here">Export</a>
+      {% if p.valid %}
+        <a class="btn-link btn-small" href="{{ p.script_url }}" download
+           title="The profile as a minidsp -f command script (writes to the device's active preset)">Script</a>
+      {% endif %}
+      <button type="button" class="btn-small btn-danger" hx-post="{{ p.delete_url }}" hx-target="#profile-list"
+              hx-confirm="Delete the profile “{{ p.name }}”? Presets it was loaded into keep their settings." hx-disabled-elt="this">Delete</button>
+    </div>
+    <details class="profile-rename">
+      <summary>Rename / describe</summary>
+      <form hx-post="{{ p.rename_url }}" hx-target="#profile-list" hx-disabled-elt="find button">
+        <label>Name <input type="text" name="name" value="{{ p.name }}" required maxlength="80" autocomplete="off"></label>
+        <label>Description <input type="text" name="description" value="{{ p.description or '' }}" maxlength="500" autocomplete="off"></label>
+        <div><button type="submit" class="btn-small">Save</button></div>
+      </form>
+    </details>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

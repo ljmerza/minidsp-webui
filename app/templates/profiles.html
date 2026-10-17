@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{#- Profiles page (docs 05 §7): saved profiles with save / load / diff / duplicate / rename / delete / export / import,
+    and a History tab with each preset's revision timeline. Actions go to /ui/profiles/… (see app/web/profiles.py). -#}
+
+{% block head %}
+  <style>
+    .profiles-page .tabs { margin-bottom: 0; }
+    .profiles-page .tab-panel { margin-top: 0; }
+    .profile-forms { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+    .profile-forms form { display: flex; flex-direction: column; gap: 0.5rem; }
+    .profile-forms label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; }
+    .profile-forms .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .profile-list-wrap { margin-top: calc(var(--gap) * 1.5); }
+    .profile-list { display: grid; gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+    .profile-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.7rem 0.85rem; background: var(--bg); }
+    .profile-item h3 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+    .profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.75rem; }
+    .profile-desc { margin: 0.3rem 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+    .profile-meta { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
+    .profile-slots { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.45rem 0 0; padding: 0; list-style: none; }
+    .slot-badge { border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.55rem; font-size: 0.8rem; }
+    .slot-badge.is-same { border-color: var(--ok); color: var(--ok); }
+    .slot-badge.is-edited { border-color: var(--warn); color: var(--warn); }
+    .profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
+    .profile-actions select { min-height: 2rem; }
+    .profile-actions .sep { flex-basis: 100%; height: 0; }
+    .profiles-page a.btn-link { display: inline-flex; align-items: center; border: 1px solid var(--border);
+      border-radius: var(--radius); background: var(--bg-input); color: inherit; text-decoration: none; }
+    .profiles-page a.btn-link:hover { border-color: var(--accent); }
+    .profiles-page .btn-danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+    .profile-rename { margin-top: 0.5rem; }
+    .profile-rename summary { cursor: pointer; color: var(--text-muted); font-size: 0.85rem; }
+    .profile-rename form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; max-width: 32rem; }
+    .profile-forms h3 { margin: 0; font-size: 0.95rem; }
+    .profile-msg { margin: 0 0 0.6rem; color: var(--ok); }
+    .diff-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; }
+    .diff-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9rem; min-width: 0; }
+    .diff-form select { max-width: 100%; }
+    .diff-table td.val { width: 32%; }
+    .diff-table .is-a { color: var(--text-muted); }
+    .history-tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: var(--gap); }
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border); }
+    .timeline .rev { font-family: var(--mono); font-weight: 600; grid-row: span 2; min-width: 3rem; }
+    .timeline .what { overflow-wrap: anywhere; }
+    .timeline .when { font-size: 0.8rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; align-items: center; }
+    .timeline .is-current .rev { color: var(--accent); }
+    .timeline .src { border: 1px solid var(--border); border-radius: 999px; padding: 0 0.45rem; }
+    .timeline .acts { display: inline-flex; gap: 0.35rem; }
+  </style>
+{% endblock %}
+
+{% block content %}
+<h1>Profiles</h1>
+<div class="profiles-page" x-data='profilesPage({{ profiles_cfg|tojson }})'>
+{% if page_error %}
+  {% include "partials/edit_guard.html" %}
+{% elif not repo_ok %}
+  <section class="card empty-state" role="alert">
+    <h2>Profiles unavailable</h2>
+    <p>The state database is not open, so profiles and history can't be stored. Master controls still work.</p>
+  </section>
+{% else %}
+  <nav class="tabs" aria-label="Profiles sections">
+    {% for t in tabs %}
+      <a class="tab{% if t.key == tab %} is-current{% endif %}" href="{{ t.url }}"
+         {%- if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if tab == "profiles" %}
+  <section class="card tab-panel" aria-labelledby="profiles-title">
+    <div class="card-head"><h2 id="profiles-title">Saved profiles</h2></div>
+    <div class="profile-forms">
+      {% if session is not none and not state_error %}
+      <form hx-post="{{ root }}/ui/profiles/save{% if serial is not none %}?serial={{ serial }}{% endif %}"
+            hx-target="#profile-list" hx-disabled-elt="find button"
+            hx-on::after-request="if (event.detail.successful) this.reset()">
+        <h3>Save current preset as a profile</h3>
+        <label>Preset
+          <select name="preset">
+            {% for o in preset_options %}
+              <option value="{{ o.index }}"{% if o.index == preset %} selected{% endif %}>{{ o.label }}{% if o.active %} (active){% endif %}</option>
+            {% endfor %}
+          </select></label>
+        <label>Name <input type="text" name="name" required maxlength="80" placeholder="Movies" autocomplete="off"></label>
+        <label>Description <input type="text" name="description" maxlength="500" placeholder="optional" autocomplete="off"></label>
+        <div class="row"><button type="submit">Save profile<span class="htmx-indicator spinner" aria-hidden="true"></span></button></div>
+      </form>
+      {% endif %}
+      <form hx-post="{{ root }}/ui/profiles/import{% if serial is not none %}?serial={{ serial }}{% endif %}"
+            hx-target="#profile-list" hx-encoding="multipart/form-data" hx-disabled-elt="find button"
+            hx-on::after-request="if (event.detail.successful) this.reset()">
+        <h3>Import a profile</h3>
+        <label>Profile file (.json from Export, or a <code>minidsp -f</code> script)
+          <input type="file" name="file" accept=".json,.txt,application/json,text/plain" required></label>
+        <div class="row"><button type="submit">Import<span class="htmx-indicator spinner" aria-hidden="true"></span></button></div>
+        <p class="hint">A whole preset as JSON, or a command script applied to the defaults and named after the file. Whole-app backups are on the Settings page.</p>
+      </form>
+    </div>
+    {% if state_error %}<p class="hint">{{ state_error }}</p>{% endif %}
+    <div id="profile-list" class="profile-list-wrap" hx-get="{{ list.list_url }}"
+         hx-trigger="mdsp-profiles-reload from:body" hx-swap="innerHTML">
+      {% with l = list %}{% include "profiles/_list.html" %}{% endwith %}
+    </div>
+  </section>
+  {% else %}
+  <section class="card tab-panel" aria-labelledby="history-title">
+    <div class="card-head"><h2 id="history-title">History</h2></div>
+    {% if session is none or state_error %}
+      {% include "partials/edit_guard.html" %}
+    {% else %}
+      <nav class="history-tabs" aria-label="Preset">
+        {% for t in history_tabs %}
+          <a class="btn-link btn-small{% if t.selected %} is-current{% endif %}" href="{{ t.url }}"{% if t.selected %} aria-current="page"{% endif %}>
+            {{- t.label }}{% if t.active %} <span class="preset-live" aria-hidden="true">&#9679;</span><span class="visually-hidden"> (active)</span>{% endif -%}
+          </a>
+        {% endfor %}
+      </nav>
+      <div id="history" hx-get="{{ history.history_url }}" hx-trigger="sse:desired delay:1000ms, mdsp-profiles-reload from:body"
+           hx-swap="innerHTML">
+        {% with h = history %}{% include "profiles/_history.html" %}{% endwith %}
+      </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="card" id="diff" aria-labelledby="diff-title">
+    <div class="card-head"><h2 id="diff-title">Compare</h2></div>
+    {% if diff.sources or diff.extra %}
+    <form class="diff-form" x-ref="diffForm" hx-get="{{ diff.url }}" hx-target="#diff-result"
+          hx-trigger="submit, change{% if diff.a and diff.b %}, load{% endif %}">
+      <label>From
+        <select name="a" x-ref="diffA">
+          {% for s in diff.extra %}<option value="{{ s }}"{% if s == diff.a %} selected{% endif %}>{{ s }}</option>{% endfor %}
+          {% for o in diff.sources %}<option value="{{ o.value }}"{% if o.value == diff.a %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+        </select></label>
+      <label>To
+        <select name="b" x-ref="diffB">
+          {% for s in diff.extra %}<option value="{{ s }}"{% if s == diff.b %} selected{% endif %}>{{ s }}</option>{% endfor %}
+          {% for o in diff.sources %}<option value="{{ o.value }}"{% if o.value == diff.b %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+        </select></label>
+      <button type="submit" class="btn-small">Compare</button>
+    </form>
+    <div id="diff-result" aria-live="polite">
+      {% if not (diff.a and diff.b) %}<p class="hint">Pick a profile, a preset or a revision on each side.</p>{% endif %}
+    </div>
+    {% else %}
+      <p class="muted">Nothing to compare yet: save a profile first.</p>
+    {% endif %}
+  </section>
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/profiles.js?v={{ asset_version }}"></script>
+{% endblock %}

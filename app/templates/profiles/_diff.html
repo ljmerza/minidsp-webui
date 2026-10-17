@@ -1,0 +1,25 @@
+{#- Field diff of two sources (profile, preset desired state, history revision). Rendered with ``a``/``b``
+    (svc.DiffSide), ``rows`` (label, a, b) and ``error``. -#}
+{% if error %}
+  <p class="field-error" role="alert">{{ error }}</p>
+{% elif same %}
+  <p class="muted">Both sides are the same thing: pick two different ones.</p>
+{% elif not rows %}
+  <p><span aria-hidden="true">&#10003;</span> {{ a.label }} and {{ b.label }} are identical.</p>
+{% else %}
+  <p>{{ rows|length }} difference{{ "s" if rows|length != 1 }} from <strong>{{ a.label }}</strong> to <strong>{{ b.label }}</strong>.</p>
+  <div class="table-scroll">
+    <table class="data-table diff-table">
+      <thead><tr><th scope="col">Setting</th><th scope="col">{{ a.label }}</th><th scope="col">{{ b.label }}</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <th scope="row" title="{{ r.path }}">{{ r.label }}</th>
+            <td class="val is-a">{{ r.a }}</td>
+            <td class="val">{{ r.b }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

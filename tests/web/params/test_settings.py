@@ -121,7 +121,8 @@ async def test_stored_runtime_settings_are_ignored_when_broken(ctx):
 
 
 class FakeBridge:
-    def __init__(self, connected: bool) -> None:
+    def __init__(self, connected: bool, manager=None) -> None:
+        self.manager = manager
         self.connected = asyncio.Event()
         if connected:
             self.connected.set()
@@ -138,7 +139,7 @@ class FakeBridge:
 async def test_remove_from_home_assistant(ctx):
     ctx.settings.mqtt_enabled = True
     ctx.settings.mqtt_host = "broker.invalid"
-    bridge = FakeBridge(connected=True)
+    bridge = FakeBridge(connected=True, manager=ctx.app.state.manager)
     ctx.app.state.mqtt = bridge
     html = (await ctx.http.get("/settings")).text
     assert "Remove from Home Assistant" in html and "connected" in html
