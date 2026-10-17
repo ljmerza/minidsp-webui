@@ -19,6 +19,19 @@ async def test_list_devices(client, daemon):
     assert devices[1].version.fw == "1.75"
 
 
+async def test_daemon_version_from_openapi(client, daemon):
+    route = daemon.get("/openapi.json").respond(
+        json={"openapi": "3.0.0", "info": {"title": "minidsp-rs", "version": "0.1.12"}}
+    )
+    assert await client.daemon_version() == "0.1.12"
+    for body in ({"info": {}}, {"info": {"version": " "}}, [], {"info": "0.1"}):
+        route.respond(json=body)
+        assert await client.daemon_version() is None
+    route.respond(404, text="not found")
+    with pytest.raises(DaemonRejected):
+        await client.daemon_version()
+
+
 async def test_get_status_full_and_levels(client, daemon):
     daemon.get("/devices/0").respond(
         json={"master": MASTER_JSON, "input_levels": [-40.0, -120.0], "output_levels": [-50.0, -60.0, -120.0, -120.0]}

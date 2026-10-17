@@ -2,6 +2,7 @@
 // group-delay modes, a hover readout of f, dB and phase for every trace, and fixed per-channel colours.
 //
 //   const plot = window.mdsp.graph.create(el, { view: 'sub', mode: 'magnitude' });
+//   (view: 'sub' | 'full' | [fMin, fMax]; dbRange: the magnitude scale, by default ± Settings' default graph range)
 //   plot.setTraces([{ id: 'o1', label: 'Shakers', color: '#f0b429', response }, ...]);
 //
 // A trace's `response` is the server's Response.to_dict() or a window.mdsp.dsp response (same keys: freqs,
@@ -251,6 +252,22 @@
     return [...(VIEWS[view] || VIEWS[DEFAULT_VIEW])];
   }
 
+  // Settings' default graph range (docs 05 §9), rendered on <body data-graph-view data-graph-db>. No view there means
+  // every page keeps its own default.
+  function pageDefaults() {
+    const ds = (typeof document !== 'undefined' && document.body && document.body.dataset) || {};
+    const db = Number(ds.graphDb);
+    return {
+      view: VIEWS[ds.graphView] ? ds.graphView : null,
+      dbRange: ds.graphDb && Number.isFinite(db) && db > 0 ? [-db, db] : [...DEFAULT_DB_RANGE],
+    };
+  }
+
+  // The named view a graph opens in when the user hasn't picked one on that page: Settings', else the page's own.
+  const defaultView = (pageView) => pageDefaults().view || (VIEWS[pageView] ? pageView : DEFAULT_VIEW);
+
+  const validRange = (r) => Array.isArray(r) && r.length === 2 && Number.isFinite(r[0]) && r[1] > r[0];
+
   class ResponsePlot {
     constructor(el, opts = {}) {
       const UPlot = window.uPlot;
@@ -261,6 +278,7 @@
       this.unwrap = Boolean(opts.unwrap);
       this.xRange = resolveView(opts.view ?? opts.range ?? DEFAULT_VIEW);
       this.yRanges = {}; // mode -> [min, max] once auto-fitted or set
+      this.dbRange = validRange(opts.dbRange) ? [opts.dbRange[0], opts.dbRange[1]] : pageDefaults().dbRange;
       this.height = opts.height || 260;
       this.traces = [];
       this.grid = [];
@@ -418,7 +436,8 @@
     }
 
     yRange() {
-      return this.yRanges[this.mode] || defaultRange(this.mode, this.unwrap);
+      if (this.yRanges[this.mode]) return this.yRanges[this.mode];
+      return this.mode === 'magnitude' ? [...this.dbRange] : defaultRange(this.mode, this.unwrap);
     }
 
     applyY() {
@@ -578,6 +597,8 @@
     MODES,
     COLORS,
     DEFAULT_DB_RANGE,
+    pageDefaults,
+    defaultView,
     channelColor,
     fmtFreq,
     fmtDb,

@@ -21,6 +21,7 @@ from app.sync.session import (
     DeviceSession,
     MasterValidationError,
     StateUnavailable,
+    factory_defaults_summary,
 )
 from app.web.adopt_sample import ADOPT_SAMPLE
 from app.web.params import syncbar_context
@@ -265,6 +266,7 @@ def adopt_context(
         "default_preset": active if active is not None else 0,
         "active_preset": active,
         "sample": ADOPT_SAMPLE,
+        "defaults_summary": factory_defaults_summary(session.profile),
         "modes": [m.value for m in AdoptMode],
         "preview_url": url(request, f"/ui/devices/{serial}/adopt/preview"),
         "adopt_url": url(request, f"/ui/devices/{serial}/adopt"),
@@ -365,7 +367,7 @@ def _parse_preset(session: DeviceSession, raw: Any) -> int:
 @router.post("/ui/devices/{serial}/adopt", response_class=HTMLResponse)
 async def adopt(request: Request, serial: int) -> Response:
     """Run the adopt: ``trust`` writes nothing, ``unknown`` writes nothing, ``push`` writes the whole preset and needs
-    the ``confirm`` checkbox."""
+    the ``confirm`` checkbox. Trusting the defaults needs the ``confirm_defaults`` checkbox."""
     if not is_htmx(request):
         return PlainTextResponse("HTMX request expected", status_code=400)
     session = await _session(request, serial)
@@ -384,6 +386,7 @@ async def adopt(request: Request, serial: int) -> Response:
             preset=preset,
             script=script,
             confirm=form.get("confirm") in ("on", "true", "1"),
+            confirm_defaults=form.get("confirm_defaults") in ("on", "true", "1"),
             trust_all=form.get("trust_all") in ("on", "true", "1"),
             timeout=BULK_TIMEOUT_S,
         )

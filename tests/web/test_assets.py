@@ -5,7 +5,7 @@ import re
 import pytest
 
 from app.main import STATIC_DIR
-from app.web.templating import fmt_db, fmt_num, meter_fraction
+from app.web.templating import fmt_db, fmt_duration, fmt_num, meter_fraction
 
 VENDOR = STATIC_DIR / "vendor"
 
@@ -49,6 +49,26 @@ def test_fmt_db():
     assert fmt_db(6, signed=True) == "+6.0 dB"
     assert fmt_db(-18.04, unit="dBFS") == "−18.0 dBFS"
     assert fmt_db(None) == "—"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0, "0 s"),
+        (45.9, "45 s"),
+        (60, "1 min"),
+        (12 * 60 + 59, "12 min"),
+        (3600, "1 h"),
+        (3 * 3600 + 12 * 60 + 5, "3 h 12 min"),
+        (86_400, "1 d"),
+        (2 * 86_400 + 4 * 3600 + 30 * 60, "2 d 4 h"),
+        (None, "—"),
+        (-1, "—"),
+        (math.inf, "—"),
+    ],
+)
+def test_fmt_duration(seconds, expected):
+    assert fmt_duration(seconds) == expected
 
 
 def test_meter_fraction_scale():

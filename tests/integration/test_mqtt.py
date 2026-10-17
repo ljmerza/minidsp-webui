@@ -40,7 +40,8 @@ DEVICE_JSON = {
 }
 MASTER_JSON = {"preset": 0, "source": "Analog", "volume": -20.0, "mute": False, "dirac": False}
 
-N_ENTITIES = 25  # master/health (6) + push-all + 4 outputs x (gain, mute, delay) + 6 level sensors
+# master/health (6) + push-all + 4 outputs x (gain, mute, delay) + 6 level sensors + config drift (verify)
+N_ENTITIES = 26
 
 _ids = itertools.count()
 
@@ -298,6 +299,9 @@ async def test_phase5_discovery(stack, broker_port, prefixes):
         level = json.loads(late.latest(prefix.format("sensor", "output_3_level")))
         assert level["enabled_by_default"] is False and level["state_class"] == "measurement"
         assert late.latest(prefix.format("select", "profile")) is None  # no saved profiles
+        drift = json.loads(late.latest(prefix.format("sensor", "drift")))
+        assert drift["options"] == ["ok", "drift", "mismatch", "unverified", "error"]
+        assert drift["entity_category"] == "diagnostic"
 
 
 async def test_output_commands_round_trip(stack, broker_port, prefixes, daemon):

@@ -11,8 +11,13 @@
     <div><dt>State</dt><dd>{{ info.state }}</dd></div>
     <div><dt>Device stream</dt>
       <dd>{{ "connected" if info.monitor_connected else "disconnected" }}</dd></div>
+    {%- set uptime = info.get("connected_for_s") %}
+    {% if info.monitor_connected and uptime is not none %}
+      <div><dt>Connection uptime</dt><dd>connected for {{ uptime|duration }}</dd></div>
+    {% endif %}
     {% if info.last_error %}<div><dt>Last stream error</dt><dd>{{ info.last_error }}</dd></div>{% endif %}
     <div><dt>minidspd</dt><dd><code>{{ daemon_url }}</code></dd></div>
+    <div><dt>minidspd version</dt><dd>{{ daemon_version or "—" }}</dd></div>
     <div><dt>Daemon index</dt><dd>{{ info.daemon_index if info.daemon_index is not none else "—" }}</dd></div>
     <div><dt>Device URL</dt><dd>{% if info.url %}<code>{{ info.url }}</code>{% else %}&mdash;{% endif %}</dd></div>
   </dl>
@@ -34,6 +39,7 @@
   <h2>No device</h2>
   <dl class="info-grid">
     <div><dt>minidspd</dt><dd><code>{{ daemon_url }}</code></dd></div>
+    {% if daemon_version %}<div><dt>minidspd version</dt><dd>{{ daemon_version }}</dd></div>{% endif %}
     <div><dt>Daemon</dt>
       <dd>{% if daemon_up is none %}connecting&hellip;{% elif daemon_up %}reachable{% else %}unreachable{% endif %}</dd></div>
     {% if daemon_error %}<div><dt>Last error</dt><dd>{{ daemon_error }}</dd></div>{% endif %}

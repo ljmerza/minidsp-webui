@@ -1,0 +1,32 @@
+# Example deployment. Copy it next to your other compose files, adjust it, then run `docker compose up -d`.
+#
+# Run it on the machine that runs minidspd. minidspd's HTTP API listens on 127.0.0.1:5380 by default (and has no
+# authentication, so keep it that way), which is why the container uses host networking. The UI is then served on
+# http://<host>:8480.
+
+services:
+  minidsp-webui:
+    image: ghcr.io/ljmerza/minidsp-webui:main # or a release tag, e.g. :v1.0.0
+    container_name: minidsp-webui
+    network_mode: host
+    environment:
+      MINIDSPD_URL: http://127.0.0.1:5380
+      WEBUI_PORT: "8480"
+      # Home Assistant over MQTT (optional). Put credentials in an env file rather than here.
+      # MQTT_ENABLED: "true"
+      # MQTT_HOST: mqtt.example.lan
+      # Nightly read-back check of the active preset (optional; local time from /etc/localtime below).
+      # VERIFY_NIGHTLY: "true"
+      # VERIFY_AT: "04:15"
+    # env_file: ./minidsp-webui.env
+    volumes:
+      - ./data:/data # SQLite database and nightly backups
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    # Sized for a Raspberry Pi. All state is in /data, so an OOM kill followed by the automatic restart loses nothing.
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"

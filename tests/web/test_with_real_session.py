@@ -114,3 +114,23 @@ async def test_big_volume_raise_needs_the_confirm_flag(ctx):
     response = await http.post(f"/ui/devices/{SERIAL}/master/volume", data=data, headers=HX)
     assert response.status_code == 200
     assert session.master.volume == -2.0
+
+
+async def test_big_ui_volume_drop_needs_confirm_and_is_audited_as_ui(ctx):
+    http, daemon, session = ctx
+    emitted: list[tuple] = []
+    session.audit._emit = lambda *entry: emitted.append(entry)
+    session.audit.quiet_s = 0.05
+    route = daemon.post("/devices/0").respond(json={**MASTER_JSON, "volume": -60.0})
+    response = await http.post(f"/ui/devices/{SERIAL}/master/volume", data={"volume": "-60"}, headers=HX)
+    assert response.status_code == 409 and "lowering" in unquote(response.headers["X-Mdsp-Error"])
+    assert not route.called
+    response = await http.post(
+        f"/ui/devices/{SERIAL}/master/volume", data={"volume": "-60", "confirm": "true"}, headers=HX
+    )
+    assert response.status_code == 200 and route.called
+    for _ in range(100):
+        if emitted:
+            break
+        await asyncio.sleep(0.01)
+    assert emitted == [("ui", "volume", -20.0, -60.0)]

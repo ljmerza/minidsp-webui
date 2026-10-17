@@ -171,7 +171,7 @@
     const pair = cfg.pair || [null, null];
 
     return {
-      view: remember('view') || 'sub',
+      view: remember('view') || (window.mdsp.graph ? window.mdsp.graph.defaultView('sub') : 'sub'),
       mode: remember('mode') || 'magnitude',
       unwrap: remember('unwrap') === 'true',
       selected: [...cfg.outputs],

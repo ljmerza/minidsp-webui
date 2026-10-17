@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from app.bus import LOG
 from app.formats.cli_script import parse_script
 from app.model.config_doc import default_config_doc
 from app.model.device_profile import M2X4HD
-from app.sync.session import AdoptMode, ConfirmationRequired, DesiredValidationError
+from app.sync.session import AdoptMode, ConfirmationRequired, DesiredValidationError, factory_defaults_summary
 
 from ..conftest import SERIAL
 from .conftest import drain, settle
@@ -102,9 +103,33 @@ async def test_adopt_rejects(session, fake, kwargs, message):
     assert session.needs_adoption and fake.configs == []
 
 
+async def test_trusting_the_defaults_needs_confirm_defaults(session, fake, bus):
+    """docs 05 §8 adopt guard: trust with no script or doc claims the device is flat."""
+    with pytest.raises(ConfirmationRequired, match="confirm_defaults"):
+        await session.adopt("trust")
+    assert session.needs_adoption and fake.configs == []
+    async with bus.subscribe([LOG]) as sub:
+        result = await session.adopt("trust", confirm_defaults=True)
+        logs = [e.data for e in (sub.get_nowait() for _ in range(sub.pending())) if e.topic == LOG]
+    assert result.unknown == 0 and result.writes == 0 and not session.needs_adoption
+    guard = [entry for entry in logs if entry.get("confirm_defaults")]
+    assert len(guard) == 1 and guard[0]["level"] == "warning" and "factory defaults" in guard[0]["message"]
+    # A script or a document is never "the defaults", and the other modes don't need it.
+    await session.adopt("trust", script="output 0 gain 3\n")
+    await session.adopt("trust", doc=default_config_doc(M2X4HD), preset=1)
+    await session.adopt("unknown", preset=2)
+
+
+def test_factory_defaults_summary():
+    lines = factory_defaults_summary(M2X4HD)
+    assert lines[0] == "In 1: 0 dB, unmuted, routed to Out 1, Out 3; PEQ bypassed"
+    assert lines[2] == "Out 1: 0 dB, 0 ms, unmuted, normal polarity; PEQ, crossovers and compressor bypassed"
+    assert len(lines) == M2X4HD.n_inputs + M2X4HD.n_outputs
+
+
 async def test_adopt_without_repo(make_session):
     s = await make_session(with_repo=False)
-    result = await s.adopt("trust")
+    result = await s.adopt("trust", confirm_defaults=True)
     assert result.revision == 1 and not s.needs_adoption
 
 

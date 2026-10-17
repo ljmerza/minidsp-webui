@@ -152,7 +152,7 @@ async def test_failed_sync_keeps_the_desired_value_and_offers_retry(ctx):
 
 
 async def test_push_all_from_the_sync_bar(ctx):
-    await ctx.session.adopt(AdoptMode.TRUST, preset=0)
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     response = await ctx.http.post(f"{UI}/presets/0/push", params={"page": "/routing"}, headers=HX)
     assert response.status_code == 200
     assert "Push complete" in response.text

@@ -502,7 +502,7 @@ async def activate(request: Request, serial: int, preset: int, page: str | None 
     if isinstance(session, Response):
         return session
     try:
-        await session.activate_preset(preset)
+        await session.activate_preset(preset, source="ui")
     except (PresetSwitchInProgress, PresetSwitchTimeout, DaemonError, MasterValidationError) as exc:
         message = str(exc) or type(exc).__name__
         session.log_event("warning", f"switch & apply preset {preset + 1} failed: {message}", kind="preset")

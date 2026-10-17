@@ -23,6 +23,7 @@ from app.daemon.client import DaemonError
 from app.model.device_profile import M2X4HD
 from app.mqtt import payloads as p
 from app.mqtt.profiles import ProfileCatalog, ProfileEntry, load_into_active
+from app.sync import verify
 from app.sync.session import (
     ConfirmationRequired,
     DeviceSession,
@@ -118,7 +119,7 @@ class MqttBridge:
     def start(self) -> None:
         if self._tasks:
             return
-        self._sub = self.bus.subscribe([MASTER, DEVICE, SYNC, DESIRED])
+        self._sub = self.bus.subscribe([MASTER, DEVICE, SYNC, DESIRED, verify.VERIFY])
         self._tasks = [
             asyncio.create_task(self._consume_bus(self._sub), name="mqtt-bus"),
             asyncio.create_task(self._run(), name="mqtt-connection"),
@@ -205,6 +206,9 @@ class MqttBridge:
         self.last_error = None
         for session in self.manager:
             await self._publish_device(session, force=True)
+            report = verify.last_report(session.serial)
+            if report is not None:
+                await self._publish_drift(session.serial, report.event())
         self.connected.set()
         log.info("mqtt: connected to %s:%s", self.settings.mqtt_host, self.settings.mqtt_port)
 
@@ -295,13 +299,15 @@ class MqttBridge:
         entries = await self._profile_entries(session)
         info = self.device_info(session, [e.name for e in entries])
         configs = p.discovery_configs(info, self.topics, volume_floor_db=self.volume_floor_db)
+        drift_topic, drift_config = self._drift_discovery(serial, info)
+        configs[drift_topic] = drift_config
         fingerprint = p.dumps(configs)
         if self._announced.get(serial) != fingerprint:
             for topic, config in configs.items():
                 if not await self._publish(topic, p.dumps(config)):
                     return
             # Optional entities that went away (the Profile select once the last profile is deleted).
-            for topic in p.removal_topics(serial, self.topics, session.profile):
+            for topic in self._removal_topics(serial, session.profile):
                 if topic not in configs and not await self._publish(topic, ""):
                     return
             if not await self._publish(self.topics.availability(serial), p.ONLINE):
@@ -313,6 +319,27 @@ class MqttBridge:
         changed = force or self._published.get(serial) != state
         if changed and await self._publish(self.topics.state(serial), state):
             self._published[serial] = state
+
+    def _drift_discovery(self, serial: int, info: p.DeviceInfo) -> tuple[str, dict[str, Any]]:
+        """The "Config drift" sensor fed by Verify device (its state lives on its own retained topic)."""
+        return verify.drift_discovery(
+            discovery_prefix=self.topics.discovery_prefix,
+            base_topic=self.topics.base,
+            serial=serial,
+            device=p.device_block(info),
+            origin=p.ORIGIN,
+        )
+
+    def _removal_topics(self, serial: int, profile: Any) -> list[str]:
+        topic, _ = verify.drift_discovery(
+            discovery_prefix=self.topics.discovery_prefix, base_topic=self.topics.base, serial=serial, device={}
+        )
+        return [*p.removal_topics(serial, self.topics, profile), topic]
+
+    async def _publish_drift(self, serial: int, event: dict[str, Any]) -> None:
+        if serial in self._removed:
+            return
+        await self._publish(verify.drift_topic(self.topics.base, serial), p.dumps(verify.drift_state(event)))
 
     async def _profile_entries(self, session: DeviceSession, *, fresh: bool = False) -> list[ProfileEntry]:
         try:
@@ -374,6 +401,10 @@ class MqttBridge:
                 event = await sub.get()
             except SubscriptionClosed:
                 return
+            if event.topic == verify.VERIFY:
+                if event.serial is not None:
+                    await self._publish_drift(event.serial, event.data)
+                continue
             if event.topic == SYNC and event.serial is not None:
                 data = event.data
                 if isinstance(data.get("preset"), int) and isinstance(data.get("counts"), dict):
@@ -414,8 +445,9 @@ class MqttBridge:
         session = self.manager.get(serial)
         ok = True
         for topic in [
-            *p.removal_topics(serial, self.topics, session.profile if session is not None else M2X4HD),
+            *self._removal_topics(serial, session.profile if session is not None else M2X4HD),
             self.topics.state(serial),
+            verify.drift_topic(self.topics.base, serial),
             self.topics.availability(serial),
         ]:
             ok = await self._publish(topic, "") and ok
@@ -462,11 +494,11 @@ class MqttBridge:
         try:
             match entity:
                 case p.VOLUME:
-                    await session.set_volume(p.parse_volume(payload, profile, self.volume_floor_db))
+                    await session.set_volume(p.parse_volume(payload, profile, self.volume_floor_db), source="ha")
                 case p.MUTE:
-                    await session.set_mute(p.parse_switch(payload))
+                    await session.set_mute(p.parse_switch(payload), source="ha")
                 case p.SOURCE:
-                    await session.set_source(p.parse_source(payload, profile))
+                    await session.set_source(p.parse_source(payload, profile), source="ha")
                 case p.PRESET:
                     await self._switch_preset(session, p.parse_preset(payload, profile))
                 case p.PROFILE:
@@ -545,9 +577,9 @@ class MqttBridge:
     async def _switch_preset(self, session: DeviceSession, preset: int) -> None:
         """Switch & flush staged edits when the session supports it (Phase 2), else a plain switch."""
         try:
-            await session.activate_preset(preset)
+            await session.activate_preset(preset, source="ha")
         except NotImplementedError:
-            await session.set_preset(preset)
+            await session.set_preset(preset, source="ha")
 
     def _reject(
         self, session: DeviceSession, entity: str, payload: str, reason: str, *, level: str = "warning"

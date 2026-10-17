@@ -227,6 +227,40 @@ async def test_manager_discovery(client, bus, settings, daemon):
         await manager.stop()
 
 
+async def test_manager_reads_the_daemon_version_once_per_daemon_start(client, bus, settings, daemon):
+    manager = SessionManager(client, bus, settings)
+    devices = daemon.get("/devices").mock(return_value=httpx.Response(200, json=[]))
+    version = daemon.get("/openapi.json").respond(json={"info": {"version": "0.1.12"}})
+    try:
+        await manager.discover()
+        await manager.discover()
+        assert manager.daemon_version == "0.1.12" and version.call_count == 1
+
+        devices.mock(side_effect=httpx.ConnectError("refused"))
+        await manager.discover()
+        assert manager.daemon_version is None  # it may come back as another version
+
+        devices.mock(return_value=httpx.Response(200, json=[]))
+        version.respond(json={"info": {"version": "0.1.13"}})
+        await manager.discover()
+        assert manager.daemon_version == "0.1.13" and version.call_count == 2
+    finally:
+        await manager.stop()
+
+
+async def test_manager_without_a_daemon_version(client, bus, settings, daemon):
+    manager = SessionManager(client, bus, settings)
+    daemon.get("/devices").mock(return_value=httpx.Response(200, json=[]))
+    version = daemon.get("/openapi.json").respond(404, text="no such route")
+    try:
+        await manager.discover()
+        await manager.discover()
+        assert manager.daemon_up is True and manager.daemon_version is None
+        assert version.call_count == 1  # display-only: not retried every scan
+    finally:
+        await manager.stop()
+
+
 async def test_manager_background_loop_survives_daemon_down(client, bus, settings, daemon):
     route = daemon.get("/devices").mock(side_effect=httpx.ConnectError("refused"))
     manager = SessionManager(client, bus, settings)

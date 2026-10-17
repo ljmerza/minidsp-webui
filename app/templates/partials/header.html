@@ -5,12 +5,33 @@
 {#- Sync tracking is shown once the session's preset state is loaded (DeviceSession.loaded). -#}
 {%- set tracked = session is not none and session.loaded is defined and session.loaded -%}
 {%- set active_preset = master.preset if master is not none else none -%}
+{#- Big master-volume drops need a confirmation in the UI (docs/02 §A); 0 turns the check off. -#}
+{%- set drop_confirm_db = session.volume_drop_confirm_db if session is not none and session.volume_drop_confirm_db is defined else 0 -%}
+{#- ``devices`` (switcher entries, only with more than one device) and ``storage_problem`` come from
+    app.web.devices.header_extras. -#}
+{%- set device_choices = devices if devices is defined and devices else [] -%}
 <div class="hdr" data-serial="{{ serial if serial is not none else '' }}"
      hx-target="#app-header" hx-swap="innerHTML">
   <div class="hdr-row">
     <div class="hdr-device">
+      {% if device_choices %}
+      <form class="hdr-devices" method="get" action="{{ root }}/ui/devices/select" x-data>
+        <input type="hidden" name="next" value="{{ root }}/">
+        <label>
+          <span class="visually-hidden">Device</span>
+          <select name="serial" aria-label="Device"
+                  @change="$el.form.elements.next.value = location.pathname + location.search; $el.form.submit()">
+            {% for d in device_choices %}
+              <option value="{{ d.serial }}"{% if d.current %} selected{% endif %}>{{ d.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <noscript><button type="submit">Show</button></noscript>
+      </form>
+      {% else %}
       <a class="hdr-product" href="{{ root }}/">{{ profile.product_name if profile else "miniDSP" }}</a>
       {%- if serial is not none %} <span class="hdr-serial">#{{ serial }}</span>{% endif %}
+      {% endif %}
       <span class="conn conn-{{ conn_level }}" role="status">
         <span class="conn-icon" aria-hidden="true">
           {%- if conn_level == "ok" %}&#9679;{% elif conn_level == "busy" %}<span class="spinner"></span>{% elif conn_level == "warn" %}&#9680;{% else %}&#10005;{% endif -%}
@@ -85,7 +106,7 @@
              {%- if vol is not none %} x-model.number="v" :aria-valuetext="fmt(v)"{% endif %}
              {%- if not controls_enabled or vol is none %} disabled{% endif %}
              data-volume-input data-current="{{ vol if vol is not none else '' }}"
-             data-confirm-raise-db="{{ volume_confirm_db }}"
+             data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
              hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
       <span class="vol-value">
         <input type="number" id="master-volume-num" name="volume" inputmode="decimal"
@@ -96,7 +117,7 @@
                {%- if vol is not none %} :value="v.toFixed(1)" @change="typed($event)"{% endif %}
                {%- if not controls_enabled or vol is none %} disabled{% endif %}
                data-volume-input data-current="{{ vol if vol is not none else '' }}"
-               data-confirm-raise-db="{{ volume_confirm_db }}"
+               data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
                hx-post="{{ base }}/volume" hx-trigger="change">
         <span class="unit">dB</span>
       </span>
@@ -127,6 +148,10 @@
     </div>
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if storage_problem is defined and storage_problem %}
+  <div class="banner banner-warn" role="alert">{{ storage_problem }}</div>
   {% endif %}
 
   {% if conn_level in ("bad", "warn") %}

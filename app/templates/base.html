@@ -9,7 +9,8 @@
   <link rel="stylesheet" href="{{ root }}/static/css/app.css?v={{ asset_version }}">
   {% block head %}{% endblock %}
 </head>
-<body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}">
+<body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}"
+      data-graph-view="{{ graph_defaults.view or '' }}" data-graph-db="{{ '%g'|format(graph_defaults.db_range) }}">
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header id="app-header" class="app-header"

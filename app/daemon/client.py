@@ -147,6 +147,15 @@ class DaemonClient:
             raise DaemonRejected(200, json.dumps(data), message="unexpected /devices response from minidspd")
         return [_parse(DaemonDevice, d, "/devices") for d in data]
 
+    async def daemon_version(self) -> str | None:
+        """minidspd's version, from its OpenAPI document (``info.version``); None when it doesn't say."""
+        data = await self._get_json("/openapi.json")
+        info = data.get("info") if isinstance(data, dict) else None
+        version = info.get("version") if isinstance(info, dict) else None
+        if not isinstance(version, str) or not version.strip():
+            return None
+        return version.strip()
+
     async def get_status(self, index: int) -> StatusSummary:
         path = f"/devices/{index}"
         return _parse(StatusSummary, await self._get_json(path), path)

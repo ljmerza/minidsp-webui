@@ -48,50 +48,19 @@
     <p class="hint">dBFS, peak hold 1.5 s. The clip light latches at &minus;1 dBFS or above; press it to reset.</p>
   </section>
 
-  <section class="card outputs-card" aria-labelledby="outputs-title">
+  {#- The cards are re-fetched on sync / desired events; dashboard.js also refreshes them when the active preset
+      changes (the "master" stream carries every volume tick, so it filters those) and drives the quick controls. -#}
+  <section class="card outputs-card" aria-labelledby="outputs-title" x-data="outputCards" hx-trigger="sse:master">
     <h2 id="outputs-title">Outputs</h2>
-    <ul class="output-cards">
-      {% for name in output_names %}
-        {%- set key = "o" ~ loop.index0 -%}
-        {%- set edit_path = output_links[loop.index0] -%}
-        <li class="output-card">
-          <div class="output-head">
-            <h3>{{ name }}</h3>
-            <span class="output-level" :class="{ 'is-clip': clip.{{ key }} }">
-              <span x-text="readout('{{ key }}')">&mdash;</span>
-            </span>
-          </div>
-          {%- set card = output_state[loop.index0] if output_state else none -%}
-          <dl class="output-params">
-            {% if card %}
-              <div><dt>Gain</dt><dd>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
-              <div><dt>Delay</dt><dd>{{ card.delay_ms|num(2) }} ms</dd></div>
-              <div><dt>Crossover</dt><dd>{{ card.crossover }}</dd></div>
-            {% else %}
-              <div><dt>Gain</dt><dd>&mdash;</dd></div>
-              <div><dt>Delay</dt><dd>&mdash;</dd></div>
-              <div><dt>Crossover</dt><dd>&mdash;</dd></div>
-            {% endif %}
-          </dl>
-          <div class="output-foot">
-            {% if card %}
-              <span class="sync-badge sync-{{ card.sync }}" title="Sync status of this output's settings (active preset)">
-                <span aria-hidden="true">{{ card.sync_icon }}</span> {{ card.sync }}
-              </span>
-            {% else %}
-              <span class="sync-badge sync-unknown" title="Preset state is not loaded">
-                <span aria-hidden="true">&ndash;</span> not tracked yet
-              </span>
-            {% endif %}
-            {% if edit_path %}<a href="{{ root }}{{ edit_path }}">edit &rarr;</a>{% endif %}
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
+    <div class="output-cards-box" data-output-cards hx-get="{{ outputs_url }}"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh" hx-swap="innerHTML">
+      {% include "partials/dashboard_outputs.html" %}
+    </div>
   </section>
 
   {%- set response_cfg = {
-    "url": root ~ "/ui/devices/" ~ serial ~ "/response", "key": "dashboard.response", "view": "sub", "preset": none,
+    "url": root ~ "/ui/devices/" ~ serial ~ "/response", "key": "dashboard.response", "view": response_view,
+    "preset": none,
     "refresh": ["sync", "master"], "height": 240, "title": "…"
   } %}
   <section class="card response-card" aria-labelledby="response-title"
@@ -104,11 +73,12 @@
         <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Fit</button>
       </span>
     </div>
-    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the un-muted outputs, 5 to 300 Hz"></div>
+    {%- set range_text = "10 Hz–20 kHz" if response_view == "full" else "5–300 Hz" %}
+    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the un-muted outputs, {{ range_text }}"></div>
     {{ fx.warnings() }}
     <p class="field-error" x-show="error" x-text="error" x-cloak></p>
     <p class="hint" x-show="empty" x-cloak>Every output is muted.</p>
-    <p class="hint">5&ndash;300 Hz, active preset: each un-muted output and their electrical sum (delay and polarity
+    <p class="hint">{{ range_text }}, active preset: each un-muted output and their electrical sum (delay and polarity
       included; drivers and the room are not).</p>
   </section>
 </div>
@@ -117,5 +87,6 @@
 
 {% block scripts %}
 <script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/dashboard.js?v={{ asset_version }}"></script>
 {% if session is not none %}{{ fx.assets() }}{% endif %}
 {% endblock %}

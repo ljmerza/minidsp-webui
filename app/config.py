@@ -1,6 +1,8 @@
+from datetime import time
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,8 +31,15 @@ class Settings(BaseSettings):
     gain_min_db: float = Field(default=-72.0, ge=-100.0, lt=24.0)
     gain_max_db: float = Field(default=12.0, ge=-100.0, lt=24.0)
     gain_step_confirm_db: float = 6.0
+    # Lowering the master volume by more than this in one UI action asks first (0 = never); HA/API drops aren't guarded.
+    volume_drop_confirm_db: float = Field(default=20.0, ge=0.0, le=127.0)
     # Most a single PEQ band or crossover group may boost (its peak gain over 5 Hz-24 kHz); larger boosts are refused.
     peq_max_boost_db: float = Field(default=24.0, ge=0.0, le=60.0)
+
+    # Graphs: the frequency view they open in ("auto" = each page's own: 5-300 Hz on the dashboard, crossover and
+    # system pages, 10 Hz-20 kHz on PEQ and Response) and the default magnitude scale (+/- this many dB)
+    graph_view: Literal["auto", "sub", "full"] = "auto"
+    graph_db_range: float = Field(default=24.0, ge=3.0, le=60.0)
 
     # Experimental: FIR on models whose profile doesn't claim it (unverified on the 2x4HD; loading taps mutes it)
     fir_experimental: bool = False
@@ -40,6 +49,10 @@ class Settings(BaseSettings):
     monitor_backoff_max_s: float = 10.0
     levels_idle_grace_s: float = 5.0
     discovery_interval_s: float = 30.0
+
+    # Readback: verify the active preset against what the app last wrote, once a night at VERIFY_AT (local time)
+    verify_nightly: bool = False
+    verify_at: str = "04:15"
 
     # MQTT / Home Assistant discovery
     mqtt_enabled: bool = False
@@ -57,6 +70,15 @@ class Settings(BaseSettings):
         if self.gain_min_db >= self.gain_max_db:
             raise ValueError(f"GAIN_MIN_DB ({self.gain_min_db}) must be below GAIN_MAX_DB ({self.gain_max_db})")
         return self
+
+    @field_validator("verify_at")
+    @classmethod
+    def _check_verify_at(cls, value: str) -> str:
+        try:
+            time.fromisoformat(value.strip())
+        except ValueError:
+            raise ValueError(f"VERIFY_AT must be a local time like 04:15, got {value!r}") from None
+        return value.strip()
 
 
 @lru_cache

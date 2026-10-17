@@ -24,14 +24,16 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
+from app.web import devices
 from app.web.nav import build_nav
-from app.web.templating import templates
+from app.web.templating import graph_defaults, templates
 
 router = APIRouter(include_in_schema=False)
 
 ERROR_HEADER = "X-Mdsp-Error"
 
-DASHBOARD_TOPICS = ("levels", "master", "device", "sync")
+# "sync" and "desired" refresh the output cards (other tabs, Home Assistant, the writer); "master" a preset switch.
+DASHBOARD_TOPICS = ("levels", "master", "device", "sync", "desired")
 DEVICE_TOPICS = ("master", "device")
 
 
@@ -43,8 +45,7 @@ def _manager(request: Request) -> SessionManager:
 
 
 def _pick_session(request: Request, serial: int | None) -> DeviceSession | None:
-    manager = _manager(request)
-    return manager.get(serial) if serial is not None else manager.default()
+    return devices.pick_session(request, serial)
 
 
 def connection(manager: SessionManager, session: DeviceSession | None) -> tuple[str, str]:
@@ -93,6 +94,7 @@ def header_context(request: Request, session: DeviceSession | None) -> dict[str,
         "sources": list(profile.sources) if profile else [],
         "volume_confirm_db": settings.gain_step_confirm_db,
         "unsupported": [d.product_name or "unknown" for d in manager.unsupported],
+        **devices.header_extras(request, session),  # device switcher and storage banner
     }
 
 
@@ -120,7 +122,11 @@ _SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"
 
 
 async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | None:
-    """Per-output gain/delay/crossover of the active preset plus a worst-of sync badge; None until state is loaded."""
+    """Per-output gain/delay/crossover of the active preset plus a worst-of sync badge; None until state is loaded.
+
+    ``ceiling`` and ``gain_min`` bound the gain nudge buttons; ``never_synced`` (gain or mute never confirmed on the
+    device) makes un-muting ask first, as on the output page.
+    """
     if session is None or not hasattr(session, "ensure_loaded"):
         return None
     try:
@@ -140,7 +146,11 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
         worst = next((s for s in _SYNC_ORDER if s in statuses), "synced")
         cards.append(
             {
+                "index": i,
                 "gain_db": out.gain_db,
+                "ceiling": session.channel_ceiling("output", i),
+                "gain_min": session.profile.gain_min_db,
+                "never_synced": any(sync.get(prefix + f, "unknown") == "unknown" for f in ("gain_db", "mute")),
                 "mute": out.mute,
                 "delay_ms": out.delay_ms,
                 "crossover": "on" if any(not g.bypass for g in out.crossover) else "bypassed",
@@ -160,6 +170,33 @@ def _not_found_page(request: Request, serial: int) -> HTMLResponse:
 # --- pages ------------------------------------------------------------------------------------------------------------
 
 
+def _nav_children(nav: list[Any], path: str) -> tuple[Any, ...]:
+    return next((item.children for item in nav if item.path == path), ())
+
+
+async def dashboard_outputs_context(
+    request: Request, session: DeviceSession | None, nav: list[Any] | None = None
+) -> dict[str, Any]:
+    """The dashboard's output cards: names and edit links from the nav, values of the active preset."""
+    if nav is None:
+        profile = session.profile if session else None
+        nav = build_nav(request, profile, getattr(session, "channel_meta", None) if session else None)
+    outputs_nav = _nav_children(nav, "/outputs")
+    cards = await output_cards(session)
+    master = session.master if session else None
+    # Quick controls edit the active preset, so they need to know which one that is.
+    preset = master.preset if cards is not None and master is not None else None
+    serial = session.serial if session else None
+    return {
+        "output_names": [child.label for child in outputs_nav],  # names saved in Settings, else "Out 1"
+        "output_links": [child.path if child.enabled else None for child in outputs_nav],
+        "output_state": cards,
+        "outputs_preset": preset,
+        "outputs_edit_url": None if preset is None else _url(request, f"/ui/devices/{serial}/presets/{preset}/edit"),
+        "outputs_url": _url(request, "/ui/dashboard/outputs", serial=serial),
+    }
+
+
 @router.get("/", response_class=HTMLResponse, name="dashboard")
 async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse:
     session = _pick_session(request, serial)
@@ -167,18 +204,15 @@ async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DASHBOARD_TOPICS)
     status = session.status if session else None
-    outputs_nav = next((item.children for item in ctx["nav"] if item.path == "/outputs"), ())
-    inputs_nav = next((item.children for item in ctx["nav"] if item.path == "/inputs"), ())
     ctx.update(
         title="Dashboard",
-        output_links=[child.path if child.enabled else None for child in outputs_nav],
-        input_names=[child.label for child in inputs_nav],  # names saved in Settings, else "In 1" / "Out 1"
-        output_names=[child.label for child in outputs_nav],
-        output_state=await output_cards(session),
+        input_names=[child.label for child in _nav_children(ctx["nav"], "/inputs")],
+        response_view=graph_defaults(request)["view"] or "sub",
         initial_levels={
             "i": list(status.input_levels) if status else [],
             "o": list(status.output_levels) if status else [],
         },
+        **await dashboard_outputs_context(request, session, ctx["nav"]),
     )
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 
@@ -189,6 +223,7 @@ def device_info_context(request: Request, session: DeviceSession | None) -> dict
         "info": session.info() if session else None,
         "daemon_url": request.app.state.settings.minidspd_url,
         "daemon_up": manager.daemon_up,
+        "daemon_version": getattr(manager, "daemon_version", None),
         "daemon_error": manager.last_error,
         "unsupported_devices": list(manager.unsupported),
         "device_info_url": _url(request, "/ui/device-info", serial=session.serial if session else None),
@@ -223,6 +258,16 @@ def header_response(
 @router.get("/ui/header", response_class=HTMLResponse)
 async def header_fragment(request: Request, serial: int | None = None) -> HTMLResponse:
     return header_response(request, _pick_session(request, serial))
+
+
+@router.get("/ui/dashboard/outputs", response_class=HTMLResponse)
+async def dashboard_outputs_fragment(request: Request, serial: int | None = None) -> HTMLResponse:
+    """The dashboard's output cards, re-fetched on SSE ``sync`` / ``desired`` events and active-preset changes."""
+    session = _pick_session(request, serial)
+    ctx = await dashboard_outputs_context(request, session)
+    response = templates.TemplateResponse(request, "partials/dashboard_outputs.html", ctx)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get("/ui/device-info", response_class=HTMLResponse)
@@ -303,8 +348,8 @@ def _form_bool(form: FormData, name: str) -> bool | None:
 @router.post("/ui/devices/{serial}/master/volume", response_class=HTMLResponse)
 async def set_volume(request: Request, serial: int) -> Response:
     async def action(session: DeviceSession, form: FormData) -> None:
-        # master.js asks before a big raise and then sends confirm=true; the session enforces the guard.
-        await session.set_volume(_form_float(form, "volume"), confirm=_form_bool(form, "confirm") is True)
+        # master.js asks before a big raise or drop and then sends confirm=true; the session enforces the guard.
+        await session.set_volume(_form_float(form, "volume"), confirm=_form_bool(form, "confirm") is True, source="ui")
 
     return await _master_action(request, serial, action)
 
@@ -312,7 +357,7 @@ async def set_volume(request: Request, serial: int) -> Response:
 @router.post("/ui/devices/{serial}/master/volume/{direction}", response_class=HTMLResponse)
 async def step_volume(request: Request, serial: int, direction: Literal["up", "down"]) -> Response:
     async def action(session: DeviceSession, _: FormData) -> None:
-        await session.volume_step(1 if direction == "up" else -1)
+        await session.volume_step(1 if direction == "up" else -1, source="ui")
 
     return await _master_action(request, serial, action)
 
@@ -324,9 +369,9 @@ async def set_mute(request: Request, serial: int) -> Response:
     async def action(session: DeviceSession, form: FormData) -> None:
         mute = _form_bool(form, "mute")
         if mute is None:
-            await session.toggle_mute()
+            await session.toggle_mute(source="ui")
         else:
-            await session.set_mute(mute)
+            await session.set_mute(mute, source="ui")
 
     return await _master_action(request, serial, action)
 
@@ -337,7 +382,7 @@ async def set_source(request: Request, serial: int) -> Response:
         source = form.get("source")
         if not isinstance(source, str) or not source:
             raise MasterValidationError("source: missing")
-        await session.set_source(source)
+        await session.set_source(source, source="ui")
 
     return await _master_action(request, serial, action)
 
@@ -347,6 +392,6 @@ async def set_preset(request: Request, serial: int) -> Response:
     """``preset`` is the 0-based device preset index; the UI labels it 1-4."""
 
     async def action(session: DeviceSession, form: FormData) -> None:
-        await session.set_preset(_form_int(form, "preset"))
+        await session.set_preset(_form_int(form, "preset"), source="ui")
 
     return await _master_action(request, serial, action)

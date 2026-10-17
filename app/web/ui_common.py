@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 
 from app.state import Repo
 from app.sync.session import DeviceSession, SessionManager, StateUnavailable
+from app.web import devices
 from app.web.routes import page_context
 from app.web.templating import templates
 
@@ -39,8 +40,8 @@ def manager_of(request: Request) -> SessionManager:
 
 
 def pick_session(request: Request, serial: int | None) -> DeviceSession | None:
-    manager = manager_of(request)
-    return manager.get(serial) if serial is not None else manager.default()
+    """An explicit serial, else the header switcher's choice, else the first device (see app.web.devices)."""
+    return devices.pick_session(request, serial)
 
 
 def repo_of(request: Request, session: DeviceSession | None = None) -> Repo | None:
