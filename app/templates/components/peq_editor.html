@@ -166,6 +166,7 @@
   <div class="peq-actions">
     <button type="button" @click="bankAction('bypass_all')" :disabled="!loaded">Bypass all</button>
     <button type="button" @click="bankAction('reset_all')" :disabled="!loaded">Reset all</button>
+    {% with rew_bank = side ~ "." ~ index ~ ".peq" %}{% include "partials/rew_buttons.html" %}{% endwith %}
     <span class="muted" x-show="!loaded && !error">Loading&hellip;</span>
   </div>
 </div>

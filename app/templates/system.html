@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{#- System page (docs 05 §6): overlay of the selected un-muted outputs + their electrical sum, and the integration
+    panel (phase difference of a pair over 20–100 Hz). Data comes from /ui/devices/{serial}/presets/{p}/system. -#}
+
+{% block head %}
+  <link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
+  <style>
+    .system-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); margin-bottom: var(--gap); }
+    .system-outputs { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; border: 0; padding: 0; margin: 0 0 0.5rem; }
+    .system-outputs legend { padding: 0; margin-bottom: 0.3rem; color: var(--text-muted); font-size: 0.85rem; }
+    .system-outputs label { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .system-outputs .is-muted { color: var(--text-muted); }
+    .integration-pair { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .integration-cursor { min-height: 1.4em; font-size: 0.85rem; color: var(--text-muted); margin: 0.3rem 0; }
+    .integration-regions { margin: 0.4rem 0; padding-left: 1.2rem; }
+    .integration-regions li { color: var(--bad); }
+    .integration-regions li span { color: var(--text); }
+    .integration-ok { color: var(--ok); }
+    .electrical-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--warn);
+      border: 1px solid var(--warn); border-radius: var(--radius); padding: 0.05rem 0.4rem; }
+  </style>
+{% endblock %}
+
+{% block content %}
+<h1>System</h1>
+{% if session is none or state_error or page_error %}
+  {% include "partials/edit_guard.html" %}
+{% else %}
+<div class="system-head">
+  <nav class="preset-tabs" aria-label="Preset to show">
+    <span class="hdr-label">Preset</span>
+    {% for t in tabs %}
+      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (active on the device)" if t.active else "") -%}
+      <a class="preset-tab{{ ' is-selected' if t.selected }}{{ ' is-active' if t.active }}" href="{{ preset_link(t.index) }}"
+         aria-label="{{ desc }}" title="{{ desc }}"{% if t.selected %} aria-current="page"{% endif %}>
+        {{- t.index + 1 -}}
+        {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9679;</span>{% endif -%}
+      </a>
+    {% endfor %}
+  </nav>
+  <span class="electrical-label" title="Delay, polarity, gains and filters only. Drivers, transducers, amplifiers and the room are not modelled.">Electrical sum</span>
+</div>
+
+<div class="system-view" x-data='systemView({{ system_cfg|tojson }})' hx-trigger="sse:desired, sse:sync">
+  <section class="card" aria-labelledby="overlay-title">
+    <div class="card-head">
+      <h2 id="overlay-title">Outputs <span class="muted">and their electrical sum</span></h2>
+      <span class="seg" role="group" aria-label="Plot">
+        <button type="button" class="btn-small" :class="{ 'is-current': mode === 'magnitude' }" @click="setMode('magnitude')">Magnitude</button>
+        <button type="button" class="btn-small" :class="{ 'is-current': mode === 'phase' }" @click="setMode('phase')">Phase</button>
+        <button type="button" class="btn-small" :class="{ 'is-current': mode === 'group_delay' }" @click="setMode('group_delay')">Group delay</button>
+      </span>
+    </div>
+    <fieldset class="system-outputs">
+      <legend>Outputs in the sum</legend>
+      {% for o in system_outputs %}
+        <label :class="{ 'is-muted': isMuted({{ o.index }}) }">
+          <input type="checkbox" :checked="isSelected({{ o.index }})" :disabled="isMuted({{ o.index }})"
+                 @change="toggle({{ o.index }}, $event.target.checked)"{% if not o.muted %} checked{% else %} disabled{% endif %}>
+          <span class="chan-dot" style="--chan: {{ o.color }}" aria-hidden="true"></span>{{ o.name }}
+          <span class="muted" x-show="isMuted({{ o.index }})"{% if not o.muted %} x-cloak{% endif %}>(muted)</span>
+        </label>
+      {% endfor %}
+    </fieldset>
+    <div class="response-options">
+      <label>Fed by
+        <select x-model="inputs" @change="load()">
+          {% for name in input_names %}<option value="{{ loop.index0 }}">{{ name }}</option>{% endfor %}
+          <option value="all">{{ input_names|join(" + ") }} (mono sum)</option>
+        </select></label>
+      <label class="check" x-show="mode === 'phase'" x-cloak><input type="checkbox" x-model="unwrap" @change="setUnwrap()"> Unwrap phase</label>
+      <span class="muted" x-show="loading" x-cloak>Updating&hellip;</span>
+    </div>
+    <div class="graph-toolbar" role="toolbar" aria-label="Graph">
+      <span class="seg" role="group" aria-label="Frequency range">
+        <button type="button" class="btn-small" :class="{ 'is-current': view === 'sub' }" :aria-pressed="(view === 'sub').toString()"
+                @click="setView('sub')">Sub/Tactile 5&ndash;300 Hz</button>
+        <button type="button" class="btn-small" :class="{ 'is-current': view === 'full' }" :aria-pressed="(view === 'full').toString()"
+                @click="setView('full')">Full 10 Hz&ndash;20 kHz</button>
+      </span>
+      <span class="seg" role="group" aria-label="Vertical scale">
+        <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Auto-fit</button>
+        <button type="button" class="btn-small" @click="resetY()" title="Back to the default scale">Reset</button>
+      </span>
+    </div>
+    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the selected outputs and their sum"></div>
+    <ul class="graph-warnings" x-show="warnings.length" x-cloak>
+      <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
+    </ul>
+    <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+    <p class="hint" x-show="empty" x-cloak>No output is selected (muted outputs can't be).</p>
+    <p class="hint"><strong>Electrical sum</strong>: the complex sum of the selected outputs' full chains (routing, input and
+      output PEQ, crossover, FIR, polarity, delay and gain) on preset {{ preset + 1 }}. It ignores drivers, transducers,
+      amplifiers and the room, so it shows how delay and polarity line up, not what you will hear or feel.</p>
+  </section>
+
+  <section class="card" aria-labelledby="integration-title">
+    <div class="card-head">
+      <h2 id="integration-title">Integration <span class="muted">phase difference, {{ integration_range[0]|int }}&ndash;{{ integration_range[1]|int }} Hz</span></h2>
+    </div>
+    <div class="integration-pair">
+      <label>Compare
+        <select x-model="pairA" @change="load()" aria-label="First output">
+          <option value="">&mdash;</option>
+          {% for o in system_outputs %}<option value="{{ o.index }}">{{ o.name }}</option>{% endfor %}
+        </select></label>
+      <label>with
+        <select x-model="pairB" @change="load()" aria-label="Second output">
+          <option value="">&mdash;</option>
+          {% for o in system_outputs %}<option value="{{ o.index }}">{{ o.name }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <div class="graph-box" x-ref="integration" x-show="integrationOn"
+         aria-label="Phase difference of the two outputs; shaded where it exceeds {{ threshold|int }} degrees"></div>
+    <p class="integration-cursor" x-show="integrationOn" x-text="cursor || 'Hover the graph for values'"></p>
+    <p class="hint" x-show="integrationNote" x-text="integrationNote" x-cloak></p>
+    <template x-if="integrationOn">
+      <div>
+        <p class="integration-ok" x-show="!regions.length"><span aria-hidden="true">&#10003;</span>
+          No cancellation region: |&Delta;&phi;| stays within {{ threshold|int }}&deg;.</p>
+        <div x-show="regions.length">
+          <p><span aria-hidden="true">&#9888;</span> Cancellation risk (|&Delta;&phi;| &gt; {{ threshold|int }}&deg;, shaded):</p>
+          <ul class="integration-regions">
+            <template x-for="r in regions" :key="r.f_lo"><li><span x-text="r.text"></span></li></template>
+          </ul>
+        </div>
+      </div>
+    </template>
+    <p class="hint">&Delta;&phi; is the first output's phase minus the second's (electrical, delay and polarity included).
+      Where it is larger than {{ threshold|int }}&deg; the two partly cancel; adjust the delay or flip the polarity of one
+      output to move or remove these regions. The level difference matters too: a region where one output is much
+      quieter than the other cancels little.</p>
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if session is not none and not state_error and not page_error %}
+<script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/graph.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/system.js?v={{ asset_version }}"></script>
+{% endif %}
+{% endblock %}

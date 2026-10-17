@@ -22,9 +22,9 @@ def _script_order(html: str) -> list[str]:
 
 async def test_output_tabs_light_up_with_their_templates(ctx):
     html = (await ctx.http.get("/outputs/2")).text
-    for label in ("Crossover", "PEQ", "Response"):
+    for label in ("Crossover", "PEQ", "Compressor", "Response"):
         assert re.search(rf'<a class="tab"[^>]*tab={label.lower()}[^>]*>{label}</a>', html), label
-    assert re.search(r'class="tab is-disabled"[^>]*>Compressor<', html)
+    assert "is-disabled" not in html.split('<nav class="tabs"')[1].split("</nav>")[0]
 
 
 async def test_peq_tab_mounts_the_editor_with_its_routes(ctx):

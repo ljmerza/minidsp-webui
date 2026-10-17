@@ -1,0 +1,214 @@
+{#- REW biquad import/export for one PEQ bank or crossover (docs 05 §5). Include it with the bank set:
+      {% with rew_bank = "outputs." ~ channel.index ~ ".peq" %}{% include "partials/rew_buttons.html" %}{% endwith %}
+    rew_bank is inputs.N.peq, outputs.N.peq or outputs.N.crossover. Needs root, serial, preset and session in the
+    context. The file is previewed (filters, recognized designs, problems) before anything changes; the editors pick
+    up the result from the "desired" event. -#}
+{%- set rew_xover = rew_bank.endswith(".crossover") -%}
+{%- set rew_api = root ~ "/api/v1" -%}
+{%- set rew_preset_url = rew_api ~ "/devices/" ~ serial ~ "/presets/" ~ preset -%}
+{%- set rew_cfg = {
+  "bank": rew_bank, "crossover": rew_xover,
+  "previewUrl": rew_api ~ "/import/rew",
+  "importUrl": rew_preset_url ~ "/import/rew",
+  "exportUrl": rew_preset_url ~ "/export/rew?download=true&bank=" ~ rew_bank,
+  "bands": session.profile.peq_per_input if rew_bank.startswith("inputs.") else session.profile.peq_per_output,
+  "groups": session.profile.crossover_groups, "biquads": session.profile.crossover_biquads
+} -%}
+<script>
+  window.rewButtons = window.rewButtons || function rewButtons(cfg) {
+    'use strict';
+    const toast = (message, level) => window.mdsp && window.mdsp.toast && window.mdsp.toast(message, level);
+    const range = (n) => Array.from({ length: n }, (_, k) => k);
+
+    async function post(url, body) {
+      let response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          credentials: 'same-origin',
+        });
+      } catch {
+        return { ok: false, status: 0, data: { detail: 'the web UI server is unreachable' } };
+      }
+      return { ok: response.ok, status: response.status, data: await response.json().catch(() => null) };
+    }
+
+    function errorText(res) {
+      const d = res.data || {};
+      const detail = typeof d.detail === 'string' ? d.detail : `Import refused (HTTP ${res.status})`;
+      return d.problems && d.problems.length ? `${detail}: ${d.problems.join('; ')}` : detail;
+    }
+
+    return {
+      cfg,
+      fileName: '',
+      text: '',
+      parsed: null,
+      busy: false,
+      index: 'all',
+      biquad: 'all',
+      pick: '',
+      unbypass: true,
+      bandOptions: range(cfg.bands),
+      groupOptions: range(cfg.groups),
+      biquadOptions: range(cfg.biquads),
+
+      async choose(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        if (file.size > 100000) {
+          toast(`${file.name} is too large for a REW biquad file`);
+          return;
+        }
+        this.fileName = file.name;
+        this.text = await file.text();
+        this.busy = true;
+        const res = await post(cfg.previewUrl, { text: this.text });
+        this.busy = false;
+        if (!res.ok) {
+          toast(errorText(res));
+          return;
+        }
+        this.parsed = res.data;
+        // A crossover file goes into group 1 unless it needs both groups: filling both would turn the other group
+        // (often a protective high-pass) into pass-through.
+        this.index = cfg.crossover && this.parsed.filters.length <= cfg.biquads ? '0' : 'all';
+        this.biquad = 'all';
+        this.pick = '';
+      },
+
+      slots() {
+        if (!cfg.crossover) return this.index === 'all' ? cfg.bands : 1;
+        return (this.index === 'all' ? cfg.groups : 1) * (this.biquad === 'all' ? cfg.biquads : 1);
+      },
+
+      // The Filter select only shows (and only counts) while the target has fewer slots than the file has filters.
+      picking() {
+        return !!this.parsed && this.slots() < this.parsed.filters.length;
+      },
+
+      summary() {
+        if (!this.parsed) return '';
+        const n = this.parsed.filters.length;
+        return `${n} filter${n === 1 ? '' : 's'}`;
+      },
+
+      canApply() {
+        return !this.busy && this.parsed && this.parsed.ok && this.slots() > 0;
+      },
+
+      async apply() {
+        if (!this.canApply()) return;
+        const body = {
+          text: this.text,
+          bank: cfg.bank,
+          index: this.index === 'all' ? 'all' : Number(this.index),
+          biquad: this.biquad === 'all' ? 'all' : Number(this.biquad),
+          unbypass: this.unbypass,
+        };
+        if (this.pick !== '' && this.picking()) body.pick = Number(this.pick);
+        this.busy = true;
+        let res = await post(cfg.importUrl, body);
+        if (res.status === 409 && res.data && res.data.error === 'confirmation_required') {
+          if (window.confirm(`${res.data.detail}.\n\nImport it anyway?`)) {
+            res = await post(cfg.importUrl, { ...body, confirm: true });
+          } else {
+            this.busy = false;
+            return;
+          }
+        }
+        this.busy = false;
+        if (!res.ok) {
+          toast(errorText(res));
+          return;
+        }
+        const warnings = (res.data.warnings || []).map((w) => w.message);
+        toast(`Imported ${this.fileName}${warnings.length ? ` (${warnings.join('; ')})` : ''}`, 'info');
+        this.cancel();
+      },
+
+      cancel() {
+        this.parsed = null;
+        this.text = '';
+        this.fileName = '';
+      },
+
+      exportFile() {
+        window.location.href = cfg.exportUrl;
+      },
+    };
+  };
+</script>
+<div class="rew" x-data='rewButtons({{ rew_cfg|tojson }})'>
+  <div class="peq-actions">
+    <button type="button" @click="$refs.file.click()" :disabled="busy"
+            title="Import biquad coefficients exported by REW (miniDSP format, 96 kHz)">Import REW&hellip;</button>
+    <input type="file" accept=".txt,text/plain" x-ref="file" hidden @change="choose($event)">
+    <button type="button" @click="exportFile()"
+            title="{{ 'Both crossover groups' if rew_xover else 'Every band' }} as REW biquad text; bypassed ones as pass-through">Export REW</button>
+  </div>
+
+  <fieldset class="drawer" x-show="parsed" x-cloak>
+    <legend>Import <span x-text="fileName"></span>: <span x-text="summary()"></span></legend>
+    <template x-if="parsed">
+      <div class="drawer">
+        <ol x-show="parsed.filters.length">
+          <template x-for="f in parsed.filters" :key="f.line">
+            <li><span class="muted" x-text="`biquad${f.number}`"></span> <span x-text="f.label"></span></li>
+          </template>
+        </ol>
+        <ul class="field-error" x-show="parsed.errors.length">
+          <template x-for="e in parsed.errors" :key="`${e.line}:${e.message}`">
+            <li x-text="e.line ? `Line ${e.line}: ${e.message}` : e.message"></li>
+          </template>
+        </ul>
+        <ul class="hint" x-show="parsed.warnings.length">
+          <template x-for="w in parsed.warnings" :key="`${w.line}:${w.message}`">
+            <li x-text="`Line ${w.line}: ${w.message}`"></li>
+          </template>
+        </ul>
+
+        <div class="drawer-actions" x-show="parsed.ok">
+          {% if rew_xover %}
+          <label>Group
+            <select x-model="index" @change="pick = ''">
+              <option value="all">Both</option>
+              <template x-for="g in groupOptions" :key="g"><option :value="g" x-text="g + 1"></option></template>
+            </select></label>
+          <label>Biquad
+            <select x-model="biquad" @change="pick = ''">
+              <option value="all">All</option>
+              <template x-for="k in biquadOptions" :key="k"><option :value="k" x-text="k + 1"></option></template>
+            </select></label>
+          {% else %}
+          <label>Into
+            <select x-model="index" @change="pick = ''">
+              <option value="all">All bands (clears the rest)</option>
+              <template x-for="k in bandOptions" :key="k"><option :value="k" x-text="`Band ${k + 1}`"></option></template>
+            </select></label>
+          {% endif %}
+          <label x-show="picking()">Filter
+            <select x-model="pick">
+              <option value="">In file order</option>
+              <template x-for="(f, n) in parsed.filters" :key="f.line">
+                <option :value="n + 1" x-text="`${n + 1}: ${f.label}`"></option>
+              </template>
+            </select></label>
+          <label><input type="checkbox" x-model="unbypass"> Enable imported filters</label>
+        </div>
+        <div class="drawer-actions">
+          <button type="button" @click="apply()" :disabled="!canApply()">Import</button>
+          <button type="button" class="btn-small" @click="cancel()">Cancel</button>
+        </div>
+        <p class="hint">
+          {%- if rew_xover %} Slots fill group by group in file order; slots left in the chosen range become pass-through.
+          {%- else %} Filters fill the bands in file order. {% endif %}
+          Coefficients are used exactly as written (miniDSP convention, 96 kHz). Imported filters are enabled only once
+          the device has confirmed their coefficients.</p>
+      </div>
+    </template>
+  </fieldset>
+</div>

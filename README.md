@@ -56,6 +56,7 @@ Works with minidspd 0.1.12, the current minidsp-rs release.
 | `GAIN_MIN_DB` / `GAIN_MAX_DB` | `-72` / `12` | Allowed range for channel and routing gains |
 | `GAIN_STEP_CONFIRM_DB` | `6` | Raising a level by more than this in one step asks for confirmation (also a PEQ band's or crossover group's peak boost) |
 | `PEQ_MAX_BOOST_DB` | `24` | Most a single PEQ band or crossover group may boost; larger boosts are refused |
+| `FIR_EXPERIMENTAL` | `false` | Show the FIR tab on models whose FIR support is unverified (the 2x4HD). Loading taps mutes the device briefly. Also a toggle on the Settings page, which overrides this |
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices |
 | `WRITE_COALESCE_MS` | `50` | Gather window for edits before they are written to the device |
 | `MUTE_WRAP_BULK_APPLY` | `true` | Mute the affected outputs while a bulk apply (push, import, profile load) runs |

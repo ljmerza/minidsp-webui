@@ -11,14 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__, web
 from app.api import v1
 from app.api.errors import register_exception_handlers
+from app.api.limits import BodyLimitMiddleware
 from app.bus import Bus
 from app.config import Settings, get_settings
 from app.daemon.client import DaemonClient
 from app.mqtt import create_bridge
 from app.state import Database, Repo
+from app.sync.fir import restore_fir_capability
 from app.sync.session import SessionManager
 from app.web import filters as filters_ui
 from app.web import state_ui
+from app.web import system as system_ui
 from app.web.settings_ui import apply_stored_runtime_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -64,6 +67,7 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         if repo:
             await apply_stored_runtime_settings(repo, settings)  # values saved on the Settings page override the env
         manager = SessionManager(daemon, bus, settings, repo=repo)
+        await restore_fir_capability(repo, settings, manager)  # the persisted experimental-FIR toggle
         mqtt = create_bridge(manager, bus, settings)
         app.state.bus = bus
         app.state.client = daemon
@@ -93,10 +97,12 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app = FastAPI(title="minidsp-webui", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     register_exception_handlers(app)
+    app.add_middleware(BodyLimitMiddleware)  # caps upload/import bodies before they are spooled or parsed
     app.include_router(v1.build_router())
     app.include_router(web.router)
     app.include_router(state_ui.router)
     app.include_router(filters_ui.router)
+    app.include_router(system_ui.router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
