@@ -32,9 +32,18 @@ from app.config import Settings
 from app.daemon.client import DaemonClient, DaemonError, DaemonUnavailable, DeviceNotFound
 from app.daemon.monitor import DeviceMonitor
 from app.dsp.recognize import annotate_designs
-from app.dsp.response import peak_gain_db
+from app.dsp.response import fir_peak_gain_db, peak_gain_db
 from app.formats.cli_script import ParsedScript, ScriptIssue, export_script, parse_script
-from app.model.config_doc import ConfigDoc, PathError, default_config_doc, diff_paths, flatten, set_path, validate_doc
+from app.model.config_doc import (
+    ConfigDoc,
+    Fir,
+    PathError,
+    default_config_doc,
+    diff_paths,
+    flatten,
+    set_path,
+    validate_doc,
+)
 from app.model.device_profile import DeviceProfile, profile_for
 from app.model.master import DaemonDevice, MasterStatus, MasterUpdate, StatusSummary
 from app.model.payload import device_values, same_value, value_problem
@@ -47,10 +56,16 @@ log = logging.getLogger(__name__)
 
 COMMIT_IDLE_S = 5.0
 _FILTER_UNIT = re.compile(r"(inputs|outputs)\.(\d+)\.(peq|crossover)\.(\d+)\.")
+_FIR_UNIT = re.compile(r"outputs\.(\d+)\.fir\.")
 BULK_TIMEOUT_S = 60.0  # longest a bulk apply (push-all, import, adopt) is awaited by the caller
-COMPRESSOR_THRESHOLD_RANGE = (-90.0, 0.0)  # spike-results §5: the device stores any float, keep it sane
 _MISSING = object()
 NO_PRESET = -1  # what the writer sees as "active" while a preset switch is in progress: nothing matches it
+# minidspd mutes the device while it loads FIR taps (docs 03 §4), so changing them always needs confirm (docs 05).
+FIR_LOAD_WARNING = (
+    "loading a FIR filter{gain} makes the device mute while the taps load, so audio drops out briefly; "
+    "repeat with confirm"
+)
+FIR_CLEAR_WARNING = "clearing a FIR filter reloads it on the device, so audio drops out briefly; repeat with confirm"
 # Reserved key in the stored applied shadow (never a dotted path): paths that were edited while their device value was
 # unknown and still have to be written. Without it a staged edit to an unknown path would be forgotten on restart.
 PENDING_KEY = "#pending"
@@ -273,6 +288,7 @@ class DeviceSession:
         self.load_error: str | None = None
         self.adoption: dict[str, Any] | None = None
         self.channel_meta: dict[tuple[str, int], ChannelMeta] = {}
+        self._fir_gains: dict[str, float] = {}  # FIR blob id -> peak gain (dB); blobs are content-addressed
         self.revisions: dict[int, int] = {}
         self._baseline: dict[int, ConfigDoc] = {}  # desired doc at the last commit
         self._flat_cache: dict[int, tuple[ConfigDoc, dict[str, Any]]] = {}
@@ -684,6 +700,20 @@ class DeviceSession:
         blob = await self.repo.get_fir_blob(blob_id)
         return None if blob is None or blob.taps is None else blob.taps.tolist()
 
+    async def _prime_fir(self, *docs: ConfigDoc) -> None:
+        """Look up the peak gain of every FIR blob ``docs`` refer to, for the synchronous `_validate`."""
+        if not self.profile.fir_supported or self.repo is None:
+            return
+        for doc in docs:
+            for out in doc.outputs:
+                blob_id = out.fir.blob_id
+                if blob_id is None or blob_id in self._fir_gains:
+                    continue
+                blob = await self.repo.get_fir_blob(blob_id)
+                if blob is not None and blob.taps is not None:
+                    gain = await asyncio.to_thread(fir_peak_gain_db, blob.taps, self.profile.sample_rate)
+                    self._fir_gains[blob_id] = gain
+
     def _on_applied(self, preset: int, _state: PresetState) -> None:
         self._schedule_persist(preset)
 
@@ -989,21 +1019,25 @@ class DeviceSession:
                 continue
             if reason := self._ceiling_problem(path, value):
                 problems.append(f"{path}: {reason}")
-            if path.endswith(".compressor.threshold_db") and isinstance(value, int | float):
-                low, high = COMPRESSOR_THRESHOLD_RANGE
-                if not low <= value <= high:
-                    problems.append(f"{path}: threshold {value:g} dB outside {low:g}..{high:g}")
+        firs = sorted({int(m.group(1)) for p in (new_values if all_paths else changed) if (m := _FIR_UNIT.match(p))})
+        problems += self._fir_problems(old, new, firs)
         if problems:
             raise DesiredValidationError("invalid settings", problems)
         boosts = self._filter_boosts(old, new, changed)
+        boosts += [
+            (f"outputs.{n}.fir", self._fir_peak(old.outputs[n].fir), self._fir_peak(new.outputs[n].fir)) for n in firs
+        ]
         limit = self.settings.peq_max_boost_db
         too_big = [
-            f"{unit}: boosts {after:.1f} dB, more than the {limit:g} dB a band or group may add"
+            f"{unit}: boosts {after:.1f} dB, more than the {limit:g} dB a filter may add"
             for unit, before, after in boosts
             if after > limit and after > before + 0.01
         ]
         if too_big:
             raise DesiredValidationError("filter boost too large", too_big)
+        loads = [n for n in firs if old.outputs[n].fir.blob_id != new.outputs[n].fir.blob_id]
+        if loads and not confirm:
+            raise ConfirmationRequired(self._fir_warning([new.outputs[n].fir for n in loads], loads))
         step = self.settings.gain_step_confirm_db
         if not confirm and step > 0:
             raises = [
@@ -1017,6 +1051,32 @@ class DeviceSession:
                 text = ", ".join(f"{p} by {delta:.3g} dB" for p, delta in raises)
                 raise ConfirmationRequired(f"raising {text} needs confirmation (more than {step:g} dB at once)")
         return changed
+
+    def _fir_problems(self, old: ConfigDoc, new: ConfigDoc, outputs: Sequence[int]) -> list[str]:
+        """A changed FIR must point at a stored blob, and an enabled one must have taps: a cleared FIR passes no
+        audio."""
+        problems = []
+        for n in outputs:
+            before, after = old.outputs[n].fir, new.outputs[n].fir
+            path = f"outputs.{n}.fir"
+            if after.blob_id is not None and after.blob_id != before.blob_id and after.blob_id not in self._fir_gains:
+                problems.append(f"{path}.blob_id: no stored FIR filter {after.blob_id!r}")
+            if not after.bypass and after.blob_id is None:
+                problems.append(f"{path}.bypass: load a FIR filter first; an empty FIR passes no audio")
+        return problems
+
+    def _fir_peak(self, fir: Fir) -> float:
+        """Peak gain a FIR adds; bypassed (or not yet known) counts as 0 dB, like a bypassed PEQ band."""
+        if fir.bypass or fir.blob_id is None:
+            return 0.0
+        return self._fir_gains.get(fir.blob_id, 0.0)
+
+    def _fir_warning(self, firs: Sequence[Fir], outputs: Sequence[int]) -> str:
+        loaded = [(n, f.blob_id) for n, f in zip(outputs, firs, strict=True) if f.blob_id is not None]
+        if not loaded:
+            return FIR_CLEAR_WARNING
+        gains = [f"output {n + 1}: peak gain {self._fir_gains[b]:+.1f} dB" for n, b in loaded if b in self._fir_gains]
+        return FIR_LOAD_WARNING.format(gain=f" ({'; '.join(gains)})" if gains else "")
 
     def _filter_boosts(self, old: ConfigDoc, new: ConfigDoc, paths: Sequence[str]) -> list[tuple[str, float, float]]:
         """``(band or group path, peak dB before, peak dB after)`` for each PEQ band / crossover group that ``paths``
@@ -1069,6 +1129,7 @@ class DeviceSession:
             if patch.get("schema_version", current.schema_version) != current.schema_version:
                 raise DesiredValidationError("invalid patch", ["schema_version: can't be changed"])
             new = parse_doc(merge_patch(current.model_dump(mode="json"), patch))
+            await self._prime_fir(current, new)
             change = self._stage(preset, new, confirm=confirm, source=source, summary=summary)
         return await self._finish(preset, change, commit=commit)
 
@@ -1130,6 +1191,7 @@ class DeviceSession:
         async with self._edit_lock:
             await self._check_revision(preset, expected_revision)
             new = parse_doc(doc.model_dump(mode="json"))
+            await self._prime_fir(self.writer.state(preset).desired, new)
             change = self._stage(preset, new, confirm=confirm, source=source, summary=summary, check_all=True)
         return await self._finish(preset, change, commit=commit, bulk=bulk, timeout=timeout)
 
@@ -1420,7 +1482,8 @@ class DeviceSession:
             if problems:
                 raise DesiredValidationError("invalid settings", problems)
             if mode == AdoptMode.PUSH:
-                self._validate(old, new, confirm=True, all_paths=True)  # ceilings, compressor ranges
+                await self._prime_fir(old, new)
+                self._validate(old, new, confirm=True, all_paths=True)  # ceilings, compressor ranges, FIR
             elif ceilings := self._ceiling_problems(new):
                 raise DesiredValidationError(
                     "gains above a channel's ceiling (raise the ceiling in Settings if the device really has them)",
@@ -1509,6 +1572,7 @@ class DeviceSession:
             except (PathError, ValidationError) as exc:
                 raise DesiredValidationError(f"the script can't be applied: {exc}") from None
             new = await asyncio.to_thread(annotate_designs, new)
+            await self._prime_fir(self.writer.state(preset).desired, new)
             summary = f"import CLI script ({len(parsed.ops)} setting(s))"
             change = self._stage(preset, new, confirm=confirm, source="import", summary=summary)
         result = await self._finish(preset, change, commit=commit, bulk=True, timeout=timeout)
@@ -1591,7 +1655,10 @@ class SessionManager:
             if serial is None:
                 continue  # still being probed by the daemon
             profile = profile_for(
-                device.product_name, gain_min_db=self.settings.gain_min_db, gain_max_db=self.settings.gain_max_db
+                device.product_name,
+                gain_min_db=self.settings.gain_min_db,
+                gain_max_db=self.settings.gain_max_db,
+                fir_supported=True if getattr(self.settings, "fir_experimental", False) else None,
             )
             if profile is None:
                 self.unsupported.append(device)
@@ -1650,6 +1717,8 @@ class SessionManager:
 __all__ = [
     "AdoptMode",
     "AdoptResult",
+    "FIR_CLEAR_WARNING",
+    "FIR_LOAD_WARNING",
     "ConfirmationRequired",
     "DesiredValidationError",
     "DeviceSession",

@@ -83,6 +83,10 @@ class PresetState:
             self._values_for = self.desired
         return self._values
 
+    def forget_values(self) -> None:
+        """Drop the cached device values (they depend on the profile)."""
+        self._values_for = None
+
     def unknown_paths(self, profile: DeviceProfile) -> list[str]:
         return [p for p in self.values(profile) if p not in self.applied]
 
@@ -215,6 +219,15 @@ class DeviceWriter:
             return self.presets[preset]
         except KeyError:
             raise KeyError(f"preset {preset} is not attached to the writer") from None
+
+    def set_profile(self, profile: DeviceProfile) -> None:
+        """Swap the device profile (e.g. FIR support toggled): device paths come and go, so the cached values are
+        dropped and every preset's sync status is republished."""
+        self.profile = profile
+        for state in self.presets.values():
+            state.forget_values()
+        for preset in list(self.presets):
+            self.notify(preset)
 
     def set_desired(self, preset: int, desired: ConfigDoc) -> list[str]:
         """Replace the desired document; the changed device paths are queued. Returns them."""

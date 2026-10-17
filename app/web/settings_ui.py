@@ -19,6 +19,7 @@ from starlette.datastructures import FormData
 from app.api.deps import require_same_origin
 from app.config import Settings
 from app.state import Repo
+from app.sync import fir as fir_svc
 from app.sync.session import DesiredValidationError, DeviceSession, SessionManager
 from app.web.ui_common import (
     KINDS,
@@ -147,13 +148,25 @@ def mqtt_context(request: Request, session: DeviceSession | None) -> dict[str, A
     }
 
 
+def fir_context(request: Request, **extra: Any) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    return {
+        "enabled": fir_svc.fir_experimental(settings),
+        "fir_url": url(request, "/ui/settings/fir"),
+        "persisted": repo_of(request) is not None,
+        "error": None,
+        "saved": False,
+        **extra,
+    }
+
+
 @router.get("/settings", response_class=HTMLResponse, name="settings_page")
 async def settings_page(request: Request, serial: int | None = None) -> Response:
     session = pick_session(request, serial)
     if serial is not None and session is None:
         return not_found_page(request, serial)
     ctx = edit_page_context(request, session, "Settings")
-    ctx.update(runtime=runtime_context(request), mqtt=mqtt_context(request, session))
+    ctx.update(runtime=runtime_context(request), mqtt=mqtt_context(request, session), fir=fir_context(request))
     if session is not None:
         error = await load_state(session)
         if error:
@@ -318,6 +331,33 @@ async def save_runtime(request: Request) -> Response:
         if session is not None:
             session.log_event("info", f"settings changed: {changed}", kind="settings", changes=changed)
     return render(request, "partials/settings_runtime.html", {"runtime": runtime_context(request, saved=True)})
+
+
+@router.post("/ui/settings/fir", response_class=HTMLResponse)
+async def save_fir(request: Request) -> Response:
+    """The experimental FIR toggle (also at ``PUT /api/v1/fir/capability``). The page reloads so the tab follows."""
+    if not is_htmx(request):
+        return PlainTextResponse("HTMX request expected", status_code=400)
+    form = await request.form()
+    enabled = form.get("fir_experimental") is not None
+    settings: Settings = request.app.state.settings
+    before = fir_svc.fir_experimental(settings)
+    manager = manager_of(request)
+    try:
+        await fir_svc.set_fir_capability(enabled, settings=settings, sessions=manager, repo=repo_of(request))
+    except Exception as exc:
+        message = f"Saving failed: {exc}"
+        ctx = {"fir": fir_context(request, error=message)}
+        return render(request, "partials/settings_fir.html", ctx, status_code=503, error=message)
+    if before != enabled:
+        session = manager.default()
+        if session is not None:
+            state = "on" if enabled else "off"
+            session.log_event("info", f"experimental FIR turned {state}", kind="settings", changes={"fir": enabled})
+    response = render(request, "partials/settings_fir.html", {"fir": fir_context(request, saved=True)})
+    if before != enabled:
+        response.headers["HX-Refresh"] = "true"  # output pages and the nav pick up the FIR tab on the next render
+    return response
 
 
 # --- Home Assistant ---------------------------------------------------------------------------------------------------

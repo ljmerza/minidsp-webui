@@ -1,0 +1,74 @@
+{#- Output page, Compressor tab (docs 05 §4): enable, threshold/ratio/attack/release, presets and the approximate
+    hard-knee transfer curve (docs 04 §6). Needs serial, preset and channel; talks to app/api/v1/compressor_fir.py. -#}
+{%- set cfg = {
+  "channel": channel.index, "preset": preset,
+  "url": root ~ "/api/v1/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/compressor"
+} -%}
+<link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
+<script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/compressor.js?v={{ asset_version }}"></script>
+
+<div class="compressor" x-data='compressorEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
+  <div class="card-head">
+    <h2>Compressor</h2>
+    <span class="xover-presets" role="group" aria-label="Presets">
+      <span class="hdr-label">Presets</span>
+      <template x-for="(p, key) in presets" :key="key">
+        <button type="button" class="btn-small" @click="applyPreset(key)" :disabled="inflight" :title="p.note"
+                x-text="p.label"></button>
+      </template>
+    </span>
+  </div>
+  <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+
+  <section class="xover-group" :class="{ 'is-bypassed': bypass }" aria-label="Compressor settings"
+           style="--group: var(--accent)">
+    <header class="xover-head">
+      <h3>Dynamics</h3>
+      <span class="xover-label" x-text="bypass ? 'bypassed' : `limits up to ${reduction().toFixed(1)} dB at 0 dBFS`"></span>
+      <span class="sync-badge is-compact" :class="`sync-${status()}`" :title="status()">
+        <span class="sync-icon" aria-hidden="true" x-text="icon()"></span>
+        <span class="sync-text visually-hidden" x-text="status()"></span>
+      </span>
+      <label class="enable">
+        <input type="checkbox" :checked="!bypass" :disabled="!loaded || inflight" @change="setEnabled($event.target.checked)">
+        <span x-text="bypass ? 'bypassed' : 'enabled'"></span>
+      </label>
+    </header>
+    <div class="xover-fields">
+      <label>Threshold
+        <span class="num-field"><input type="number" class="num" inputmode="decimal" step="0.5"
+               :min="range('threshold_db')[0]" :max="range('threshold_db')[1]" :class="{ 'is-invalid': invalid('threshold_db') }"
+               x-model.number="form.threshold_db" @input="render()" @change="commit('threshold_db')"> <span class="unit">dBFS</span>
+          <span class="sync-icon" :class="`sync-${status('threshold_db')}`" :title="status('threshold_db')" x-text="icon('threshold_db')"></span></span></label>
+      <label>Ratio
+        <span class="num-field"><input type="number" class="num" inputmode="decimal" step="0.5"
+               :min="range('ratio')[0]" :max="range('ratio')[1]" :class="{ 'is-invalid': invalid('ratio') }"
+               x-model.number="form.ratio" @input="render()" @change="commit('ratio')"> <span class="unit">:1</span>
+          <span class="sync-icon" :class="`sync-${status('ratio')}`" :title="status('ratio')" x-text="icon('ratio')"></span></span></label>
+      <label>Attack
+        <span class="num-field"><input type="number" class="num" inputmode="decimal" step="1"
+               :min="range('attack_ms')[0]" :max="range('attack_ms')[1]" :class="{ 'is-invalid': invalid('attack_ms') }"
+               x-model.number="form.attack_ms" @change="commit('attack_ms')"> <span class="unit">ms</span>
+          <span class="sync-icon" :class="`sync-${status('attack_ms')}`" :title="status('attack_ms')" x-text="icon('attack_ms')"></span></span></label>
+      <label>Release
+        <span class="num-field"><input type="number" class="num" inputmode="decimal" step="1"
+               :min="range('release_ms')[0]" :max="range('release_ms')[1]" :class="{ 'is-invalid': invalid('release_ms') }"
+               x-model.number="form.release_ms" @change="commit('release_ms')"> <span class="unit">ms</span>
+          <span class="sync-icon" :class="`sync-${status('release_ms')}`" :title="status('release_ms')" x-text="icon('release_ms')"></span></span></label>
+    </div>
+    <label class="visually-hidden" for="comp-threshold-{{ channel.index }}">Threshold slider</label>
+    <input id="comp-threshold-{{ channel.index }}" type="range" step="0.5"
+           :min="range('threshold_db')[0]" :max="range('threshold_db')[1]"
+           x-model.number="form.threshold_db" @input="render()" @change="commit('threshold_db')">
+  </section>
+
+  <div class="graph-box">
+    <h3>Transfer curve <span class="muted">(approximate, hard knee)</span></h3>
+    <div class="graph-canvas" x-ref="graph" role="img"
+         :aria-label="`Static curve: unity up to ${form.threshold_db} dBFS, then ${ratioText()}`"></div>
+  </div>
+  <ul class="graph-warnings">
+    <template x-for="note in notes" :key="note"><li x-text="note"></li></template>
+  </ul>
+</div>

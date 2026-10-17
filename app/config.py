@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Most a single PEQ band or crossover group may boost (its peak gain over 5 Hz-24 kHz); larger boosts are refused.
     peq_max_boost_db: float = Field(default=24.0, ge=0.0, le=60.0)
 
+    # Experimental: FIR on models whose profile doesn't claim it (unverified on the 2x4HD; loading taps mutes it)
+    fir_experimental: bool = False
+
     # Monitor
     monitor_backoff_min_s: float = 0.5
     monitor_backoff_max_s: float = 10.0

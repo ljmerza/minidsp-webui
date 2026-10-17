@@ -1,0 +1,15 @@
+{#- Experimental FIR toggle. Rendered with ``fir``. Saving reloads the page so the output pages show or hide the FIR tab. -#}
+<form id="settings-fir" class="settings-form" hx-post="{{ fir.fir_url }}" hx-target="this" hx-swap="outerHTML">
+  {% if fir.error %}
+    <div class="form-errors" role="alert"><p>{{ fir.error }}</p></div>
+  {% elif fir.saved %}
+    <p class="form-saved" role="status">Saved{% if not fir.persisted %} until the app restarts (no database){% endif %}.</p>
+  {% endif %}
+  <label class="check"><input type="checkbox" name="fir_experimental"{% if fir.enabled %} checked{% endif %}
+         aria-describedby="fir-hint">
+    Experimental FIR</label>
+  <p class="hint" id="fir-hint"><span aria-hidden="true">&#9888;</span> FIR on the 2x4HD is unverified. Loading taps
+    mutes the device while they load. With this on, each output gets a FIR tab and push-all includes the FIR. Turning it
+    off only hides the tab: clear any loaded FIR first.</p>
+  <button type="submit">Save</button>
+</form>

@@ -1,0 +1,86 @@
+{#- Output page, FIR tab (docs 05 §4), shown only when the device profile has FIR support (experimental toggle in
+    Settings). Upload -> preview -> confirmed load; enable/bypass and clear. Talks to app/api/v1/compressor_fir.py. -#}
+{%- set cfg = {
+  "channel": channel.index, "preset": preset,
+  "url": root ~ "/api/v1/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/fir"
+} -%}
+<link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
+<script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/fir.js?v={{ asset_version }}"></script>
+
+<div class="fir" x-data='firEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
+  <div class="card-head">
+    <h2>FIR <span class="muted">(experimental)</span></h2>
+  </div>
+  <p class="banner banner-warn">FIR is unverified on this device. Try it on a muted, unused output first.</p>
+  <p class="field-error" x-show="error" x-text="error" x-cloak></p>
+  <p class="banner banner-bad" x-show="loaded && !supported" x-cloak>
+    FIR is off for this device. Turn on experimental FIR in Settings to use it.</p>
+
+  <div x-show="supported">
+    <div class="drawer-actions">
+      <label class="file-pick">
+        <span>Upload .wav</span>
+        <input type="file" accept=".wav,audio/wav,audio/x-wav,audio/wave" :disabled="busy" @change="pick($event)">
+      </label>
+      <span class="hint">must be {{ (session.profile.sample_rate / 1000)|round|int }} kHz mono &middot;
+        max {{ session.profile.fir_max_taps }} taps</span>
+    </div>
+
+    <section class="xover-group" x-show="upload" x-cloak aria-label="Uploaded filter" style="--group: var(--warn)">
+      <header class="xover-head">
+        <h3>Uploaded, not loaded</h3>
+        <span class="xover-label" x-text="upload ? summary(upload.preview, upload.blob) : ''"></span>
+      </header>
+      <div class="drawer-actions">
+        <button type="button" @click="loadUpload()" :disabled="busy">Load to device &#9888; audio drops out briefly</button>
+        <button type="button" class="btn-small" @click="show(shown === 'upload' ? 'loaded' : 'upload')"
+                x-show="hasFilter()" x-text="shown === 'upload' ? 'Show loaded' : 'Show upload'"></button>
+        <button type="button" class="btn-small" @click="discardUpload()" :disabled="busy">Discard</button>
+      </div>
+    </section>
+
+    <section class="xover-group" :class="{ 'is-bypassed': !state || state.bypass }" aria-label="Loaded filter"
+             style="--group: var(--accent)">
+      <header class="xover-head">
+        <h3>On the device</h3>
+        <span class="xover-label"
+              x-text="hasFilter() ? (state.preview ? summary(state.preview, state.blob) : (state.blob_missing ? 'stored taps missing' : `${state.blob ? state.blob.n_taps : '?'} taps`)) : 'no filter loaded'"></span>
+        <span class="sync-badge is-compact" :class="`sync-${status()}`" :title="status()">
+          <span class="sync-icon" aria-hidden="true" x-text="icon()"></span>
+          <span class="sync-text visually-hidden" x-text="status()"></span>
+        </span>
+        <label class="enable">
+          <input type="checkbox" :checked="state && !state.bypass" :disabled="busy || !hasFilter()"
+                 @change="setEnabled($event.target.checked)">
+          <span x-text="!state || state.bypass ? 'bypassed' : 'enabled'"></span>
+        </label>
+      </header>
+      <div class="drawer-actions">
+        <button type="button" class="btn-small" @click="clear()" :disabled="busy || !hasFilter()">Clear</button>
+      </div>
+    </section>
+
+    <div class="graph-box">
+      <h3>Impulse <span class="muted" x-show="shown === 'upload'" x-cloak>(upload)</span></h3>
+      <div class="graph-canvas" x-ref="impulse" role="img" aria-label="FIR impulse response"></div>
+    </div>
+    <div class="graph-box">
+      <div class="graph-toolbar" role="toolbar" aria-label="Response">
+        <span class="seg" role="group" aria-label="Plot">
+          <button type="button" class="btn-small" :class="{ 'is-current': responseMode === 'magnitude' }"
+                  :aria-pressed="(responseMode === 'magnitude').toString()" @click="setMode('magnitude')">Magnitude</button>
+          <button type="button" class="btn-small" :class="{ 'is-current': responseMode === 'phase' }"
+                  :aria-pressed="(responseMode === 'phase').toString()" @click="setMode('phase')">Phase</button>
+          <button type="button" class="btn-small" :class="{ 'is-current': responseMode === 'excess' }"
+                  :aria-pressed="(responseMode === 'excess').toString()" @click="setMode('excess')"
+                  title="Phase with the latency estimate removed">Phase &minus; latency</button>
+        </span>
+      </div>
+      <h3 x-text="modeTitle()">Magnitude (dB)</h3>
+      <div class="graph-canvas" x-ref="response" role="img" aria-label="FIR frequency response"></div>
+    </div>
+    <p class="hint">Latency assumes a linear-phase filter when the impulse is symmetric, otherwise the position of its
+      largest tap. The device mutes while it loads FIR taps.</p>
+  </div>
+</div>

@@ -36,6 +36,16 @@ _COMPRESSOR_FIELDS = {
     "attack_ms": "attack",
     "release_ms": "release",
 }
+# Ranges the app accepts for compressor settings, on every write path. Threshold: spike results §5 (stored as plain
+# dB, never clamped by the device). Ratio, attack and release can't be read back, so their units are the documented
+# ones (x:1, ms) and the limits are conservative: a ratio below 1 would expand (add gain above the threshold).
+COMPRESSOR_RANGES: dict[str, tuple[float, float]] = {
+    "threshold_db": (-90.0, 0.0),
+    "ratio": (1.0, 100.0),
+    "attack_ms": (0.1, 2000.0),
+    "release_ms": (1.0, 5000.0),
+}
+_COMPRESSOR_UNITS = {"threshold_db": " dB", "ratio": "", "attack_ms": " ms", "release_ms": " ms"}
 _BIQUAD_KEYS = ("b0", "b1", "b2", "a1", "a2")
 
 
@@ -215,8 +225,10 @@ def value_problem(path: str, value: Any, profile: DeviceProfile) -> str | None:
                 return boolean()
             if not _finite(value):
                 return f"compressor {leaf} must be a finite number"
-            if leaf != "threshold_db" and value < 0:
-                return f"compressor {leaf} must not be negative"
+            low, high = COMPRESSOR_RANGES[leaf]
+            if not low <= value <= high:
+                name = leaf.removesuffix("_db").removesuffix("_ms")
+                return f"{name} {value:g}{_COMPRESSOR_UNITS[leaf]} outside {low:g}..{high:g}"
             return None
         case ["fir", ("bypass" | "blob_id") as leaf] if side == OUTPUTS:
             if not profile.fir_supported:

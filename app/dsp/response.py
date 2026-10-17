@@ -141,6 +141,15 @@ def fir_tf(taps: Sequence[float] | np.ndarray, freqs: np.ndarray, fs: float = FS
     return Tf(h, dh)
 
 
+def fir_peak_gain_db(taps: Sequence[float] | np.ndarray, fs: float = FS, n: int = 1024) -> float:
+    """Highest gain of a FIR filter (float32 taps) on a 5 Hz-24 kHz grid, in dB."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        peak = float(np.max(np.abs(fir_tf(taps, freq_grid(n=n), fs).h)))
+    if not math.isfinite(peak):
+        return math.inf
+    return 20 * math.log10(peak) if peak > 0 else DB_FLOOR
+
+
 def gain_factor(gain_db: float) -> float:
     return 10 ** (gain_db / 20)
 
