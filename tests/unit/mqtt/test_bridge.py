@@ -163,7 +163,7 @@ async def test_connect_publishes_discovery_availability_and_state(bridge, broker
     assert broker.retained[BRIDGE_AVAIL] == "online"
     assert broker.retained[AVAIL] == "online"
     discovery = {t: json.loads(v) for t, v in broker.retained.items() if t.startswith("homeassistant/")}
-    assert len(discovery) == 6
+    assert len(discovery) == 25  # 6 master/health + push-all + 4 x (gain, mute, delay) + 6 level sensors
     volume = discovery[f"homeassistant/number/minidsp_{SERIAL}/volume/config"]
     assert volume["min"] == -80.0 and volume["device"]["sw_version"] == "fw 1.75"
     assert volume["device"]["configuration_url"] == "http://minidsp.invalid:8480"
@@ -179,6 +179,8 @@ async def test_connect_publishes_discovery_availability_and_state(bridge, broker
         "preset_switching": None,
         "sync": "unknown",
         "sync_counts": {"synced": 0, "pending": 0, "failed": 0, "unknown": 0},
+        "outputs": [{"gain": None, "mute": None, "delay": None}] * 4,  # the preset state isn't loaded
+        "profile": None,
     }
     # Discovery is announced before the state the entities read.
     topics = [t for t, *_ in broker.published]

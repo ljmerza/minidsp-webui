@@ -68,6 +68,7 @@ Works with minidspd 0.1.12, the current minidsp-rs release.
 | `MQTT_DISCOVERY_PREFIX` | `homeassistant` | Home Assistant discovery prefix |
 | `MQTT_BASE_TOPIC` | `minidsp-webui` | Prefix for state, command and availability topics |
 | `MQTT_VOLUME_FLOOR_DB` | `-127` | Lowest master volume the Home Assistant slider offers |
+| `MQTT_LEVELS` | `false` | Feed the input/output level sensors (at most 1 Hz; keeps the device's level polling on) |
 
 Gain-step confirmation, the gather window, mute-wrap and reapply-on-reconnect can also be changed on the Settings
 page; values saved there take precedence over the environment.

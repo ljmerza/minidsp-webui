@@ -65,3 +65,14 @@ async def test_rew_json_is_capped(limited):
     for target in ("/api/v1/import/rew", url):
         response = await limited.post(target, json={"text": text, "bank": "outputs.0.peq"})
         assert response.status_code == 413
+
+
+def test_profile_import_limits_pick_the_right_route():
+    middleware = BodyLimitMiddleware(app=None)
+
+    def limit(path: str) -> int | None:
+        return middleware.limit_for({"type": "http", "method": "POST", "path": path})
+
+    assert limit("/api/v1/profiles/import") == JSON_BODY_LIMIT
+    assert limit("/ui/profiles/import") == (1 << 20) + MULTIPART_SLACK  # the multipart form needs the slack
+    assert limit("/api/v1/profiles") is None

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import require_same_origin
 from app.api.v1 import (
     adopt,
+    backup,
     compressor_fir,
     devices,
     dsp,
@@ -14,6 +15,7 @@ from app.api.v1 import (
     import_export,
     master,
     presets,
+    profiles,
     rew,
     status,
     system,
@@ -35,6 +37,8 @@ ROUTERS: list[APIRouter] = [
     compressor_fir.router,
     rew.router,
     system.router,
+    profiles.router,
+    backup.router,
 ]
 
 

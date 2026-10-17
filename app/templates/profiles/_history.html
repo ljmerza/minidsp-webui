@@ -1,0 +1,11 @@
+{#- One preset's revision timeline, newest first. Rendered with ``h`` (app/web/profiles.py history_context). -#}
+<p class="hint">Revisions are recorded when an edit is finished (a slider released, a form submitted, or 5 s without
+  edits). The newest 200 per preset are kept. Reverting writes the old settings back as a new revision.
+  {%- if h.uncommitted %} <strong>Preset {{ h.preset + 1 }} has edits that aren't recorded yet.</strong>{% endif %}</p>
+{% if not h.entries %}
+  <p class="muted">Preset {{ h.preset + 1 }} has no history yet.</p>
+{% else %}
+<ul class="timeline" aria-label="Revisions of preset {{ h.preset + 1 }}">
+  {% include "profiles/_history_rows.html" %}
+</ul>
+{% endif %}

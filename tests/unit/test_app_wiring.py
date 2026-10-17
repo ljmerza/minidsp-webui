@@ -60,3 +60,50 @@ async def test_app_serves_without_a_database(settings, client, daemon, tmp_path)
         assert (await http.get("/api/v1/health")).json()["state"] == "memory"
         # preset state still works, in memory only
         assert (await http.get(f"/api/v1/devices/{SERIAL}/presets")).status_code == 200
+
+
+async def test_phase5_profiles_and_backup_are_wired(settings, client, daemon):
+    async with running(settings, client, daemon) as (app, http):
+        assert (await http.get("/api/v1/profiles")).json() == []
+        assert (await http.get("/api/v1/backup/db/files")).status_code == 200
+        profiles = await http.get("/profiles")
+        assert profiles.status_code == 200
+        assert 'href="/profiles"' in profiles.text  # the sidebar item is enabled once the page is served
+        assert (await http.get("/profiles?tab=history&preset=1")).status_code == 200
+        page = await http.get("/settings")
+        assert page.status_code == 200 and 'id="backup-title"' in page.text
+        assert (await http.get("/ui/settings/backup")).status_code == 200
+
+
+async def test_profile_writes_refresh_the_mqtt_bridge(settings, client, daemon):
+    class Bridge:
+        refreshed = 0
+
+        def refresh(self, serial=None):
+            Bridge.refreshed += 1
+
+        async def stop(self):
+            pass
+
+    async with running(settings, client, daemon) as (app, http):
+        app.state.mqtt = Bridge()
+        await http.get("/api/v1/profiles")
+        assert Bridge.refreshed == 0
+        created = await http.post("/api/v1/profiles", json={"name": "Movies", "serial": SERIAL, "preset": 0})
+        assert created.status_code in (200, 201)
+        assert Bridge.refreshed == 1
+        await http.patch(f"/api/v1/profiles/{created.json()['id']}", json={"name": "Films"})
+        assert Bridge.refreshed == 2
+        app.state.mqtt = None
+
+
+async def test_a_staged_database_restore_is_swapped_in_at_startup(settings, client, daemon):
+    async with running(settings, client, daemon) as (_, http):
+        await http.post("/api/v1/profiles", json={"name": "Before", "serial": SERIAL, "preset": 0})
+        snapshot = (await http.get("/api/v1/backup/db")).content
+        await http.post("/api/v1/profiles", json={"name": "After", "serial": SERIAL, "preset": 0})
+        staged = await http.post("/api/v1/backup/db/restore", content=snapshot)
+        assert staged.status_code == 200, staged.text
+        assert [p["name"] for p in (await http.get("/api/v1/profiles")).json()] == ["After", "Before"]
+    async with running(settings, client, daemon) as (_, http):
+        assert [p["name"] for p in (await http.get("/api/v1/profiles")).json()] == ["Before"]

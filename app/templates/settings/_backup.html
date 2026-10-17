@@ -1,0 +1,312 @@
+{#- Settings → Backup (docs 05 §9). Rendered with ``backup`` = app.web.backup.backup_context. Include it inside a card:
+      <section class="card" aria-labelledby="backup-title"><h2 id="backup-title">Backup</h2>
+        {% include "settings/_backup.html" %}</section>
+    Files are sent to the JSON API as the raw request body; the JSON import is previewed before anything changes.
+    #backup-status re-renders itself (hx-select) on the "backup-changed" event. -#}
+<script>
+  window.backupPanel = window.backupPanel || function backupPanel(cfg) {
+    'use strict';
+    const toast = (message, level) => window.mdsp && window.mdsp.toast && window.mdsp.toast(message, level);
+    const changed = () => document.body.dispatchEvent(new CustomEvent('backup-changed'));
+
+    async function send(url, file, contentType) {
+      let response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': contentType },
+          body: file,
+          credentials: 'same-origin',
+        });
+      } catch {
+        return { ok: false, status: 0, data: { detail: 'the web UI server is unreachable' } };
+      }
+      return { ok: response.ok, status: response.status, data: await response.json().catch(() => null) };
+    }
+
+    function errorText(res) {
+      const d = res.data || {};
+      const detail = typeof d.detail === 'string' ? d.detail : `Request failed (HTTP ${res.status})`;
+      const problems = d.problems || [];
+      return problems.length ? `${detail}: ${problems.slice(0, 5).join('; ')}` : detail;
+    }
+
+    return {
+      cfg,
+      busy: false,
+      // JSON import
+      jsonFile: null,
+      plan: null,
+      report: null,
+      jsonError: '',
+      parts: { presets: true, channels: true, profiles: true, settings: true },
+      overwriteProfiles: false,
+      restoreShadow: false,
+      retarget: false,
+      // database restore
+      dbFile: null,
+      dbInfo: null,
+      dbError: '',
+
+      query(extra = {}) {
+        const include = Object.keys(this.parts).filter((p) => this.parts[p]);
+        const params = new URLSearchParams({ include: include.join(',') });
+        if (this.overwriteProfiles) params.set('overwrite_profiles', 'true');
+        if (this.restoreShadow) params.set('restore_shadow', 'true');
+        if (this.retarget && cfg.serial !== null) params.set('target_serial', String(cfg.serial));
+        for (const [k, v] of Object.entries(extra)) params.set(k, v);
+        return params.toString();
+      },
+
+      // The backup holds one other device and this page has one: offer to import into it.
+      canRetarget() {
+        if (!this.plan || cfg.serial === null) return false;
+        const devices = this.plan.devices || [];
+        return this.retarget || (devices.length === 1 && devices[0].source_serial !== cfg.serial);
+      },
+
+      async chooseJson(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        if (file.size > cfg.maxJson) {
+          toast(`${file.name} is too large for a backup file`);
+          return;
+        }
+        this.jsonFile = file;
+        this.retarget = false;
+        this.report = null;
+        await this.preview();
+      },
+
+      async preview() {
+        if (!this.jsonFile) return;
+        this.busy = true;
+        const res = await send(`${cfg.previewUrl}?${this.query()}`, this.jsonFile, 'application/json');
+        this.busy = false;
+        this.plan = res.ok ? res.data : null;
+        this.jsonError = res.ok ? '' : errorText(res);
+      },
+
+      changes(device) {
+        const presets = device.presets.filter((p) => p.changes > 0 || p.unknown > 0);
+        if (!presets.length) return 'no preset changes';
+        return presets.map((p) => `preset ${p.preset + 1}: ${p.changes} change${p.changes === 1 ? '' : 's'}`
+          + (p.unknown ? ` + ${p.unknown} setting${p.unknown === 1 ? '' : 's'} not known to be on the device` : '')
+          + (device.live ? (p.active ? ' (written now)' : ' (staged)') : ' (stored)')).join(', ');
+      },
+
+      canImport() {
+        return !this.busy && this.plan && this.plan.ok;
+      },
+
+      async importJson() {
+        if (!this.canImport()) return;
+        const question = 'Import this backup? Changed presets are applied to the device as a bulk apply (the active '
+          + 'preset is written now, mute-wrapped; the others are staged). Settings not known to be on the device are '
+          + 'written as well.';
+        if (!window.confirm(question)) return;
+        this.busy = true;
+        const res = await send(`${cfg.importUrl}?${this.query({ confirm: 'true' })}`, this.jsonFile, 'application/json');
+        this.busy = false;
+        if (!res.ok) {
+          this.jsonError = errorText(res);
+          toast(this.jsonError);
+          return;
+        }
+        this.report = res.data;
+        this.plan = null;
+        this.jsonFile = null;
+        if (res.data.ok) toast('Backup imported', 'info');
+        else toast(`Backup imported with errors: ${res.data.errors.slice(0, 3).join('; ')}`);
+        changed();
+      },
+
+      cancelJson() {
+        this.jsonFile = null;
+        this.plan = null;
+        this.report = null;
+        this.jsonError = '';
+      },
+
+      async chooseDb(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        if (file.size > cfg.maxDb) {
+          toast(`${file.name} is too large for a database backup`);
+          return;
+        }
+        this.dbFile = file;
+        this.busy = true;
+        const res = await send(`${cfg.restoreUrl}?dry_run=true`, file, 'application/vnd.sqlite3');
+        this.busy = false;
+        this.dbInfo = res.ok ? res.data : null;
+        this.dbError = res.ok ? '' : errorText(res);
+      },
+
+      async stageRestore() {
+        if (!this.dbFile || !this.dbInfo || this.busy) return;
+        const question = 'Replace the whole database with this backup when the app next restarts? Everything changed '
+          + 'since the backup is lost (the current database is kept in the backup folder).';
+        if (!window.confirm(question)) return;
+        this.busy = true;
+        const res = await send(this.cfg.restoreUrl, this.dbFile, 'application/vnd.sqlite3');
+        this.busy = false;
+        if (!res.ok) {
+          this.dbError = errorText(res);
+          toast(this.dbError);
+          return;
+        }
+        this.cancelDb();
+        toast('Restore staged: restart the app to apply it', 'info');
+        changed();
+      },
+
+      cancelDb() {
+        this.dbFile = null;
+        this.dbInfo = null;
+        this.dbError = '';
+      },
+    };
+  };
+</script>
+<div id="settings-backup" class="backup" x-data='backupPanel({{ backup.config|tojson }})'>
+  <h3>Export</h3>
+  {% if backup.db_available %}
+  <div class="drawer-actions">
+    <a class="btn-link" href="{{ backup.export_url }}" download
+       title="Every preset, channel names, profiles, FIR files and settings as JSON">Download JSON backup</a>
+    <a class="btn-link" href="{{ backup.db_url }}" download title="A copy of the whole database, history included">Download database</a>
+  </div>
+  {% else %}
+  <p class="muted">The state database isn't available, so there is nothing to export.</p>
+  {% endif %}
+  {% if backup.scripts %}
+  <p class="hint">CLI scripts for <code>minidsp -f</code>, a recovery path that needs no web app (each writes the
+    <em>active</em> preset):</p>
+  <div class="drawer-actions">
+    {% for s in backup.scripts %}<a class="btn-link btn-small" href="{{ s.url }}" download>{{ s.label }}</a>{% endfor %}
+  </div>
+  {% endif %}
+
+  <h3>Import a JSON backup</h3>
+  {% if backup.db_available %}
+  <div class="drawer-actions">
+    <button type="button" @click="$refs.json.click()" :disabled="busy">Choose backup&hellip;</button>
+    <input type="file" accept=".json,application/json" x-ref="json" hidden @change="chooseJson($event)">
+  </div>
+  <div class="form-errors" role="alert" x-show="jsonError" x-cloak><p x-text="jsonError"></p></div>
+  <fieldset class="drawer" x-show="plan" x-cloak>
+    <legend>Import <span x-text="jsonFile && jsonFile.name"></span></legend>
+    <template x-if="plan">
+      <div class="drawer">
+        <p class="hint" x-show="plan.exported_at" x-text="`Exported ${plan.exported_at} by version ${plan.app_version || '?'}`"></p>
+        <div class="drawer-actions">
+          <label class="check"><input type="checkbox" x-model="parts.presets" @change="preview()"> Presets</label>
+          <label class="check"><input type="checkbox" x-model="parts.channels" @change="preview()"> Channel names</label>
+          <label class="check"><input type="checkbox" x-model="parts.profiles" @change="preview()"> Profiles</label>
+          <label class="check"><input type="checkbox" x-model="parts.settings" @change="preview()"> Settings</label>
+        </div>
+        <ul>
+          <template x-for="d in plan.devices" :key="d.serial">
+            <li><span x-text="`${d.product_name} ${d.serial}${d.live ? '' : ' (offline)'}: `"></span><span x-text="changes(d)"></span>
+              <span x-show="d.channel_changes" x-text="`, ${d.channel_changes} channel setting(s)`"></span></li>
+          </template>
+          <li x-show="plan.profiles.new.length" x-text="`New profiles: ${plan.profiles.new.join(', ')}`"></li>
+          <li x-show="plan.profiles.overwrite.length" x-text="`Profiles replaced: ${plan.profiles.overwrite.join(', ')}`"></li>
+          <li x-show="plan.profiles.skip.length" x-text="`Profiles kept (same name exists): ${plan.profiles.skip.join(', ')}`"></li>
+          <li x-show="plan.settings.length" x-text="`Settings: ${plan.settings.join(', ')}`"></li>
+        </ul>
+        <div class="drawer-actions">
+          <label class="check" x-show="plan.profiles.skip.length || overwriteProfiles">
+            <input type="checkbox" x-model="overwriteProfiles" @change="preview()"> Replace profiles with the same name</label>
+          <label class="check" x-show="canRetarget()">
+            <input type="checkbox" x-model="retarget" @change="if (retarget) restoreShadow = false; preview()">
+            <span x-text="`Import into the connected device (${cfg.serial})`"></span></label>
+          <label class="check" :class="retarget && 'muted'"><input type="checkbox" x-model="restoreShadow" :disabled="retarget" @change="preview()">
+            Trust the backup's record of what is on the device</label>
+        </div>
+        <p class="hint" x-show="restoreShadow">Only for presets this app has no state for (e.g. after a reinstall),
+          when the device hasn't been changed since the backup. Presets the backup doesn't show fully synced are pushed.
+          Never used when importing into a different device.</p>
+        <ul class="field-error" x-show="plan.problems.length">
+          <template x-for="p in plan.problems" :key="p"><li x-text="p"></li></template>
+        </ul>
+        <ul class="hint" x-show="plan.warnings.length">
+          <template x-for="w in plan.warnings" :key="w"><li x-text="w"></li></template>
+        </ul>
+        <div class="drawer-actions">
+          <button type="button" @click="importJson()" :disabled="!canImport()">Import</button>
+          <button type="button" class="btn-small" @click="cancelJson()">Cancel</button>
+        </div>
+      </div>
+    </template>
+  </fieldset>
+  <template x-if="report">
+    <div role="status">
+      <p class="form-saved" x-show="report.ok">Imported.</p>
+      <ul>
+        <template x-for="p in report.presets" :key="`${p.serial}-${p.preset}`">
+          <li x-text="`Device ${p.serial} preset ${p.preset + 1}: ${p.mode}`"></li>
+        </template>
+      </ul>
+      <ul class="field-error" x-show="report.errors.length">
+        <template x-for="e in report.errors" :key="e"><li x-text="e"></li></template>
+      </ul>
+    </div>
+  </template>
+  {% else %}
+  <p class="muted">Importing needs the state database.</p>
+  {% endif %}
+
+  <h3>Database backups</h3>
+  <div id="backup-status" hx-get="{{ backup.partial_url }}" hx-trigger="backup-changed from:body"
+       hx-select="#backup-status" hx-swap="outerHTML">
+    {% if backup.message %}<p class="form-saved" role="status">{{ backup.message }}</p>{% endif %}
+    {% if backup.pending_restore %}
+    <div class="form-errors" role="alert">
+      <p><span aria-hidden="true">&#9888;</span> A database restore is staged ({{ backup.pending_restore.size }} bytes,
+        {{ backup.pending_restore.staged_at }}). It replaces the database when the app restarts.</p>
+      <button type="button" class="btn-small" hx-post="{{ backup.cancel_url }}" hx-target="#backup-status"
+              hx-select="#backup-status" hx-swap="outerHTML">Cancel the restore</button>
+    </div>
+    {% endif %}
+    {% if backup.files %}
+    <p class="hint">Nightly copies (only when something changed; the newest {{ backup.keep }} are kept):</p>
+    <ul class="backup-files">
+      {% for f in backup.files %}
+      <li><a href="{{ f.url }}" download>{{ f.name }}</a> <span class="muted">{{ (f.size / 1024)|round(1) }} kB{% if f.kind == "pre-restore" %}, replaced by a restore{% endif %}</span></li>
+      {% endfor %}
+    </ul>
+    {% if backup.more_files %}<p class="hint">and {{ backup.more_files }} older.</p>{% endif %}
+    {% else %}
+    <p class="hint">No nightly backups yet. One is written each night when something changed (the newest
+      {{ backup.keep }} are kept).</p>
+    {% endif %}
+  </div>
+
+  <h3>Restore the database</h3>
+  <div class="drawer-actions">
+    <button type="button" @click="$refs.db.click()" :disabled="busy">Choose database file&hellip;</button>
+    <input type="file" accept=".sqlite3,.sqlite,.db,application/vnd.sqlite3" x-ref="db" hidden @change="chooseDb($event)">
+  </div>
+  <div class="form-errors" role="alert" x-show="dbError" x-cloak><p x-text="dbError"></p></div>
+  <fieldset class="drawer" x-show="dbInfo" x-cloak>
+    <legend>Restore <span x-text="dbFile && dbFile.name"></span></legend>
+    <template x-if="dbInfo">
+      <div class="drawer">
+        <p x-text="`Schema version ${dbInfo.schema_version}; ${dbInfo.counts.preset_state} preset state(s), ${dbInfo.counts.revision} revision(s), ${dbInfo.counts.profile} profile(s), devices ${dbInfo.serials.join(', ') || 'none'}`"></p>
+        <ul class="hint" x-show="dbInfo.warnings.length">
+          <template x-for="w in dbInfo.warnings" :key="w"><li x-text="w"></li></template>
+        </ul>
+        <div class="drawer-actions">
+          <button type="button" @click="stageRestore()" :disabled="busy">Restore at next restart</button>
+          <button type="button" class="btn-small" @click="cancelDb()">Cancel</button>
+        </div>
+        <p class="hint">The file replaces the database the next time the app starts (restart the container). The
+          sessions keep running on the current database until then.</p>
+      </div>
+    </template>
+  </fieldset>
+</div>

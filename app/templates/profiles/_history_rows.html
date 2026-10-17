@@ -1,0 +1,23 @@
+{#- Timeline entries plus a "Load older" row that replaces itself with the next page. Rendered with ``h``. -#}
+{% for e in h.entries %}
+  <li class="{{ 'is-current' if e.current }}">
+    <span class="rev" title="Revision {{ e.revision }}">r{{ e.revision }}</span>
+    <span class="what">{{ e.summary }}</span>
+    <span class="when">
+      <time datetime="{{ e.created_at }}">{{ e.created_text }}</time>
+      <span class="src">{{ e.source_label }}</span>
+      {% if e.current %}<span>current</span>{% endif %}
+      <span class="acts">
+        {% if not e.current %}
+          <button type="button" class="btn-small" @click="diffWith('{{ e.diff_a }}', '{{ h.diff_b }}')">Compare with now</button>
+          <button type="button" class="btn-small" @click="revert({{ h.serial }}, {{ h.preset }}, {{ e.revision }})">Revert to here</button>
+        {% endif %}
+      </span>
+    </span>
+  </li>
+{% endfor %}
+{% if h.more_url %}
+  <li class="timeline-more">
+    <button type="button" class="btn-small" hx-get="{{ h.more_url }}" hx-target="closest li" hx-swap="outerHTML">Load older revisions</button>
+  </li>
+{% endif %}

@@ -1183,16 +1183,29 @@ class DeviceSession:
         commit: bool = True,
         bulk: bool = True,
         timeout: float | None = BULK_TIMEOUT_S,
+        push_unknown: bool = False,
     ) -> EditResult:
         """Replace the whole desired document (profile load, restore). With ``bulk`` it is applied as a bulk apply
-        (mute-wrapped when ``MUTE_WRAP_BULK_APPLY``) and awaited up to ``timeout``."""
+        (mute-wrapped when ``MUTE_WRAP_BULK_APPLY``) and awaited up to ``timeout``.
+
+        ``push_unknown`` also writes the paths the shadow doesn't know, in the same bulk apply, so the preset ends up
+        holding exactly ``doc`` (a profile load) rather than ``doc`` only where it differs from the old desired."""
         self._check_source(source)
         await self._ready(preset)
         async with self._edit_lock:
             await self._check_revision(preset, expected_revision)
             new = parse_doc(doc.model_dump(mode="json"))
             await self._prime_fir(self.writer.state(preset).desired, new)
+            if push_unknown and (problems := self._ceiling_problems(new)):
+                raise DesiredValidationError("gains above a channel's ceiling; lower them before loading", problems)
             change = self._stage(preset, new, confirm=confirm, source=source, summary=summary, check_all=True)
+            if push_unknown:
+                # No await since `_stage`, so these join the same (mute-wrapped) flush as the changed paths.
+                unknown = self.writer.state(preset).unknown_paths(self.profile)
+                if unknown:
+                    self.writer.notify(preset, unknown)
+                    doc_after, paths, device_paths = change
+                    change = (doc_after, paths, [*device_paths, *(p for p in unknown if p not in device_paths)])
         return await self._finish(preset, change, commit=commit, bulk=bulk, timeout=timeout)
 
     def _stage(

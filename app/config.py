@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     mqtt_discovery_prefix: str = "homeassistant"
     mqtt_base_topic: str = "minidsp-webui"
     mqtt_volume_floor_db: float = -127.0
+    mqtt_levels: bool = False  # level sensors; feeding them keeps the device's USB level polling on
 
     @model_validator(mode="after")
     def _check_gain_range(self) -> "Settings":
