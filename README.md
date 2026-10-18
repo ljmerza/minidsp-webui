@@ -351,7 +351,14 @@ make test-integration    # integration tests against the dev stack (starts and s
 make dev-down
 make dev-up-embedded     # the all-in-one variant: bundled minidspd + mock device, UI on 127.0.0.1:8481
 make test-embedded       # build the image and test it in embedded + mock mode
+make e2e-setup           # once: Chromium for Playwright + the minidspd release binary (to ~/.cache/minidsp-webui)
+make test-e2e            # browser tests at 1440x900 and 390x844 (touch), with axe-core accessibility checks
 ```
+
+The browser tests (`tests/e2e`, Playwright for Python) start the app itself in embedded mode with minidspd's mock
+device, on random loopback ports and a throwaway database, one fresh app per test file. They ignore your environment
+and `.env`, and refuse to run if minidspd sees any device besides the mock. `tests/e2e/conftest.py` describes the
+fixtures; pytest-playwright's `--headed`, `--slowmo 200` and `--tracing retain-on-failure` help when one fails.
 
 The dev stack (`docker-compose.dev.yml`) runs the real `minidspd` 0.1.12 against its built-in mock device, so no
 hardware is needed. Its `webui` service runs in external mode against a separate mock daemon container; the
@@ -377,4 +384,5 @@ a real broker.
   tab converges on the same state.
 
 CI runs ruff and pytest on every pull request and builds multi-arch images to GHCR, using the reusable workflows in
-[ljmerza/misc-actions](https://github.com/ljmerza/misc-actions).
+[ljmerza/misc-actions](https://github.com/ljmerza/misc-actions). The browser tests run in their own workflow
+(`.github/workflows/e2e.yml`) on every pull request and push to `main`.
