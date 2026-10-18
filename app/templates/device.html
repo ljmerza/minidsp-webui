@@ -2,62 +2,6 @@
 
 {% block content %}
 <h1>Device &amp; sync</h1>
-<section id="device-info" class="card" aria-live="polite"
-         hx-get="{{ device_info_url }}" hx-trigger="sse:device" hx-swap="innerHTML">
-  {% include "partials/device_info.html" %}
-</section>
-
-{#- The bundled minidspd process and USB visibility (docs/11), polled from /api/v1/health while the tab is visible. -#}
-<section id="daemon-process" class="card" aria-labelledby="daemon-process-title"
-         x-data="{
-           h: null, error: null, timer: null,
-           async load() {
-             if (document.hidden) return;
-             try {
-               const r = await fetch('{{ root }}/api/v1/health', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-               if (!r.ok) throw new Error('HTTP ' + r.status);
-               this.h = await r.json(); this.error = null;
-             } catch (e) { this.error = String(e.message || e); }
-           },
-           init() { this.load(); this.timer = setInterval(() => this.load(), 5000); },
-           destroy() { clearInterval(this.timer); },
-           usbText() {
-             const h = this.h;
-             if (h.usb_device_visible === null || h.usb_device_visible === undefined) return 'not checked';
-             if (h.usb_access === 'ok') return 'visible and openable';
-             return h.usb_device_visible ? 'visible but not openable' : 'not visible';
-           },
-         }">
-  <h2 id="daemon-process-title">minidspd process</h2>
-  <p class="muted" x-show="!h && !error">Loading&hellip;</p>
-  <p class="muted" x-show="error" x-text="'Could not load the health report: ' + error"></p>
-  <template x-if="h">
-    <dl class="info-grid">
-      <div><dt>Mode</dt>
-        <dd x-text="h.daemon_mode === 'embedded' ? ('embedded (bundled in this container' + (h.daemon_mock ? ', mock device' : '') + ')') : 'external (host daemon)'"></dd></div>
-      <div><dt>Process</dt><dd x-text="h.daemon_process"></dd></div>
-      <template x-if="h.daemon_mode === 'embedded'">
-        <div><dt>Restarts</dt><dd x-text="h.daemon_restarts"></dd></div>
-      </template>
-      <template x-if="h.daemon_pid">
-        <div><dt>PID</dt><dd x-text="h.daemon_pid"></dd></div>
-      </template>
-      <template x-if="h.daemon_last_exit">
-        <div><dt>Last exit</dt><dd x-text="h.daemon_last_exit"></dd></div>
-      </template>
-      <template x-if="h.daemon_process_error">
-        <div><dt>Process error</dt><dd x-text="h.daemon_process_error"></dd></div>
-      </template>
-      <template x-if="h.daemon_mode === 'embedded'">
-        <div><dt>miniDSP on USB</dt><dd x-text="usbText()"></dd></div>
-      </template>
-      <template x-if="h.daemon_mode === 'embedded' && h.usb_detail">
-        <div><dt>USB detail</dt><dd x-text="h.usb_detail"></dd></div>
-      </template>
-    </dl>
-  </template>
-</section>
-
 {% if session is not none and serial is not none %}
 {%- set ui = root ~ "/ui/devices/" ~ serial -%}
 {%- set q = request.query_params.get("preset") -%}
@@ -72,19 +16,32 @@
     <div hx-get="{{ ui }}/adopt" hx-trigger="load" hx-swap="outerHTML"><p class="muted">Loading&hellip;</p></div>
   </section>
   {% endif %}
-  <section id="sync" class="card" aria-labelledby="sync-title">
+  <section id="sync" class="card sync-card" aria-labelledby="sync-title">
     <h2 id="sync-title">Status{{ help("status") }}</h2>
     <div hx-get="{{ ui }}/sync-panel{% if q and q.isdigit() %}?preset={{ q }}{% endif %}" hx-trigger="load" hx-swap="outerHTML">
       <p class="muted">Loading&hellip;</p>
     </div>
+    <div id="verify" class="verify-section" role="region" aria-labelledby="verify-title">
+      <h3 id="verify-title" class="verify-title">Last check{{ help("check-device") }}</h3>
+      {#- The Check device button above replaces #verify-panel; a nightly or API run re-renders it. -#}
+      <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
+        <p class="muted">Loading&hellip;</p>
+      </div>
+    </div>
+    <p class="sync-legend"><span class="hdr-label">Legend</span>{{ help("status") }}
+      <span>(no mark) Sent</span> · <span><span aria-hidden="true">⟳</span> Sending</span> ·
+      <span><span aria-hidden="true">⏸</span> Waiting for preset N</span> · <span><span aria-hidden="true">⚠</span> Failed</span> ·
+      <span><span aria-hidden="true">?</span> Unknown</span> · <span><span aria-hidden="true">≠</span> Changed on device</span> ·
+      <span><span aria-hidden="true">⊘</span> Can't check</span></p>
   </section>
 
-  <section id="verify" class="card" aria-labelledby="verify-title">
-    <h2 id="verify-title">Check device{{ help("check-device") }}</h2>
-    {#- The partial (#verify-panel) replaces itself on its own posts; a nightly or API run re-renders it here. -#}
-    <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
+  <section id="sync-settings" class="card" aria-labelledby="sync-settings-title">
+    <h2 id="sync-settings-title">Settings by channel</h2>
+    {% if sync_preset is not none %}
+    <div hx-get="{{ ui }}/sync-table?preset={{ sync_preset }}" hx-trigger="load" hx-swap="outerHTML">
       <p class="muted">Loading&hellip;</p>
     </div>
+    {% endif %}
   </section>
 
   {% if not adopt_first %}
@@ -93,13 +50,77 @@
     <div hx-get="{{ ui }}/adopt" hx-trigger="load" hx-swap="outerHTML"><p class="muted">Loading&hellip;</p></div>
   </section>
   {% endif %}
-
-  <section id="events" class="card" aria-labelledby="events-title">
-    <h2 id="events-title">Event log</h2>
-    <div class="event-log-box" hx-get="{{ ui }}/events" hx-trigger="load, sse:log delay:800ms" hx-swap="innerHTML">
-      <p class="muted">Loading&hellip;</p>
-    </div>
-  </section>
 </div>
 {% endif %}
+
+{#- Device, daemon and connection details are for troubleshooting, so they start folded (design §11.1, P06). -#}
+<details id="technical" class="card fold" data-keep-open{% if session is none %} open{% endif %}>
+  <summary><h2 class="fold-title">Technical details</h2> <span class="muted">device, minidspd, connection</span></summary>
+  <section id="device-info" class="tech-section" aria-live="polite"
+           hx-get="{{ device_info_url }}" hx-trigger="sse:device" hx-swap="innerHTML">
+    {% include "partials/device_info.html" %}
+  </section>
+
+  {#- The bundled minidspd process and USB visibility (docs/11), polled from /api/v1/health while the tab is visible. -#}
+  <section id="daemon-process" class="tech-section" aria-labelledby="daemon-process-title"
+           x-data="{
+             h: null, error: null, timer: null,
+             async load() {
+               if (document.hidden) return;
+               try {
+                 const r = await fetch('{{ root }}/api/v1/health', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                 if (!r.ok) throw new Error('HTTP ' + r.status);
+                 this.h = await r.json(); this.error = null;
+               } catch (e) { this.error = String(e.message || e); }
+             },
+             init() { this.load(); this.timer = setInterval(() => this.load(), 5000); },
+             destroy() { clearInterval(this.timer); },
+             usbText() {
+               const h = this.h;
+               if (h.usb_device_visible === null || h.usb_device_visible === undefined) return 'not checked';
+               if (h.usb_access === 'ok') return 'visible and openable';
+               return h.usb_device_visible ? 'visible but not openable' : 'not visible';
+             },
+           }">
+    <h3 id="daemon-process-title">minidspd process</h3>
+    <p class="muted" x-show="!h && !error">Loading&hellip;</p>
+    <p class="muted" x-show="error" x-text="'Could not load the health report: ' + error"></p>
+    <template x-if="h">
+      <dl class="info-grid">
+        <div><dt>Mode</dt>
+          <dd x-text="h.daemon_mode === 'embedded' ? ('embedded (bundled in this container' + (h.daemon_mock ? ', mock device' : '') + ')') : 'external (host daemon)'"></dd></div>
+        <div><dt>Process</dt><dd x-text="h.daemon_process"></dd></div>
+        <template x-if="h.daemon_mode === 'embedded'">
+          <div><dt>Restarts</dt><dd x-text="h.daemon_restarts"></dd></div>
+        </template>
+        <template x-if="h.daemon_pid">
+          <div><dt>PID</dt><dd x-text="h.daemon_pid"></dd></div>
+        </template>
+        <template x-if="h.daemon_last_exit">
+          <div><dt>Last exit</dt><dd x-text="h.daemon_last_exit"></dd></div>
+        </template>
+        <template x-if="h.daemon_process_error">
+          <div><dt>Process error</dt><dd x-text="h.daemon_process_error"></dd></div>
+        </template>
+        <template x-if="h.daemon_mode === 'embedded'">
+          <div><dt>miniDSP on USB</dt><dd x-text="usbText()"></dd></div>
+        </template>
+        <template x-if="h.daemon_mode === 'embedded' && h.usb_detail">
+          <div><dt>USB detail</dt><dd x-text="h.usb_detail"></dd></div>
+        </template>
+      </dl>
+    </template>
+  </section>
+</details>
+
+{% if session is not none and serial is not none %}
+<details id="events" class="card fold" data-keep-open>
+  <summary><h2 id="events-title" class="fold-title">Event log</h2></summary>
+  <div class="event-log-box" hx-get="{{ ui }}/events" hx-trigger="load, sse:log delay:800ms" hx-swap="innerHTML">
+    <p class="muted">Loading&hellip;</p>
+  </div>
+</details>
+{% endif %}
 {% endblock %}
+
+{% block scripts %}<script src="{{ root }}/static/js/device.js?v={{ asset_version }}"></script>{% endblock %}

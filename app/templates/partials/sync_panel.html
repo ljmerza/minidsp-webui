@@ -1,5 +1,28 @@
-{#- Device page: the sync bar plus the sync table of the chosen preset. Rendered with ``bar`` and ``t``. -#}
-<div class="sync-panel">
-  {% include "partials/syncbar.html" %}
-  {% include "partials/sync_table.html" %}
+{#- Device & sync status (phase 9 design §11.1): the overview (sync_overview.html, which reloads itself inside
+    #sync-overview-box) and the three actions. Rendered with ``bar``, ``view``, ``message``, ``verify_url`` and
+    ``check_supported``. The last check (#verify-panel) and the table by channel load on their own. -#}
+<div class="sync-panel" id="sync-panel">
+  <div id="sync-overview-box" class="sync-overview-box">
+    {% include "partials/sync_overview.html" %}
+  </div>
+  <div class="sync-actions" role="group" aria-label="Device and sync actions">
+    {% if check_supported %}
+    <span class="sync-action">
+      {#- Outside the reloading overview, so a reload during the check can't drop its result. -#}
+      <button type="button" id="verify-run" class="btn-small" hx-post="{{ verify_url }}" hx-target="#verify-panel"
+              hx-swap="outerHTML" hx-disabled-elt="this" hx-indicator="#verify-busy">Check device</button>{{ help("check-device") }}
+      <span id="verify-busy" class="htmx-indicator" role="status"><span class="spinner" aria-hidden="true"></span><span class="visually-hidden">Reading&hellip;</span></span>
+    </span>
+    {% endif %}
+    <span class="sync-action">
+      <button type="button" class="btn-small" hx-post="{{ bar.push_url }}" hx-target="#sync-overview-box" hx-swap="innerHTML"
+              hx-disabled-elt="this"
+              hx-confirm="Send every setting of preset {{ bar.preset + 1 }} to the device, replacing what it holds?{% if bar.mute_wrap %} The affected outputs are muted while it runs.{% endif %}{% if not bar.is_active %} Preset {{ bar.preset + 1 }} isn't playing, so it waits until it plays.{% endif %}">
+        Send all&hellip;<span class="htmx-indicator spinner" aria-hidden="true"></span>
+      </button>{{ help("send") }}
+    </span>
+    <span class="sync-action">
+      <a class="btn-small btn-link" href="#adopt">Set up this device&hellip;</a>{{ help("set-up") }}
+    </span>
+  </div>
 </div>

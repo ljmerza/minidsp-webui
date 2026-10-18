@@ -45,6 +45,7 @@ from app.sync.session import (
     UndoUnavailable,
     undo_unit,
 )
+from app.sync.status import check_summary, status_view
 from app.web.sync_ui import SYNC_CHANGED, describe_path, format_value
 from app.web.ui_common import channel_label, manager_of, render, url
 
@@ -354,13 +355,22 @@ def verify_context(
     rows = sorted((_row(session, i) for i in report.items), key=lambda r: _ORDER[r["status"]]) if report else []
     base = f"/ui/devices/{session.serial}/verify"
     refused = report.refused if report else []
+    check = None
+    drift_paths = [i.path for i in report.drifted] if report else []
+    if report is not None:
+        # The result in words, counted by the one status model: a change stays open until sent, used or forgotten.
+        view = status_view(session, report.preset, report)
+        if view is not None:
+            drift_paths = [p for p in drift_paths if p in view.changed]
+        check = view.check if view is not None else check_summary(report, None, set(drift_paths))
     return {
         "serial": session.serial,
         "report": report,
+        "check": check,
         "counts": report.counts if report else None,
         "rows": [r for r in rows if r["status"] != "unverifiable"],
         "unverifiable": [r for r in rows if r["status"] == "unverifiable"],
-        "drift_paths": [i.path for i in report.drifted] if report else [],
+        "drift_paths": drift_paths,
         "accept_paths": [i.path for i in report.acceptable] if report else [],
         "accept_count": _count_units([i.path for i in report.acceptable]) if report else 0,
         "refused": refused_lines(session, session.writer.state(report.preset).desired, refused) if refused else [],
@@ -424,7 +434,7 @@ async def verify_mark_unknown(request: Request, serial: int) -> Response:
     report.marked_unknown = sorted(set(report.marked_unknown) | set(marked))
     message = (
         f"Forgot {_settings(len(marked))}: the app now treats them as Unknown. Nothing changed on the device. "
-        "Push them from the sync table to overwrite the device."
+        "Send them from the table below to overwrite the device."
         if marked
         else None
     )

@@ -133,22 +133,23 @@
               hx-post="{{ base }}/volume/up">+</button>
     </div>
 
-    {% if tracked and active_preset is not none %}
-      {%- set c = session.sync_summary(active_preset).counts -%}
-      {%- set st = "failed" if c.failed else "pending" if c.pending else "unknown" if c.unknown else "synced" -%}
+    {%- set sv = sync_view(session, active_preset) if tracked and active_preset is not none else none %}
+    {% if sv is not none %}
+      {#- One headline from the status model (app/sync/status.py): Failed > Changed on device > Sending n of N >
+           Waiting > Unknown > All sent. It never claims the device matches. -#}
       <div class="hdr-sync">
-        <a class="hdr-status" href="{{ root }}/device?preset={{ active_preset + 1 }}#sync">
+        <a class="hdr-status" href="{{ root }}/device?preset={{ active_preset + 1 }}#sync" data-sync-state="{{ sv.state }}">
           <span class="visually-hidden">Status of preset {{ active_preset + 1 }}: </span>
-          <span class="sync-badge sync-{{ st }}">
-            <span aria-hidden="true">{{ {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}[st] }}</span>
-            {% if st == "synced" %}All sent
-            {%- else %}{% if c.failed %}{{ c.failed }} failed{% endif %}{% if c.pending %}{% if c.failed %}, {% endif %}{{ c.pending }} sending{% endif %}{% if c.unknown %}{% if c.failed or c.pending %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif %}
+          <span class="sync-badge sync-{{ sv.css }}">
+            <span aria-hidden="true">{{ sv.glyph }}</span>
+            {{ sv.text }}
           </span>
         </a>{{ help("status") }}
       </div>
-      {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action). -#}
+      {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action).
+           Throttled while a bulk write runs, so "Sending n of N" counts, and once more after the writes stop. -#}
       <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
-            hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"
+            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms"
             hx-target="#app-header" hx-swap="innerHTML"></span>
     {% else %}
     <div class="hdr-sync">

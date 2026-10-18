@@ -8,6 +8,7 @@
   <title>{% block title %}{{ title }}{% endblock %} · minidsp-webui</title>
   <link rel="stylesheet" href="{{ root }}/static/css/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/help.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ root }}/static/css/sync.css?v={{ asset_version }}">
   {% block head %}{% endblock %}
 </head>
 <body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}"
