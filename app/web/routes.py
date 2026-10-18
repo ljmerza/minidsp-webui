@@ -25,11 +25,12 @@ from app.sync.session import (
     SessionState,
 )
 from app.sync.summary import session_summary
-from app.web import devices, glossary
+from app.web import devices, flow, glossary
 from app.web.nav import build_nav
 from app.web.templating import graph_defaults, templates
 
 router = APIRouter(include_in_schema=False)
+router.include_router(flow.router)  # /ui/flow, the signal-flow diagram (phase 9 design §5)
 
 ERROR_HEADER = "X-Mdsp-Error"
 
@@ -221,6 +222,7 @@ async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse
             "o": list(status.output_levels) if status else [],
         },
         **await dashboard_outputs_context(request, session, ctx["nav"]),
+        **await flow.flow_context(request, session),
     )
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 

@@ -1,0 +1,186 @@
+/* The signal-flow diagram (phase 9 design §5): partials/flow_card.html + partials/flow.html.
+   Row heights come from app/web/flow.py (custom properties on .flow), so the SVG lines meet the HTML rows. Every state
+   is glyph + word + colour; default blocks use a lighter text colour (not opacity) and a dashed outline. */
+
+.flow-card { grid-column: 1 / -1; }
+.flow-head { flex-wrap: wrap; }
+.flow-legend { color: var(--text-muted); font-size: 0.8rem; }
+.flow-details-btn { display: none; }
+.flow-empty { margin: 0; }
+
+/* --- the full diagram -------------------------------------------------------------------------------------------- */
+
+.flow-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; position: relative; padding-bottom: 0.25rem; }
+.flow-grid {
+  display: grid; grid-template-columns: 11rem var(--flow-route-w) minmax(36rem, 1fr);
+  min-width: calc(47rem + var(--flow-route-w)); align-items: start;
+}
+.flow-inputs, .flow-routes, .flow-outputs { position: relative; height: var(--flow-h-folded); }
+.flow.is-open .flow-inputs, .flow.is-open .flow-routes, .flow.is-open .flow-outputs { height: var(--flow-h-open); }
+
+/* Inputs: boxes at the server's coordinates. The name link covers the box, so a click anywhere opens the input. */
+.flow-in {
+  position: absolute; left: 0; right: 0; top: var(--top-folded); height: var(--flow-in-h);
+  display: flex; flex-direction: column; justify-content: center; gap: 0.15rem;
+  padding: 0.35rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+  font-size: 0.85rem; overflow: hidden;
+}
+.flow.is-open .flow-in { top: var(--top-open); }
+.flow-in-title { margin: 0; font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem; }
+.flow-in-name { color: var(--text); text-decoration: none; }
+.flow-in-name::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+.flow-in-name:hover { text-decoration: underline; }
+.flow-in-name:focus-visible { outline: none; }
+.flow-in:focus-within:has(.flow-in-name:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flow-in-details { color: var(--text-muted); }
+.flow-in .flow-note-wrap, .flow-in .flow-meter { position: relative; z-index: 1; }
+.flow-in.is-muted { border-style: dashed; }
+
+/* Route lines (decorative; the rows repeat them as text). */
+.flow-svg { position: absolute; top: 0; left: 0; overflow: visible; }
+.flow-svg-open { display: none; }
+.flow.is-open .flow-svg-open { display: block; }
+.flow.is-open .flow-svg-folded { display: none; }
+.flow-line-path { fill: none; stroke: var(--accent); stroke-width: 2; }
+.flow-line-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+.flow-line.is-muted .flow-line-path { stroke: var(--text-muted); stroke-dasharray: 5 4; }
+.flow-line-label {
+  fill: var(--text); font: 600 11px/1 var(--font); paint-order: stroke;
+  stroke: var(--bg-raised); stroke-width: 4px; stroke-linejoin: round;
+}
+.flow-line.is-muted .flow-line-label { fill: var(--text-muted); }
+.flow-line:hover .flow-line-path { stroke-width: 3; }
+.flow-arrowhead path { fill: var(--accent); }
+.flow-arrowhead.is-muted path { fill: var(--text-muted); }
+.flow-arrowhead.is-bad path { fill: var(--bad); }
+.flow-stub-path { fill: none; stroke: var(--bad); stroke-width: 2; stroke-dasharray: 4 3; }
+
+/* Output rows: a heading line and a line of blocks, at a fixed height. */
+.flow-outputs { display: flex; flex-direction: column; gap: var(--flow-row-gap); }
+.flow-row {
+  position: relative; height: var(--flow-row-h); flex: 0 0 auto;
+  display: flex; flex-direction: column; justify-content: center; gap: 0.3rem;
+  padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+}
+.flow-row.badge-silent { border-color: var(--bad); }
+.flow:not(.is-open) .flow-row.is-unused { display: none; }
+.flow-row-head { display: flex; align-items: center; gap: 0.3rem 0.75rem; min-width: 0; white-space: nowrap; }
+.flow-row-title { margin: 0; font-size: 0.95rem; display: inline-flex; align-items: center; gap: 0.45rem; }
+.flow-row-title a { color: var(--text); }
+.flow-fed { margin: 0; font-size: 0.85rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.flow-fed strong { color: var(--bad); }
+.flow-row-head .btn-small { min-height: 1.9rem; }
+.flow-row-meter { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem; }
+
+.flow-badge { font: inherit; font-size: 0.8rem; cursor: pointer; background: transparent; min-height: 1.6rem; }
+
+.flow-blocks { display: flex; align-items: center; gap: 0.3rem; flex-wrap: nowrap; overflow: hidden; }
+.flow-sep { color: var(--text-muted); }
+.flow-block {
+  position: relative; display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap;
+  padding: 0.1rem 0.5rem; min-height: 1.75rem; border: 1px solid var(--text-muted); border-radius: 6px;
+  color: var(--text); text-decoration: none; font-size: 0.82rem; background: var(--bg-raised);
+}
+.flow-block:hover { border-color: var(--accent); }
+.flow-block.is-default { border-style: dashed; border-color: var(--border); color: var(--text-muted); background: transparent; }
+.flow-block.is-caution { border-color: var(--warn); color: var(--warn); }
+.flow-block.is-problem, .flow-block.is-clipped { border-color: var(--bad); color: var(--bad); }
+.flow-row.is-muted .flow-block { color: var(--text-muted); }
+.flow-sync { font-size: 0.75rem; margin-left: 0.1rem; color: var(--text-muted); }
+.flow-sync-failed { color: var(--bad); }
+.flow-sync-changed, .flow-sync-waiting { color: var(--warn); }
+.flow-block.is-target { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .flow-block.is-target { animation: flow-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes flow-pulse { 50% { outline-color: transparent; } }
+
+/* The "✕ no input" stub sits over the end of its dashed red line, in the routes column. */
+.flow-stub { position: absolute; right: calc(100% + 0.4rem); top: 50%; transform: translateY(-50%); z-index: 1; }
+.flow-stub-btn {
+  min-height: 1.75rem; padding: 0.05rem 0.4rem; font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+  color: var(--bad); background: var(--bg-raised); border: 1px dashed var(--bad);
+}
+
+/* Notes (ⓘ): grey info, amber with ⚠ when the input that is sent nowhere shows signal. */
+.flow-note {
+  font-size: 0.8rem; min-height: 1.6rem; padding: 0.05rem 0.45rem; color: var(--text-muted);
+  background: transparent; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap;
+}
+.flow-note.is-caution { color: var(--warn); border-color: var(--warn); }
+.flow-tag { font-size: 0.78rem; color: var(--text-muted); font-weight: normal; }
+
+.flow-pop-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.flow-pop-actions .btn-small, .flow-pop-actions a { min-height: 2.25rem; display: inline-flex; align-items: center; }
+.flow-fix-link { text-decoration: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.15rem 0.6rem; }
+
+/* The shared Not in use line. */
+.flow-fold {
+  height: var(--flow-fold-h); flex: 0 0 auto; display: flex; align-items: center; gap: 0.6rem;
+  padding: 0 0.6rem; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Meters: a horizontal bar with the dashboard's colour zones, a peak tick and the reading. */
+.flow-meter { display: inline-flex; align-items: center; gap: 0.35rem; }
+.flow-meter-track {
+  position: relative; width: 4.5rem; height: 0.55rem; background: #0a0c0f;
+  border: 1px solid var(--border); border-radius: 3px; overflow: hidden;
+}
+.flow-meter.is-small .flow-meter-track { width: 3rem; }
+.flow-meter-bar {
+  position: absolute; inset: 0; clip-path: inset(0 100% 0 0);
+  background: linear-gradient(to right, var(--meter-green) 0%, var(--meter-green) 77.5%, var(--meter-yellow) 77.5%,
+    var(--meter-yellow) 94.4%, var(--meter-red) 94.4%);
+  transition: clip-path 0.12s linear;
+}
+.flow-meter-peak { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
+.flow-meter-value { font-size: 0.75rem; color: var(--text-muted); min-width: 4.6rem; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .flow-meter-bar { transition: none; } }
+
+.flow-clip {
+  min-height: 1.6rem; padding: 0 0.4rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--text-muted); background: var(--bg-input); border-color: var(--border);
+}
+.flow-clip.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #000; }
+
+/* --- the phone's compact list ------------------------------------------------------------------------------------- */
+
+.flow-list { display: none; list-style: none; margin: 0; padding: 0; }
+.flow-list ul { list-style: none; margin: 0.15rem 0 0; padding: 0 0 0 0.9rem; }
+.flow-list > li { padding: 0.35rem 0; border-top: 1px solid var(--border); }
+.flow-list > li:first-child { border-top: 0; }
+.flow-list li li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; min-height: 2rem; }
+.flow-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; min-height: 2rem; }
+.flow-list a { font-weight: 600; }
+.flow-list .flow-meter-value { min-width: 0; }
+.flow-list-note { margin: 0.1rem 0 0 0.9rem; color: var(--text-muted); font-size: 0.85rem; }
+.flow-list-fix { display: block; margin-top: 0.3rem; }
+.flow-list-fix .btn-small { min-height: 2.75rem; }
+.flow-x { color: var(--bad); font-weight: 700; }
+.flow-arrow { color: var(--text-muted); }
+
+@media (max-width: 599px) {
+  .flow-details-btn { display: inline-flex; align-items: center; gap: 0.3rem; min-height: 2.75rem; margin-left: auto; }
+  .flow-legend { display: none; }
+  .flow-list { display: block; }
+  .flow-scroll { display: none; }
+  .flow.is-details .flow-list { display: none; }
+  .flow.is-details .flow-scroll { display: block; }
+}
+.flow-card:has(.flow-empty) .flow-details-btn { display: none; }
+
+/* Touch: 44 px hit areas without changing the fixed row geometry (an invisible extension around each control). */
+@media (pointer: coarse) {
+  .flow-badge, .flow-note, .flow-clip, .flow-stub-btn, .flow-row-head .btn-small, .flow-fold-btn { position: relative; }
+  .flow-block::before, .flow-badge::before, .flow-note::before, .flow-clip::before, .flow-stub-btn::before,
+  .flow-row-head .btn-small::before, .flow-fold-btn::before {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: max(100%, 44px); height: max(100%, 44px);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .flow-block, .flow-row, .flow-in { border-width: 2px; }
+  .flow-line-path { stroke-width: 3; }
+}
