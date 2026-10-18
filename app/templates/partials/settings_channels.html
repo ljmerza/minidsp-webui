@@ -34,6 +34,27 @@
       </tbody>
     </table>
   </div>
+  <fieldset class="channel-flags">
+    <legend>How each channel is used</legend>
+    <input type="hidden" name="channel_flags" value="1">
+    <ul class="channel-flag-list">
+      {% for r in c.rows %}
+        <li>
+          <span class="channel-flag-name">{{ r.name or r.default_name }}{% if r.name %} <span class="muted">({{ r.default_name }})</span>{% endif %}</span>
+          <label class="check"><input type="checkbox" name="{{ r.key }}-unused"{% if r.unused %} checked{% endif %}
+                 aria-label="{{ r.name or r.default_name }}: Not in use" aria-describedby="flag-unused-hint"> Not in use</label>
+          {% if r.kind == "output" %}
+            <label class="check"><input type="checkbox" name="{{ r.key }}-tactile"{% if r.tactile %} checked{% endif %}
+                   aria-label="{{ r.name or r.default_name }}: Shakers (tactile)" aria-describedby="flag-tactile-hint"> Shakers (tactile)</label>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="hint" id="flag-unused-hint"><strong>Not in use:</strong> the app stops pointing out this channel's notes
+      (for example "muted, but In 1 is sent to it"), and a muted output reads "Not in use".</p>
+    <p class="hint" id="flag-tactile-hint"><strong>Shakers (tactile):</strong> this output drives shakers or bass
+      transducers you feel rather than hear.</p>
+  </fieldset>
   <p class="hint">Names and colours are used on every page and graph. A level limit caps the output's level and every
     route level into it; leave it empty for the device range ({{ c.gain_min|db }} to {{ c.gain_max|db(signed=true) }}).</p>
   <button type="submit">Save channels</button>

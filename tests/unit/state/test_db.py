@@ -29,7 +29,7 @@ async def test_open_creates_parent_dir_and_sets_pragmas(db, db_path):
 
 async def test_initial_migration_creates_schema(db):
     assert TABLES | {"schema_migrations"} <= await _tables(db)
-    assert await db.applied_migrations() == {1: "initial"}
+    assert await db.applied_migrations() == {1: "initial", 2: "channel_flags"}
 
 
 def test_repo_migrations_are_well_formed():
@@ -56,6 +56,32 @@ async def test_reopen_up_to_date_db_writes_nothing(db_path):
 
     after = (db_path.stat().st_mtime_ns, hashlib.sha256(db_path.read_bytes()).hexdigest())
     assert after == before
+
+
+async def test_channel_flags_migration_keeps_existing_rows(tmp_path):
+    """0002 adds the Settings flags to a database made before them: existing channels read as in use, not tactile."""
+    mig = tmp_path / "mig"
+    mig.mkdir()
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name.startswith("0001_"):
+            (mig / path.name).write_text(path.read_text())
+    db_file = tmp_path / "old.sqlite3"
+    db = await Database.open(db_file, migrations_dir=mig)
+    await db.execute(
+        "INSERT INTO channel_meta (serial, kind, idx, name, color, max_gain_db)"
+        " VALUES (7, 'output', 0, 'Shakers', NULL, 6)"
+    )
+    await db.close()
+
+    db = await Database.open(db_file)  # the real migrations directory: applies 0002
+    try:
+        assert await db.applied_migrations() == {1: "initial", 2: "channel_flags"}
+        row = await db.fetchone("SELECT * FROM channel_meta WHERE serial = 7")
+        assert (row["name"], row["max_gain_db"], row["unused"], row["tactile"]) == ("Shakers", 6.0, 0, 0)
+        with pytest.raises(sqlite3.IntegrityError):
+            await db.execute("UPDATE channel_meta SET unused = 2 WHERE serial = 7")
+    finally:
+        await db.close()
 
 
 async def test_incremental_migrations(tmp_path):

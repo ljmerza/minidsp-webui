@@ -18,6 +18,7 @@ from app.api.v1 import (
     profiles,
     rew,
     status,
+    summary,
     system,
     verify,
 )
@@ -31,6 +32,7 @@ ROUTERS: list[APIRouter] = [
     master.router,
     events.router,
     presets.router,
+    summary.router,
     adopt.router,
     import_export.router,
     filters.router,
