@@ -42,7 +42,7 @@ async def test_device_page_uses_one_feed_that_keeps_the_header_sync_badge_curren
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
     html = (await ctx.http.get(f"{UI}/sync-panel")).text
     assert 'id="syncbar"' in html and 'id="sync-table"' in html
-    assert "outputs.0.gain_db" in html and "Out 1 · gain" in html
+    assert "outputs.0.gain_db" in html and "Out 1 output level" in html
     assert "sync-unknown" in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
@@ -55,7 +55,7 @@ async def test_sync_table_hint_points_at_verify_instead_of_claiming_no_readback(
     """Regression: the hint said the device can't be read back, next to a Verify panel that had just read it."""
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
     assert "can't be read back" not in html
-    assert '<a href="#verify">Verify device</a>' in html
+    assert '<a href="#verify">Check device</a>' in html
 
 
 async def test_sync_panel_preset_and_errors(ctx):
@@ -193,8 +193,13 @@ async def test_event_log_without_a_database(ctx):
 
 def test_describe_and_format(ctx):
     s = ctx.session
-    assert describe_path(s, "outputs.0.crossover.1.compiled.2") == "Out 1 · crossover 2 · biquad 3"
-    assert describe_path(s, "inputs.1.routing.3.enabled") == "In 2 · → Out 4 · enabled"
+    assert describe_path(s, "outputs.0.crossover.1.compiled.2") == "Out 1 · band filter 2 · stage 3"
+    assert describe_path(s, "inputs.1.routing.3.enabled") == "In 2 → Out 4 route"
+    assert describe_path(s, "inputs.0.routing.1.gain_db") == "In 1 → Out 2 route level"
+    assert describe_path(s, "outputs.0.gain_db") == "Out 1 output level"
+    assert describe_path(s, "inputs.1.gain_db") == "In 2 input level"
+    assert describe_path(s, "outputs.0.peq.3") == "Out 1 · EQ band 4"
+    assert describe_path(s, "outputs.0.mute") == "Out 1 mute"
     assert describe_path(s, "outputs.2.compressor.threshold_db") == "Out 3 · compressor · threshold"
     assert format_value(s, "outputs.0.delay_ms", 9.0) == "9.000 ms (864 samples)"
     assert format_value(s, "outputs.0.gain_db", -3.0) == "−3.00 dB"

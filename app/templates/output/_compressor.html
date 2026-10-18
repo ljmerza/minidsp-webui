@@ -6,6 +6,8 @@
 } -%}
 <link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
 <script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+{#- peq_editor.js first: it holds the signed-number parser the threshold field shares (phase 9 P01). -#}
+<script src="{{ root }}/static/js/peq_editor.js?v={{ asset_version }}"></script>
 <script src="{{ root }}/static/js/compressor.js?v={{ asset_version }}"></script>
 
 <div class="compressor" x-data='compressorEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
@@ -36,11 +38,22 @@
       </label>
     </header>
     <div class="xover-fields">
-      <label>Threshold
-        <span class="num-field"><input type="number" class="num" inputmode="decimal" step="0.5"
-               :min="range('threshold_db')[0]" :max="range('threshold_db')[1]" :class="{ 'is-invalid': invalid('threshold_db') }"
-               x-model.number="form.threshold_db" @input="render()" @change="commit('threshold_db')"> <span class="unit">dBFS</span>
-          <span class="sync-icon" :class="`sync-${status('threshold_db')}`" :title="status('threshold_db')" x-text="icon('threshold_db')"></span></span></label>
+      {#- A text field with − / + steppers (phase 9 P01): a number field plus x-model.number wiped a typed "-", so "-10"
+          arrived as 10, and phone decimal keypads may have no minus key at all. -#}
+      <div class="threshold-field">
+        <label for="comp-threshold-text-{{ channel.index }}">Threshold</label>
+        <span class="num-field stepper">
+          <button type="button" class="step-btn" @click="stepThreshold(-1)" :disabled="!canStep(-1)"
+                  aria-label="Threshold 1 dB lower">&minus;</button>
+          <input id="comp-threshold-text-{{ channel.index }}" type="text" class="num" inputmode="decimal" autocomplete="off"
+                 spellcheck="false" :class="{ 'is-invalid': thresholdInvalid() }"
+                 :aria-invalid="thresholdInvalid().toString()"
+                 x-model="thresholdText" @input="onThresholdInput()" @change="commitThreshold()">
+          <button type="button" class="step-btn" @click="stepThreshold(1)" :disabled="!canStep(1)"
+                  aria-label="Threshold 1 dB higher">+</button>
+          <span class="unit">dBFS</span>
+          <span class="sync-icon" :class="`sync-${status('threshold_db')}`" :title="status('threshold_db')" x-text="icon('threshold_db')"></span></span>
+      </div>
       <label>Ratio
         <span class="num-field"><input type="number" class="num" inputmode="decimal" step="0.5"
                :min="range('ratio')[0]" :max="range('ratio')[1]" :class="{ 'is-invalid': invalid('ratio') }"
@@ -60,7 +73,7 @@
     <label class="visually-hidden" for="comp-threshold-{{ channel.index }}">Threshold slider</label>
     <input id="comp-threshold-{{ channel.index }}" type="range" step="0.5"
            :min="range('threshold_db')[0]" :max="range('threshold_db')[1]"
-           x-model.number="form.threshold_db" @input="render()" @change="commit('threshold_db')">
+           x-model.number="form.threshold_db" @input="onThresholdSlide()" @change="commit('threshold_db')">
   </section>
 
   <div class="graph-box">

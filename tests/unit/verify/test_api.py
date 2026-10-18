@@ -1,5 +1,8 @@
 """Verify JSON API and the Device page partial, on a throwaway app over a real session and the fake frame bridge."""
 
+import json
+import re
+
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -129,8 +132,8 @@ async def test_partial_before_any_run(http):
     r = await http.get(f"/ui/devices/{SERIAL}/verify")
     assert r.status_code == 200
     assert 'id="verify-panel"' in r.text
-    assert "Verify device" in r.text
-    assert "Not verified since the app started" in r.text
+    assert "Check device" in r.text
+    assert "Not checked since the app started" in r.text
 
 
 async def test_partial_run_shows_drift_first(http, bridge):
@@ -142,21 +145,22 @@ async def test_partial_run_shows_drift_first(http, bridge):
     assert html.index("outputs.0.gain_db") < html.index("outputs.1.gain_db")
     assert 'class="row-failed"' in html
     assert "−6.02 dB" in html
-    assert "Mark drifted settings unknown" in html
+    assert "Forget these values" in html
+    assert "Use the device&#39;s values" in html or "Use the device's values" in html
     assert "can&#39;t report" in html or "can't report" in html
 
 
 async def test_partial_clean_run(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
     assert "no drift found" in r.text
-    assert "Mark drifted" not in r.text
+    assert "Forget these values" not in r.text
 
 
 async def test_partial_shows_errors(http, bridge):
     bridge.fail = OSError("refused")
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
     assert r.status_code == 200
-    assert "Verify failed" in r.text
+    assert "Check device failed" in r.text
 
 
 async def test_partial_mark_unknown(http, bridge, shaker):  # noqa: F811
@@ -167,7 +171,7 @@ async def test_partial_mark_unknown(http, bridge, shaker):  # noqa: F811
         data={"preset": "0", "path": ["outputs.0.gain_db", "outputs.1.gain_db"]},  # only drifted paths count
     )
     assert r.status_code == 200
-    assert "Marked 1 setting(s) unknown" in r.text
+    assert "Forgot 1 setting: the app now treats them as Unknown" in r.text
     assert "mdsp-sync-changed" in r.headers["HX-Trigger"]
     status = shaker.sync_status(0)
     assert status["outputs.0.gain_db"] == "unknown"
@@ -177,7 +181,7 @@ async def test_partial_mark_unknown(http, bridge, shaker):  # noqa: F811
 
 async def test_partial_mark_unknown_needs_a_matching_report(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify/mark-unknown", data={"preset": "0", "path": "x"})
-    assert "verify again" in r.text
+    assert "check the device again" in r.text
     assert "HX-Trigger" not in r.headers
 
 
@@ -233,16 +237,136 @@ async def test_partial_offers_and_accepts_device_values(http, bridge, shaker):  
     bridge.memory[M2X4HD_MAP.output_delay[0]] = f32(0.0)
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
     assert "no drift; 1 never-confirmed setting(s)" in r.text
-    assert "Accept device values (1)" in r.text
+    assert 'id="verify-use"' in r.text
     r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": ["outputs.0.delay_ms"]})
     assert r.status_code == 200
-    assert "Accepted 1 device value(s)" in r.text
-    assert "mdsp-sync-changed" in r.headers["HX-Trigger"]
+    assert "Using the device&#39;s values for 1 setting." in r.text
+    trigger = json.loads(r.headers["HX-Trigger"])
+    assert "mdsp-sync-changed" in trigger
+    assert trigger["mdsp-toast"]["action"]["label"] == "Undo"
     assert shaker.sync_status(0)["outputs.0.delay_ms"] == "synced"
     assert shaker.desired(0).outputs[0].delay_ms == 0.0
 
 
 async def test_partial_accept_needs_a_matching_report(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": "x"})
-    assert "verify again" in r.text
+    assert "check the device again" in r.text
     assert "HX-Trigger" not in r.headers
+
+
+# --- safe "Use the device's values" (phase9 design §11.2) ---------------------------------------------------------
+
+ZERO_BIQUAD = dict.fromkeys(("b0", "b1", "b2", "a1", "a2"), 0.0)
+XOVER = "outputs.0.crossover.0.compiled.0"
+
+
+def zero_crossover(bridge) -> None:
+    for k in range(5):
+        bridge.memory[M2X4HD_MAP.crossover_biquad(0, 0, 0) + k] = f32(0.0)
+
+
+def visible(html: str) -> str:
+    """The text a user can see: hidden form fields carry internal paths on purpose."""
+    return re.sub(r"<input[^>]*>", "", html)
+
+
+async def test_accept_json_refuses_zero_filters_and_offers_undo(http, bridge, shaker, fake):  # noqa: F811
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    zero_crossover(bridge)
+    await http.post(f"/api/v1/devices/{SERIAL}/verify")
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 0})
+    body = r.json()
+    assert body["accepted"] == ["outputs.0.gain_db"]
+    assert body["refused"] == [XOVER]
+    assert body["undo"]["seconds"] == 30
+    token = body["undo"]["token"]
+
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept/undo", json={"preset": 0, "token": "nope"})
+    assert r.status_code == 409 and r.json()["error"] == "undo_nothing"
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept/undo", json={"preset": 0, "token": token})
+    assert r.status_code == 200
+    assert "outputs.0.gain_db" in r.json()["restored"] and r.json()["skipped"] == []
+    assert shaker.desired(0).outputs[0].gain_db == 12.0
+    assert shaker.writer.pending_paths(0) == []
+    assert fake.configs == []
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept/undo", json={"preset": 0})
+    assert r.status_code == 409
+
+
+async def test_undo_json_after_the_window_is_410(http, bridge, shaker, monkeypatch):  # noqa: F811
+    from app.sync import session as session_mod
+
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    await http.post(f"/api/v1/devices/{SERIAL}/verify")
+    await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 0})
+    monkeypatch.setattr(session_mod, "ACCEPT_UNDO_S", -1.0)
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept/undo", json={"preset": 0})
+    assert r.status_code == 410 and r.json()["error"] == "undo_expired"
+
+
+async def test_partial_confirm_lists_names_effects_and_refusals(http, bridge, shaker):  # noqa: F811
+    await shaker.set_channel_meta("output", 0, name="Shakers")
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    zero_crossover(bridge)
+    r = await http.post(f"/ui/devices/{SERIAL}/verify")
+    assert "Forget these values" in r.text and 'id="verify-use"' in r.text
+    assert r.text.index("Forget these values") < r.text.index("verify-divider") < r.text.index('id="verify-use"')
+    assert "Shakers · band filter 1 is all zeros, which would make Shakers silent." in r.text
+
+    r = await http.get(
+        f"/ui/devices/{SERIAL}/verify/accept/confirm", params={"preset": "0", "path": ["outputs.0.gain_db"]}
+    )
+    assert r.status_code == 200
+    html = r.text
+    assert "<dialog" in html and "data-modal" in html
+    assert "Use the device's values for 1 setting?" in html
+    assert "Nothing is sent to the device" in html
+    assert "Shakers output level:</span> +12.00 dB" in html and "−6.02 dB" in html
+    assert 'Shakers<span class="confirm-effect">: 18.0 dB quieter</span>' in html
+    assert "Not used (looks like a read error)" in html
+    assert "would make Shakers silent" in html
+    assert 'name="path" value="outputs.0.gain_db"' in html
+    assert f'name="path" value="{XOVER}"' not in html  # the refused filter is never posted
+    assert "outputs." not in visible(html)
+    assert shaker.desired(0).outputs[0].gain_db == 12.0  # the confirm changes nothing
+
+
+async def test_partial_confirm_needs_a_matching_report(http):
+    r = await http.get(f"/ui/devices/{SERIAL}/verify/accept/confirm", params={"preset": "0"})
+    assert r.status_code == 409
+
+
+async def test_partial_accept_refuses_a_stale_confirm(http, bridge, shaker):  # noqa: F811
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    await http.post(f"/ui/devices/{SERIAL}/verify")
+    r = await http.post(
+        f"/ui/devices/{SERIAL}/verify/accept",
+        data={"preset": "0", "checked_at": "2000-01-01T00:00:00", "path": ["outputs.0.gain_db"]},
+    )
+    assert "check the device again" in r.text
+    assert shaker.desired(0).outputs[0].gain_db == 12.0
+
+
+async def test_partial_accept_then_undo(http, bridge, shaker, fake):  # noqa: F811
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    await http.post(f"/ui/devices/{SERIAL}/verify")
+    report = svc.last_report(SERIAL)
+    r = await http.post(
+        f"/ui/devices/{SERIAL}/verify/accept",
+        data={"preset": "0", "checked_at": report.checked_at, "path": ["outputs.0.gain_db"]},
+    )
+    toast = json.loads(r.headers["HX-Trigger"])["mdsp-toast"]
+    assert toast["timeout_ms"] == 30000
+    assert toast["action"]["url"].endswith(f"/ui/devices/{SERIAL}/verify/accept/undo")
+    assert shaker.desired(0).outputs[0].gain_db == -6.02
+
+    r = await http.post(toast["action"]["url"], data=toast["action"]["values"])
+    assert r.status_code == 200
+    assert "Undone: the app&#39;s earlier values are back for 1 setting." in r.text
+    trigger = json.loads(r.headers["HX-Trigger"])
+    assert "mdsp-sync-changed" in trigger and "Undone" in trigger["mdsp-toast"]["message"]
+    assert shaker.desired(0).outputs[0].gain_db == 12.0
+    assert fake.configs == []
+
+    r = await http.post(toast["action"]["url"], data=toast["action"]["values"])
+    assert r.status_code == 409 and "Nothing to undo" in r.text

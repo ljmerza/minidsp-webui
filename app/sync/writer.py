@@ -290,6 +290,42 @@ class DeviceWriter:
         self._changed(preset)
         self._resolve(preset)
 
+    def restore(
+        self,
+        preset: int,
+        desired: ConfigDoc,
+        applied: Mapping[str, Any],
+        *,
+        unknown: Iterable[str] = (),
+        failed: Mapping[str, str] | None = None,
+    ) -> list[str]:
+        """Put back an earlier shadow for some paths together with a new desired document (undoing an accept of
+        device values). ``applied`` holds the restored shadow values, ``unknown`` the paths the shadow didn't know and
+        ``failed`` the restored give-ups. Nothing is written and nothing is queued: a restored path whose shadow value
+        differs from its desired value (a write was still due) becomes unknown instead. Returns those paths."""
+        state = self.state(preset)
+        state.desired = desired
+        values = state.values(self.profile)
+        failed = failed or {}
+        dropped: list[str] = []
+        for path in [*applied, *unknown]:
+            state.dirty.discard(path)
+            state.attempts.pop(path, None)
+            state.retry_at.pop(path, None)
+            state.failed.pop(path, None)
+            if path in failed:
+                state.failed[path] = failed[path]
+            if path in applied:
+                value = applied[path]
+                if path in state.failed or path not in values or same_value(path, value, values[path], self.profile):
+                    state.applied[path] = value
+                    continue
+                dropped.append(path)
+            state.applied.pop(path, None)
+        self._changed(preset)
+        self._resolve(preset)
+        return dropped
+
     def invalidate(self, preset: int, paths: Iterable[str] | None = None) -> None:
         """Forget what the device holds (e.g. after a possible power cycle). Nothing is written."""
         state = self.state(preset)

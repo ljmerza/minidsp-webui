@@ -3,6 +3,8 @@ log. These are HTMX partials loaded into the Device page; the page itself is ser
 """
 
 import json
+import re
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -16,6 +18,7 @@ from app.model.payload import device_values
 from app.sync.session import (
     BULK_TIMEOUT_S,
     AdoptMode,
+    BigRaise,
     ConfirmationRequired,
     DesiredValidationError,
     DeviceSession,
@@ -63,27 +66,94 @@ _FIELD_LABELS = {
 }
 
 
-def describe_path(session: DeviceSession, path: str) -> str:
-    """``outputs.0.crossover.1.compiled.2`` -> "Shakers · crossover 2 · biquad 3" (1-based like the UI)."""
+# Channel-level settings read as one phrase ("Shakers output level"); see the phase9 design §2 vocabulary.
+_CHANNEL_FIELDS = {"mute": "mute", "invert": "polarity", "delay_ms": "delay"}
+
+
+def describe_path(session: DeviceSession | None, path: str) -> str:
+    """A setting's plain name, 1-based like the UI and with the channel names from Settings:
+
+    ``outputs.0.gain_db`` -> "Shakers output level", ``inputs.0.routing.1.gain_db`` -> "In 1 → Sub route level",
+    ``outputs.0.peq.2`` -> "Shakers · EQ band 3", ``outputs.0.crossover.1.compiled.2`` -> "Shakers · band filter 2 ·
+    stage 3". Anything else comes back unchanged."""
     parts = path.split(".")
-    if len(parts) < 3 or not parts[1].isdigit():
+    if len(parts) < 3 or parts[0] not in ("inputs", "outputs") or not parts[1].isdigit():
         return path
     kind = "input" if parts[0] == "inputs" else "output"
-    words = [channel_label(session, kind, int(parts[1]))]
+    name = channel_label(session, kind, int(parts[1]))
     rest = parts[2:]
+    if len(rest) == 1 and rest[0] == "gain_db":
+        return f"{name} {kind} level"
+    if len(rest) == 1 and rest[0] in _CHANNEL_FIELDS:
+        return f"{name} {_CHANNEL_FIELDS[rest[0]]}"
+    if rest[0] == "routing" and len(rest) >= 2 and rest[1].isdigit():
+        route = f"{name} → {channel_label(session, 'output', int(rest[1]))} route"
+        field = rest[2:]
+        if field == ["gain_db"]:
+            return f"{route} level"
+        if not field or field == ["enabled"]:
+            return route
+        return " · ".join([route, *(_FIELD_LABELS.get(key, key) for key in field)])
+    words = [name]
     while rest:
         key = rest.pop(0)
-        if key == "routing" and rest and rest[0].isdigit():
-            words.append(f"→ {channel_label(session, 'output', int(rest.pop(0)))}")
-        elif key in ("peq", "crossover") and rest and rest[0].isdigit():
-            words.append(f"{'PEQ' if key == 'peq' else 'crossover'} {int(rest.pop(0)) + 1}")
+        if key in ("peq", "crossover") and rest and rest[0].isdigit():
+            words.append(f"{'EQ band' if key == 'peq' else 'band filter'} {int(rest.pop(0)) + 1}")
         elif key == "compiled" and rest and rest[0].isdigit():
-            words.append(f"biquad {int(rest.pop(0)) + 1}")
+            words.append(f"stage {int(rest.pop(0)) + 1}")
         elif key in ("compressor", "fir"):
             words.append(key if key == "compressor" else "FIR")
+        elif key in ("peq", "crossover"):
+            words.append("EQ" if key == "peq" else "band filters")
         else:
             words.append(_FIELD_LABELS.get(key, key))
     return " · ".join(words)
+
+
+_PATH_IN_TEXT = re.compile(r"\b(?:inputs|outputs)\.\d+(?:\.\w+)*")
+
+
+def humanize_paths(session: DeviceSession | None, text: str) -> str:
+    """``text`` with every internal path in it (``outputs.0.gain_db``) replaced by its `describe_path` name."""
+    return _PATH_IN_TEXT.sub(lambda m: describe_path(session, m.group(0)), text)
+
+
+def _db_amount(value: float) -> str:
+    return f"{round(value, 2):g} dB"
+
+
+def raise_label(session: DeviceSession | None, item: BigRaise | Mapping[str, Any]) -> str:
+    """ "Shakers output level" or, for a filter whose peak rises, "Shakers · EQ band 4 peak"."""
+    path, kind = (item.path, item.kind) if isinstance(item, BigRaise) else (item["path"], item.get("kind", "gain"))
+    return describe_path(session, path) + (" peak" if kind == "peak" else "")
+
+
+def raise_rows(session: DeviceSession | None, raises: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """``raises`` (`BigRaise.as_json`) with a ``label`` and a ``text`` ("Shakers output level up 12 dB")."""
+    rows = []
+    for item in raises:
+        label = raise_label(session, item)
+        rows.append({**item, "label": label, "text": f"{label} up {_db_amount(float(item['delta_db']))}"})
+    return rows
+
+
+def confirmation_text(session: DeviceSession | None, exc: ConfirmationRequired) -> str:
+    """The question behind a 409 ``confirmation_required`` in words, with channel names and no internal paths. The
+    pages show it as "<text>.\n\nApply it anyway?", so it has no closing full stop."""
+    raises = ""
+    if exc.raises:
+        parts = [f"{raise_label(session, r)} by {_db_amount(r.delta_db)}" for r in exc.raises]
+        limit = f" (more than {_db_amount(exc.limit_db)} in one step)" if exc.limit_db else ""
+        raises = f"This raises {_join_words(parts)} at once{limit}"
+        if str(exc).startswith("raising "):
+            return raises
+    text = humanize_paths(session, str(exc)).rstrip(".")
+    text = text[:1].upper() + text[1:]
+    return f"{text}. {raises}" if raises else text
+
+
+def _join_words(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def format_value(session: DeviceSession, path: str, value: Any, *, known: bool = True) -> str:
@@ -443,4 +513,12 @@ async def event_log(request: Request, serial: int, limit: int = EVENT_LIMIT) -> 
     return render(request, "partials/event_log.html", ctx)
 
 
-__all__ = ["describe_path", "format_value", "router"]
+__all__ = [
+    "confirmation_text",
+    "describe_path",
+    "format_value",
+    "humanize_paths",
+    "raise_label",
+    "raise_rows",
+    "router",
+]

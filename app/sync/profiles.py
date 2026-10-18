@@ -41,6 +41,7 @@ from app.state.db import utcnow_iso
 from app.state.repo import UNSET
 from app.sync.session import (
     BULK_TIMEOUT_S,
+    Confirmed,
     DesiredValidationError,
     DeviceSession,
     EditResult,
@@ -73,6 +74,7 @@ __all__ = [
     "import_profile",
     "import_profile_script",
     "list_profiles",
+    "load_diff",
     "load_preview",
     "load_profile",
     "loaded_slots",
@@ -492,8 +494,17 @@ async def load_preview(session: DeviceSession, profile_id: int, preset: int | No
     preset = await _target(session, preset)
     current = await session.get_desired(preset)
     changes, writes = change_counts(current, normalize_delays(doc, session.profile))
+    # The checks `load_profile` runs, dry: the caller can ask about every big raise in one question and then load
+    # with ``confirm`` (a load the checks would refuse is refused by the load itself).
+    check = await session.check_replace(preset, doc, push_unknown=True)
     master = session.master
     return {
+        "problems": check.problems,
+        "needs_confirm": check.needs_confirm,
+        "confirmation": check.confirmation,
+        "raises": [r.as_json() for r in check.raises],
+        "raise_limit_db": check.limit_db,
+        "fir_loads": list(check.fir_loads),
         "profile": profile.id,
         "name": profile.name,
         "preset": preset,
@@ -506,6 +517,13 @@ async def load_preview(session: DeviceSession, profile_id: int, preset: int | No
     }
 
 
+async def load_diff(session: DeviceSession, profile_id: int, preset: int | None = None) -> list["DiffRow"]:
+    """The differences loading the profile into ``preset`` (default: the active one) would make, in document order."""
+    _profile, doc = await _profile_for_load(session, profile_id)
+    preset = await _target(session, preset)
+    return diff_docs(await session.get_desired(preset), normalize_delays(doc, session.profile))
+
+
 async def load_profile(
     session: DeviceSession,
     profile_id: int,
@@ -513,6 +531,7 @@ async def load_profile(
     *,
     activate: bool = False,
     confirm: bool = False,
+    confirmed: Confirmed | None = None,
     expected_revision: int | None = None,
     timeout: float | None = BULK_TIMEOUT_S,
 ) -> LoadResult:
@@ -522,7 +541,8 @@ async def load_profile(
     no confirmed device value for are written too, so the preset holds exactly the profile. An inactive preset
     is staged (written when it becomes active); with ``activate`` the device is then switched to it and the staged
     changes are applied, held muted while they land (``MUTE_WRAP_BULK_APPLY``). Validation errors, the big-step
-    guard and FIR loads raise like any other edit (``confirm`` allows the guarded ones).
+    guard and FIR loads raise like any other edit (``confirm`` allows the guarded ones; ``confirmed`` only the ones
+    the user was asked about, so a raise that grew since `load_preview` asks again).
     """
     profile, doc = await _profile_for_load(session, profile_id)
     preset = await _target(session, preset)
@@ -532,6 +552,7 @@ async def load_profile(
         preset,
         doc,
         confirm=confirm,
+        confirmed=confirmed,
         expected_revision=expected_revision,
         source="profile",
         summary=f"Loaded profile “{profile.name}”",
@@ -598,6 +619,7 @@ async def revert_to(
     number: int,
     *,
     confirm: bool = False,
+    confirmed: Confirmed | None = None,
     expected_revision: int | None = None,
     timeout: float | None = BULK_TIMEOUT_S,
 ) -> EditResult:
@@ -610,6 +632,7 @@ async def revert_to(
         preset,
         doc,
         confirm=confirm,
+        confirmed=confirmed,
         expected_revision=expected_revision,
         source="revert",
         summary=f"Reverted to revision {number}",

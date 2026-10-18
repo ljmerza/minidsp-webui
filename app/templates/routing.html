@@ -46,7 +46,7 @@
                   <label class="route-toggle">
                     <input type="checkbox" data-path="{{ ep }}" data-type="bool"
                            data-route-output="{{ o }}" data-route-input="{{ i }}"
-                           data-route-title="{{ output_titles[o] }}"{% if on %} checked{% endif %}>
+                           data-route-name="{{ out_name }}" data-route-input-name="{{ in_name }}"{% if on %} checked{% endif %}>
                     <span class="visually-hidden">Route {{ in_name }} to {{ out_name }}</span>
                   </label>
                   <span class="num-field route-gain">
@@ -70,18 +70,22 @@
   </section>
 
   {% if input_names|length > 1 %}
+  {%- set every = "both inputs" if input_names|length == 2 else "every input" %}
   <section class="card" aria-labelledby="mono-title">
-    <h2 id="mono-title">Mono sum</h2>
+    <h2 id="mono-title">Play {{ every }} on one output (mono sum)</h2>
     <div class="mono-sum">
-      <label>Send every input at <strong>&minus;6 dB</strong> to
-        <select data-mono-target>
-          {% for name in output_names %}<option value="{{ loop.index0 }}">{{ name }}</option>{% endfor %}
-        </select>
-      </label>
-      <button type="button" data-mono-sum data-gain="-6">Apply</button>
+      <label for="mono-target">Output</label>
+      <select id="mono-target" data-mono-target aria-describedby="mono-preview">
+        <option value="" selected>Choose an output&hellip;</option>
+        {% for name in output_names %}<option value="{{ loop.index0 }}">{{ name }}</option>{% endfor %}
+      </select>
+      <button type="button" data-mono-sum data-gain="-6" disabled>Apply</button>
     </div>
-    <p class="hint">Enables the routes from all inputs to the chosen output, each at &minus;6 dB, so a stereo source
-      sums to mono without clipping.</p>
+    <p id="mono-preview" class="mono-preview" data-mono-preview aria-live="polite"
+       data-empty-text="Choose an output to see what changes. Nothing is sent until you press Apply.">Choose an output
+      to see what changes. Nothing is sent until you press Apply.</p>
+    <p class="hint">Turns on the routes from {{ every }} to that output, each at &minus;6 dB, so a stereo source plays
+      in mono without clipping. Other outputs don't change, and Undo puts the routes back.</p>
   </section>
   {% endif %}
 </div>

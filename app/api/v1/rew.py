@@ -40,6 +40,7 @@ from app.formats.rew import (
 from app.model.filters import Biquad
 from app.sync.filters import band_view, group_view
 from app.sync.session import ConfirmationRequired, DesiredValidationError, DeviceSession
+from app.web.sync_ui import describe_path
 
 router = APIRouter(tags=["import/export"])
 
@@ -159,8 +160,8 @@ async def import_rew(
             )
             views = {f"{bank.path}.{g}": group_view(group) for g, group in changed.items()}
             if cleared := cleared_groups(doc, bank, changed):
-                names = ", ".join(str(g + 1) for g in cleared)
-                text = f"the import clears crossover group {names} of {bank.path} to pass-through, removing its filters"
+                names = ", ".join(describe_path(session, f"{bank.path}.{g}") for g in cleared)
+                text = f"the import clears {names} to pass-through, removing its filters"
                 if not body.confirm:
                     raise ConfirmationRequired(text)
                 warnings.append(text)

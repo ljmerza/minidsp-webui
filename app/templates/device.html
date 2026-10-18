@@ -80,9 +80,9 @@
   </section>
 
   <section id="verify" class="card" aria-labelledby="verify-title">
-    <h2 id="verify-title">Verify device</h2>
+    <h2 id="verify-title">Check device</h2>
     {#- The partial (#verify-panel) replaces itself on its own posts; a nightly or API run re-renders it here. -#}
-    <div class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
+    <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
       <p class="muted">Loading&hellip;</p>
     </div>
   </section>

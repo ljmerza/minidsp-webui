@@ -40,22 +40,29 @@
   </ul>
 {%- endmacro %}
 
+{#- Grouped, with the hint in the group label (phase 9 P07): a gentle cut is Peaking, not Notch. -#}
 {% macro type_options() -%}
-  <option value="passthrough">&mdash; (flat)</option>
-  <option value="peaking">Peaking</option>
-  <option value="lowshelf">Low shelf</option>
-  <option value="highshelf">High shelf</option>
-  <option value="lp1">Low-pass 1st</option>
-  <option value="hp1">High-pass 1st</option>
-  <option value="lp2">Low-pass 2nd</option>
-  <option value="hp2">High-pass 2nd</option>
-  <option value="bandpass">Band-pass</option>
-  <option value="notch">Notch</option>
-  <option value="ap1">All-pass 1st</option>
-  <option value="ap2">All-pass 2nd</option>
-  <option value="lt">Linkwitz Transform</option>
-  <option value="gain">Gain</option>
-  <option value="raw">Raw</option>
+  <option value="passthrough">&mdash; unused</option>
+  <optgroup label="Common: for a boom, use Peaking">
+    <option value="peaking">Peaking</option>
+    <option value="lowshelf">Low shelf</option>
+    <option value="highshelf">High shelf</option>
+  </optgroup>
+  <optgroup label="Filters: Notch removes a very thin slice">
+    <option value="lp1">Low-pass 1st</option>
+    <option value="lp2">Low-pass 2nd</option>
+    <option value="hp1">High-pass 1st</option>
+    <option value="hp2">High-pass 2nd</option>
+    <option value="bandpass">Band-pass</option>
+    <option value="notch">Notch</option>
+  </optgroup>
+  <optgroup label="Specialist">
+    <option value="ap1">All-pass 1st</option>
+    <option value="ap2">All-pass 2nd</option>
+    <option value="lt">Linkwitz Transform</option>
+    <option value="gain">Gain</option>
+    <option value="raw">Raw</option>
+  </optgroup>
 {%- endmacro %}
 
 {% macro editor(side, index, color, name, view="full") -%}
@@ -71,6 +78,8 @@
   {{ warnings() }}
   <p class="hint">Drag a handle: sideways = frequency, up/down = gain. Mouse wheel over a handle or pinch = Q.
     Hold Shift for fine steps. The curve is a preview until the server confirms the change.</p>
+  <p class="hint">Choosing a type for an unused band turns it on. For a boom, pick Peaking, then Cut and how many dB;
+    you never need a minus sign. Notch removes a very thin slice.</p>
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
 
   <div class="table-scroll">
@@ -80,7 +89,8 @@
         <tr>
           <th scope="col">#</th><th scope="col">On</th><th scope="col">Type</th>
           <th scope="col">Freq <span class="unit">Hz</span></th><th scope="col">Q</th>
-          <th scope="col">Gain <span class="unit">dB</span></th><th scope="col">Source</th><th scope="col"><span class="visually-hidden">Actions</span></th>
+          <th scope="col">Cut / Boost</th><th scope="col"><span class="unit">dB</span></th>
+          <th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
       <template x-for="band in bands" :key="band.index">
@@ -106,15 +116,31 @@
             <td><input type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
                        x-model.number="band.form.q" @input="onFieldInput(band)" @change="commitForm(band)"
                        :disabled="band.external || !uses(band, 'q')" :aria-label="`Band ${band.index + 1} Q`"></td>
-            <td><input type="number" class="num" inputmode="decimal" min="-30" max="20" step="0.1"
-                       x-model.number="band.form.gain_db" @input="onFieldInput(band)" @change="commitForm(band)"
-                       :disabled="band.external || !uses(band, 'gain')" :aria-label="`Band ${band.index + 1} gain in dB`"></td>
+            <td>
+              {#- Cut / Boost + a magnitude (phase 9 P01): no minus key needed; the stored gain stays signed. -#}
+              <div class="cut-boost" role="radiogroup" :aria-label="`Band ${band.index + 1}: cut or boost`">
+                <label><input type="radio" value="cut" :name="`${prefix}.${band.index}.sign`"
+                              :checked="uses(band, 'gain') && band.form.cut" @change="setCut(band, true)"
+                              :disabled="band.external || !uses(band, 'gain')"><span>Cut</span></label>
+                <label><input type="radio" value="boost" :name="`${prefix}.${band.index}.sign`"
+                              :checked="uses(band, 'gain') && !band.form.cut" @change="setCut(band, false)"
+                              :disabled="band.external || !uses(band, 'gain')"><span>Boost</span></label>
+              </div>
+            </td>
+            {#- Text, not type=number: a number field reports a lone "-" as empty and Alpine wiped it, so "-4" became +4. -#}
+            <td><input type="text" class="num mag" inputmode="decimal" autocomplete="off" spellcheck="false"
+                       x-model="band.form.mag" @input="onGainInput(band)" @change="commitGain(band)"
+                       :disabled="band.external || !uses(band, 'gain')"
+                       :aria-label="`Band ${band.index + 1}: dB to ${band.form.cut ? 'cut' : 'boost'}`"></td>
             <td class="source"><span x-text="sourceText(band)" :title="band.label"></span></td>
-            <td class="row-actions">
-              <span class="sync-badge is-compact" :class="`sync-${status(band)}`" :title="statusTitle(band)">
+            <td class="band-status">
+              <span class="band-off" x-show="isOff(band)">off</span>
+              <span class="sync-badge is-compact" x-show="!isOff(band)" :class="`sync-${status(band)}`" :title="statusTitle(band)">
                 <span class="sync-icon" aria-hidden="true" x-text="statusIcon(band)"></span>
                 <span class="sync-text visually-hidden" x-text="status(band)"></span>
               </span>
+            </td>
+            <td class="row-actions">
               <button type="button" class="btn-small" @click.stop="openDrawer(band)" :aria-expanded="(drawer === band.index).toString()"
                       :aria-label="`Band ${band.index + 1} raw coefficients`">raw</button>
               <button type="button" class="btn-small" @click.stop="resetBand(band)" :disabled="band.external || band.source === 'flat'"
@@ -122,7 +148,7 @@
             </td>
           </tr>
           <tr class="peq-drawer-row" x-show="drawer === band.index" x-cloak>
-            <td colspan="8">
+            <td colspan="10">
               <div class="drawer">
                 <template x-if="band.form.type === 'lt'">
                   <fieldset class="helper">

@@ -1,0 +1,46 @@
+{#- "Use the device's values" confirm (phase9 design §11.2), loaded into #verify-dialog-slot and opened as a modal by
+     app.js (dialog[data-modal]). Accepting posts to the verify panel, which replaces this dialog with it. -#}
+<dialog id="verify-accept-dialog" class="confirm-dialog" data-modal aria-labelledby="verify-accept-title"
+        aria-describedby="verify-accept-desc">
+  <form hx-post="{{ accept_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
+    <h2 id="verify-accept-title" tabindex="-1">Use the device's values for {{ count_text }}?</h2>
+    <p id="verify-accept-desc">The app's values become what the device reported. Nothing is sent to the device, and
+      you can undo it for 30 seconds.</p>
+    <input type="hidden" name="preset" value="{{ preset }}">
+    <input type="hidden" name="checked_at" value="{{ checked_at }}">
+    {% for p in paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+
+    {% for g in groups %}
+      <section class="confirm-group" aria-label="{{ g.name }}">
+        <h3>{{ g.name }}{% if g.effect %}<span class="confirm-effect">: {{ g.effect }}</span>{% endif %}</h3>
+        <ul class="confirm-lines">
+          {% for line in g.lines %}
+            <li><span class="confirm-label">{{ line.label }}:</span> {{ line.before }}
+              <span aria-hidden="true">→</span><span class="visually-hidden">becomes</span> {{ line.after }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endfor %}
+    {% if confirm_only %}
+      <p class="hint">{{ confirm_only }} more setting(s) already hold the app's value on the device; they are only
+        marked as sent.</p>
+    {% endif %}
+    {% if refused %}
+      <div class="confirm-refused">
+        <p><strong>Not used (looks like a read error):</strong></p>
+        <ul class="issues">{% for line in refused %}<li>{{ line }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+    {% if problems %}
+      <div class="form-errors" role="alert">
+        <p>These values can't be used:</p>
+        <ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+      </div>
+    {% endif %}
+
+    <div class="dialog-actions">
+      <button type="button" class="dialog-cancel" data-dialog-close>Cancel</button>
+      <button type="submit" class="btn-primary"{% if problems %} disabled{% endif %}>Use the device's values</button>
+    </div>
+  </form>
+</dialog>

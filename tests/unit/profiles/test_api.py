@@ -7,6 +7,7 @@ from app.model.config_doc import default_config_doc
 from app.model.device_profile import M2X4HD
 from app.model.filters import FilterDesign
 from app.sync import profiles as svc
+from app.sync.session import ConfirmationRequired
 
 from .conftest import API, SERIAL
 
@@ -210,6 +211,56 @@ async def test_load_preview_changes_nothing(ctx):
     assert data["active"] is True
     assert ctx.fake.configs == []
     assert ctx.session.desired(0).outputs[0].gain_db == 0.0
+
+
+async def _big_raise_profile(ctx, name: str = "Loud") -> int:
+    doc = default_config_doc(M2X4HD).model_dump(mode="json")
+    doc["outputs"][0]["gain_db"] = 12.0  # +12 dB at once: the big-step guard asks
+    doc["inputs"][0]["routing"][1]["gain_db"] = 7.0  # a route level counts too
+    doc["outputs"][2]["gain_db"] = 3.0  # below the 6 dB step: not asked about
+    created = (await ctx.http.post(f"{API}/profiles", json={"name": name, "config": doc})).json()
+    return created["id"]
+
+
+async def test_load_preview_returns_the_raises_load_profile_asks_about(ctx):
+    pid = await _big_raise_profile(ctx)
+    preview = await svc.load_preview(ctx.session, pid, 1)
+    assert preview["needs_confirm"] is True and preview["problems"] == []
+    assert preview["raise_limit_db"] == 6.0
+    raised = {r["path"]: r["delta_db"] for r in preview["raises"]}
+    assert raised == {"outputs.0.gain_db": 12.0, "inputs.0.routing.1.gain_db": 7.0}
+    assert all(r["kind"] == "gain" for r in preview["raises"])
+    assert ctx.session.desired(1).outputs[0].gain_db == 0.0  # a preview changes nothing
+
+    try:
+        await svc.load_profile(ctx.session, pid, 1)
+    except ConfirmationRequired as exc:
+        assert {(r.path, r.delta_db) for r in exc.raises} == set(raised.items())
+        assert str(exc) == preview["confirmation"]
+    else:
+        raise AssertionError("load_profile should have asked first")
+    result = await svc.load_profile(ctx.session, pid, 1, confirm=True)
+    assert result.edit.doc.outputs[0].gain_db == 12.0
+
+
+async def test_load_preview_without_raises_needs_no_confirm(ctx):
+    doc = default_config_doc(M2X4HD).model_dump(mode="json")
+    doc["outputs"][0]["gain_db"] = -3.0
+    pid = (await ctx.http.post(f"{API}/profiles", json={"name": "Quiet", "config": doc})).json()["id"]
+    preview = await svc.load_preview(ctx.session, pid, 1)
+    assert preview["needs_confirm"] is False and preview["raises"] == [] and preview["confirmation"] is None
+    await svc.load_profile(ctx.session, pid, 1)  # no ConfirmationRequired
+
+
+async def test_api_preview_names_the_raises(ctx):
+    await ctx.session.set_channel_meta("output", 0, name="Shakers")
+    pid = await _big_raise_profile(ctx)
+    data = (await ctx.http.post(f"{API}/profiles/{pid}/apply", params={"preset": 1, "preview": "true"})).json()
+    labels = {r["path"]: r["label"] for r in data["raises"]}
+    assert labels == {
+        "outputs.0.gain_db": "Shakers output level",
+        "inputs.0.routing.1.gain_db": "In 1 → Out 2 route level",
+    }
 
 
 async def test_load_refuses_other_device_models(ctx):

@@ -107,8 +107,9 @@ def simple_values(session: DeviceSession, preset: int) -> dict[str, Any]:
 # Routing guard (UI only: the edit API and HA/MQTT clients are not affected). Routing enables can't be read back from
 # the device, so a route switched off by accident silences an output with nothing to show for it. Before a route is
 # turned off, the routing page asks if that leaves the output with no enabled route while it is un-muted or shows
-# signal above this level. Mirrored by app/static/js/routing.js (LIVE_DBFS, wouldSilence).
-ROUTE_LIVE_DBFS = -100.0
+# signal above this level (the no-signal floor of phase9 design §5.3; the real device's floor is not measured yet).
+# Mirrored by app/static/js/routing.js (LIVE_DBFS, wouldSilence).
+ROUTE_LIVE_DBFS = -90.0
 
 
 def output_routed(values: Mapping[str, Any], n_inputs: int, output: int, *, without: int | None = None) -> bool:
@@ -395,7 +396,9 @@ async def edit_values(request: Request, serial: int, preset: int) -> Response:
             preset, patch_from_values(body.values), confirm=body.confirm, commit=body.commit, source="ui"
         )
     except ConfirmationRequired as exc:
-        return _edit_error(session, preset, paths, 409, "confirmation_required", str(exc))
+        from app.web.sync_ui import confirmation_text  # sync_ui builds on this module
+
+        return _edit_error(session, preset, paths, 409, "confirmation_required", confirmation_text(session, exc))
     except UnknownPreset as exc:
         return _edit_error(session, preset, paths, 404, "unknown_preset", str(exc))
     except DesiredValidationError as exc:

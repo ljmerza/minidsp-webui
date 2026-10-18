@@ -50,8 +50,18 @@ async def test_route_cells_carry_what_the_routing_guard_needs(ctx):
     html = (await ctx.http.get("/routing")).text
     cell = _tag(html, r'data-path="inputs\.1\.routing\.1\.enabled"')
     assert 'data-route-output="1"' in cell and 'data-route-input="1"' in cell
-    assert 'data-route-title="Out 2 (Sub)"' in cell
-    assert 'data-route-title="Out 1"' in _tag(html, r'data-path="inputs\.0\.routing\.0\.enabled"')
+    assert 'data-route-name="Sub"' in cell and 'data-route-input-name="In 2"' in cell
+    assert 'data-route-name="Out 1"' in _tag(html, r'data-path="inputs\.0\.routing\.0\.enabled"')
+
+
+async def test_mono_sum_has_no_default_output_and_starts_disabled(ctx):
+    html = (await ctx.http.get("/routing")).text
+    assert "Play both inputs on one output (mono sum)" in html
+    select = _tag(html, r"data-mono-target")
+    assert 'id="mono-target"' in select
+    assert '<option value="" selected>Choose an output&hellip;</option>' in html
+    assert "disabled" in _tag(html, r"data-mono-sum")
+    assert "data-mono-preview" in html and 'aria-live="polite"' in _tag(html, r"data-mono-preview")
 
 
 async def test_routing_page_passes_the_current_output_levels(ctx):

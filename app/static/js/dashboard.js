@@ -6,14 +6,14 @@
 // so the server applies the same guards (gain ceilings, the big-step confirmation). Un-muting an output whose gain or
 // mute was never confirmed on the device asks first, as on the output page. Per output at most one request is in
 // flight and only the newest values wait, so values never arrive out of order. A refused change re-fetches the cards,
-// which puts the stored values back.
+// which puts the stored values back. Mute acts at once and leaves an Undo toast (phase9 design §4.3, P20).
 (() => {
   'use strict';
 
   const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
 
   const mdsp = () => window.mdsp || {};
-  const toast = (message, level) => mdsp().toast && mdsp().toast(message, level);
+  const toast = (message, level, options) => mdsp().toast && mdsp().toast(message, level, options);
   const fmtDb = (value) => (mdsp().fmtDb ? mdsp().fmtDb(value) : `${value.toFixed(1)} dB`);
   const round1 = (value) => Math.round(value * 10) / 10;
 
@@ -96,9 +96,7 @@
         const o = Number(card.dataset.output);
         if (button.dataset.action === 'mute') {
           const mute = card.dataset.mute !== 'true';
-          if (!mute && card.dataset.neverSynced === 'true' && !this.confirmUnmute(card)) return;
-          this.show(card, { mute });
-          this.enqueue(list.dataset.editUrl, o, { [`outputs.${o}.mute`]: mute });
+          if (this.setMute(card, mute)) this.muteToast(o, card.dataset.name || `Out ${o + 1}`, mute);
         } else if (button.dataset.action === 'nudge') {
           const gain = nudgedGain(
             Number(card.dataset.gain),
@@ -110,6 +108,47 @@
           this.show(card, { gain });
           this.enqueue(list.dataset.editUrl, o, { [`outputs.${o}.gain_db`]: gain });
         }
+      },
+
+      // Mute or un-mute one card's output (un-muting a never-synced output asks first). False when cancelled.
+      setMute(card, mute) {
+        const list = this.list();
+        if (!list || !list.dataset.editUrl) return false;
+        if (!mute && card.dataset.neverSynced === 'true' && !this.confirmUnmute(card)) return false;
+        const o = Number(card.dataset.output);
+        this.show(card, { mute });
+        this.enqueue(list.dataset.editUrl, o, { [`outputs.${o}.mute`]: mute });
+        return true;
+      },
+
+      card(o) {
+        const list = this.list();
+        return list ? list.querySelector(`[data-output="${o}"]`) : null;
+      },
+
+      // "Shakers muted. [Undo]": Undo puts the previous state back. The cards may have been re-fetched meanwhile, so
+      // the card is looked up again; if they now show another preset (the playing preset changed), Undo would hit
+      // the same output number on that preset instead, so it changes nothing and says so.
+      muteToast(o, name, mute) {
+        const before = this.list();
+        const preset = before ? before.dataset.preset : undefined;
+        toast(`${name} ${mute ? 'muted' : 'un-muted'}.`, 'info', {
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              const list = this.list();
+              if (!list || list.dataset.preset !== preset) {
+                toast(`${name} was left as it is: the device has switched presets since.`, 'info');
+                return;
+              }
+              const card = this.card(o);
+              if (card && card.dataset.mute === String(mute)) this.setMute(card, !mute);
+              const again = this.card(o);
+              const button = again && again.querySelector('[data-action="mute"]');
+              if (button) button.focus();
+            },
+          },
+        });
       },
 
       confirmUnmute(card) {

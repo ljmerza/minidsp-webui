@@ -1,6 +1,8 @@
 // Profiles page (docs 05 §7): load a profile into a preset, revert a preset to a revision, point the diff at
-// something, and show stored UTC times in local time. Loads and reverts ask first (the server phrases the question
-// from a preview), and again when the big-step guard or a FIR load needs it (409 confirmation_required).
+// something, and show stored UTC times in local time. Loads and reverts ask once: the server phrases the question
+// from a preview that already lists the big raises the load needs confirmed (phase9 design §14.8, P11), and the
+// answer sends back exactly what was asked about (`confirmed`). If the state changed in between so that a raise is
+// new or bigger, the server answers 409 confirmation_required and this asks again about the new amounts.
 (() => {
   'use strict';
 
@@ -37,18 +39,26 @@
     return problems || data.detail || `Request failed (HTTP ${result.status})`;
   }
 
-  // preview -> confirm -> apply -> (409 -> confirm -> apply with confirm)
+  const MAX_REASKS = 3; // a state that keeps changing under the question ends in an error toast, not a loop
+
+  // preview -> one confirm -> apply (with what the preview asked about) -> (409 when it grew meanwhile -> ask again)
   async function guarded(url, body) {
     const preview = await post(url, { ...body, preview: true });
     if (!preview.ok) {
       toast(refusal(preview));
       return false;
     }
+    if (Array.isArray(preview.data.problems) && preview.data.problems.length) {
+      toast(refusal(preview)); // it would be refused: say why instead of asking
+      return false;
+    }
     if (!window.confirm(preview.data.question)) return false;
-    let result = await post(url, { ...body, confirm: false });
-    if (result.status === 409 && result.data && result.data.error === 'confirmation_required') {
+    const answer = (data) => (data && data.confirms ? { confirmed: data.confirms } : {});
+    let result = await post(url, { ...body, ...(preview.data.needs_confirm ? answer(preview.data) : {}) });
+    for (let ask = 0; ask < MAX_REASKS; ask++) {
+      if (!(result.status === 409 && result.data && result.data.error === 'confirmation_required')) break;
       if (!window.confirm(`${result.data.detail}.\n\nApply it anyway?`)) return false;
-      result = await post(url, { ...body, confirm: true });
+      result = await post(url, { ...body, ...answer(result.data) });
     }
     if (!result.ok) {
       toast(refusal(result));
@@ -83,8 +93,18 @@
   document.addEventListener('DOMContentLoaded', () => localTimes(document));
 
   function profilesPage(cfg) {
+    const targets = {}; // profile id -> the "Load into" preset picked, kept while the list re-renders (P11)
+
     return {
       busy: null,
+
+      targetFor(id, fallback) {
+        return id in targets ? targets[id] : String(fallback);
+      },
+
+      rememberTarget(id, preset) {
+        targets[id] = String(preset);
+      },
 
       reload() {
         if (window.htmx) htmx.trigger(document.body, cfg.reloadEvent);
@@ -95,6 +115,7 @@
         this.busy = id;
         try {
           const url = cfg.loadUrl.replace('{id}', encodeURIComponent(id));
+          this.rememberTarget(id, preset);
           if (await guarded(url, { preset, activate, serial: cfg.serial })) this.reload();
         } finally {
           this.busy = null;
@@ -136,5 +157,5 @@
   }
 
   window.profilesPage = profilesPage;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { profilesPage, refusal };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { profilesPage, refusal, guarded };
 })();

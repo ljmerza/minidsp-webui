@@ -152,7 +152,7 @@ async def test_diff_partial(ctx):
     assert response.status_code == 200
     html = response.text
     assert "3 differences" in html
-    assert "Out 1 · gain" in html
+    assert "Out 1 output level" in html
     assert "−3.00 dB" in html
     assert "9.000 ms (864 samples)" in html
     assert "180°" in html
@@ -179,7 +179,7 @@ async def test_diff_partial_formats_filter_units(ctx):
     response = await ctx.http.get(f"{UI}/diff", params={"a": f"profile:{flat}", "b": f"profile:{sub}"})
     html = response.text
     assert "1 difference from" in html
-    assert "Out 2 · crossover 1" in html
+    assert "Out 2 · band filter 1" in html
     assert "LR4 LP 80 Hz" in html
     assert '<td class="val is-a">off</td>' in html
 
@@ -198,7 +198,10 @@ async def test_load_preview_and_apply(ctx):
     data = response.json()
     assert data["changes"] == 1
     assert "Load “Games” into preset 2?" in data["question"]
-    assert "staged" in data["question"]
+    assert "1 setting change:\n• Out 1 output level: +0.00 dB → −2.00 dB" in data["question"]
+    assert "Preset 2 isn't playing: it waits and is sent when you switch to preset 2." in data["question"]
+    assert "outputs." not in data["question"]
+    assert data["raises"] == [] and data["needs_confirm"] is False and data["problems"] == []
 
     response = await ctx.http.post(url, json={"preset": 1, "activate": True, "preview": True}, headers=HX)
     assert "switches to preset 2" in response.json()["question"]
@@ -266,12 +269,89 @@ async def test_load_failed_write_warns(ctx):
     assert "Not finished" in data["message"]
 
 
+async def test_load_with_a_big_raise_asks_once_by_name(ctx):
+    await ctx.session.set_channel_meta("output", 0, name="Shakers")
+    pid = await _create(ctx, "Movies", gain_db=12.0)
+    url = f"{UI}/{pid}/load"
+    data = (await ctx.http.post(url, json={"preset": 1, "preview": True}, headers=HX)).json()
+    assert data["needs_confirm"] is True
+    assert [r["label"] for r in data["raises"]] == ["Shakers output level"]
+    question = data["question"]
+    assert "This raises Shakers output level by 12 dB at once (more than 6 dB in one step). Pressing OK" in question
+    assert "• Shakers output level: +0.00 dB → +12.00 dB" in question
+    assert "outputs." not in question
+    raise_12 = {"path": "outputs.0.gain_db", "delta_db": 12.0, "kind": "gain"}
+    assert data["confirms"] == {"raises": [raise_12], "fir_loads": []}
+    # profiles.js sends back what the question named: one question, no second 409
+    response = await ctx.http.post(url, json={"preset": 1, "confirmed": data["confirms"]}, headers=HX)
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert ctx.session.desired(1).outputs[0].gain_db == 12.0
+
+
+async def test_load_asks_again_when_a_raise_grew_after_the_preview(ctx):
+    """The answer covers only the raise the preview named: a level lowered meanwhile (another tab, MQTT) makes the
+    load a bigger raise, which must be asked about again rather than slip through on the old yes."""
+    pid = await _create(ctx, "Loud", gain_db=8.0)
+    url = f"{UI}/{pid}/load"
+    preview = (await ctx.http.post(url, json={"preset": 0, "preview": True}, headers=HX)).json()
+    assert preview["needs_confirm"] is True
+    assert preview["confirms"]["raises"] == [{"path": "outputs.0.gain_db", "delta_db": 8.0, "kind": "gain"}]
+
+    assert (await ctx.edit(0, {"outputs": {"0": {"gain_db": -30.0}}})).status_code == 200  # a second client
+
+    response = await ctx.http.post(url, json={"preset": 0, "confirmed": preview["confirms"]}, headers=HX)
+    assert response.status_code == 409
+    data = response.json()
+    assert data["error"] == "confirmation_required"
+    assert "by 38 dB" in data["detail"]
+    assert data["confirms"]["raises"] == [{"path": "outputs.0.gain_db", "delta_db": 38.0, "kind": "gain"}]
+    assert ctx.session.desired(0).outputs[0].gain_db == -30.0  # nothing loaded
+
+    # answering the new question loads it
+    response = await ctx.http.post(url, json={"preset": 0, "confirmed": data["confirms"]}, headers=HX)
+    assert response.status_code == 200, response.text
+    assert ctx.session.desired(0).outputs[0].gain_db == 8.0
+
+
+async def test_load_confirmed_still_passes_a_smaller_raise(ctx):
+    pid = await _create(ctx, "Loud", gain_db=8.0)
+    url = f"{UI}/{pid}/load"
+    preview = (await ctx.http.post(url, json={"preset": 0, "preview": True}, headers=HX)).json()
+    assert (await ctx.edit(0, {"outputs": {"0": {"gain_db": 1.0}}})).status_code == 200  # now a 7 dB raise
+    response = await ctx.http.post(url, json={"preset": 0, "confirmed": preview["confirms"]}, headers=HX)
+    assert response.status_code == 200, response.text
+    assert ctx.session.desired(0).outputs[0].gain_db == 8.0
+
+
+async def test_load_confirmed_does_not_cover_a_raise_on_another_output(ctx):
+    doc = default_config_doc(M2X4HD).model_dump(mode="json")
+    doc["outputs"][0]["gain_db"] = 8.0
+    doc["outputs"][1]["gain_db"] = -20.0
+    pid = await _create_doc(ctx, "Two", doc)
+    url = f"{UI}/{pid}/load"
+    preview = (await ctx.http.post(url, json={"preset": 0, "preview": True}, headers=HX)).json()
+    assert [r["path"] for r in preview["confirms"]["raises"]] == ["outputs.0.gain_db"]
+    assert (await ctx.edit(0, {"outputs": {"1": {"gain_db": -40.0}}})).status_code == 200  # Out 2 now rises 20 dB
+    response = await ctx.http.post(url, json={"preset": 0, "confirmed": preview["confirms"]}, headers=HX)
+    assert response.status_code == 409
+    assert {r["path"] for r in response.json()["confirms"]["raises"]} == {"outputs.0.gain_db", "outputs.1.gain_db"}
+
+
+async def test_load_409_names_settings(ctx):
+    await ctx.session.set_channel_meta("output", 0, name="Shakers")
+    pid = await _create(ctx, "Movies", gain_db=12.0)
+    response = await ctx.http.post(f"{UI}/{pid}/load", json={"preset": 1}, headers=HX)
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail == "This raises Shakers output level by 12 dB at once (more than 6 dB in one step)"
+
+
 async def test_history_tab_and_revert(ctx):
     await ctx.edit(0, {"outputs": {"0": {"gain_db": -10.0}}})
     first = ctx.session.revisions[0]
     await ctx.edit(0, {"outputs": {"0": {"gain_db": -8.0}}})
     html = (await ctx.http.get("/profiles", params={"tab": "history", "preset": 1})).text
-    assert "Out 1 · gain −10 → −8 dB" in html
+    assert "Out 1 output level −10 → −8 dB" in html
     assert f"r{first}" in html
     assert "Revert to here" in html
     assert f"revision:0:{first}" in html
@@ -288,9 +368,28 @@ async def test_history_tab_and_revert(ctx):
     assert "revert" in partial.text
     assert (await ctx.http.post(url, json={}, headers=HX)).json()["changed"] == 0
 
+    bad = await ctx.http.post(url, json={"confirmed": {"raises": [], "bogus": 1}}, headers=HX)
+    assert bad.status_code == 400
     bad = await ctx.http.post(f"/ui/devices/{SERIAL}/presets/0/history/999/revert", json={}, headers=HX)
     assert bad.status_code == 404
     assert (await ctx.http.post("/ui/devices/1/presets/0/history/1/revert", json={}, headers=HX)).status_code == 404
+
+
+async def test_revert_answers_the_409_with_what_it_named(ctx):
+    await ctx.edit(0, {"outputs": {"0": {"gain_db": 10.0}}}, confirm="true")
+    loud = ctx.session.revisions[0]
+    await ctx.edit(0, {"outputs": {"0": {"gain_db": 0.0}}})
+    url = f"/ui/devices/{SERIAL}/presets/0/history/{loud}/revert"
+    response = await ctx.http.post(url, json={}, headers=HX)
+    assert response.status_code == 409
+    confirms = response.json()["confirms"]
+    assert confirms["raises"] == [{"path": "outputs.0.gain_db", "delta_db": 10.0, "kind": "gain"}]
+    await ctx.edit(0, {"outputs": {"0": {"gain_db": -20.0}}})  # meanwhile: the revert is now a 30 dB raise
+    response = await ctx.http.post(url, json={"confirmed": confirms}, headers=HX)
+    assert response.status_code == 409 and "by 30 dB" in response.json()["detail"]
+    response = await ctx.http.post(url, json={"confirmed": response.json()["confirms"]}, headers=HX)
+    assert response.status_code == 200, response.text
+    assert ctx.session.desired(0).outputs[0].gain_db == 10.0
 
 
 async def test_history_paging(ctx):
@@ -315,12 +414,12 @@ async def test_list_partial(ctx):
 
 
 def test_pretty_summary():
-    assert pretty_summary(None, "outputs.0.gain_db: 10 → 12") == "Out 1 · gain 10 → 12 dB"
-    assert pretty_summary(None, "outputs.0.gain_db: -2.5 → 0") == "Out 1 · gain −2.5 → 0 dB"
-    assert pretty_summary(None, "outputs.0.invert: off → on") == "Out 1 · polarity off → on"
-    assert pretty_summary(None, "outputs.1.peq.2 changed") == "Out 2 · PEQ 3 changed"
+    assert pretty_summary(None, "outputs.0.gain_db: 10 → 12") == "Out 1 output level 10 → 12 dB"
+    assert pretty_summary(None, "outputs.0.gain_db: -2.5 → 0") == "Out 1 output level −2.5 → 0 dB"
+    assert pretty_summary(None, "outputs.0.invert: off → on") == "Out 1 polarity off → on"
+    assert pretty_summary(None, "outputs.1.peq.2 changed") == "Out 2 · EQ band 3 changed"
     text = pretty_summary(None, "4 changes: outputs.0.gain_db, inputs.1.mute, outputs.3.delay_ms, …")
-    assert text == "4 changes: Out 1 · gain, In 2 · mute, Out 4 · delay, …"
+    assert text == "4 changes: Out 1 output level, In 2 mute, Out 4 delay, …"
     assert pretty_summary(None, "Loaded profile “Games”") == "Loaded profile “Games”"
     assert pretty_summary(None, None) == "—"
 
