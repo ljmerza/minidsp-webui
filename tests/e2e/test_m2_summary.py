@@ -105,3 +105,11 @@ def test_marking_an_output_not_in_use_folds_its_note(screen: Page, api: Api, sho
     out4 = screen.locator(".output-card").nth(3)
     expect(out4.locator(".output-sentence")).to_have_text("Not in use: muted.")
     expect(out4.locator("[data-health-badge]")).to_have_text("◌ Not in use")
+
+    # Put the flag back: pytest may run the module's other tests after this one (it groups items by their
+    # parametrized fixtures), and they expect the walkthrough state where Out 4 is merely muted.
+    visit(screen, "/settings")
+    screen.locator("fieldset.channel-flags li", has_text="Out 4").get_by_label("Out 4: Not in use").uncheck()
+    screen.get_by_role("button", name="Save channels").click()
+    expect(screen.locator("#settings-channels .form-saved")).to_have_text("Saved.")
+    assert api._ok(api.http.get(f"{api.dev}/presets/0/summary"))["outputs"][3]["badge"] == "muted"
