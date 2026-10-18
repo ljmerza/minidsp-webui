@@ -18,38 +18,40 @@
     .integration-ok { color: var(--ok); }
     .electrical-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--warn);
       border: 1px solid var(--warn); border-radius: var(--radius); padding: 0.05rem 0.4rem; }
+    .calc-note { display: inline-flex; align-items: center; gap: 0.35rem; }
   </style>
 {% endblock %}
 
 {% block content %}
-<h1>System</h1>
+<h1>Combined response</h1>
 {% if session is none or state_error or page_error %}
   {% include "partials/edit_guard.html" %}
 {% else %}
 <div class="system-head">
   <nav class="preset-tabs" aria-label="Preset to show">
-    <span class="hdr-label">Preset</span>
+    <span class="hdr-label">Device preset</span>
     {% for t in tabs %}
-      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (active on the device)" if t.active else "") -%}
+      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (playing)" if t.active else "") -%}
       <a class="preset-tab{{ ' is-selected' if t.selected }}{{ ' is-active' if t.active }}" href="{{ preset_link(t.index) }}"
-         aria-label="{{ desc }}" title="{{ desc }}"{% if t.selected %} aria-current="page"{% endif %}>
+         aria-label="{{ desc }}"{% if t.selected %} aria-current="page"{% endif %}>
         {{- t.index + 1 -}}
-        {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9679;</span>{% endif -%}
+        {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9654;</span>{% endif -%}
       </a>
     {% endfor %}
   </nav>
-  <span class="electrical-label" title="Delay, polarity, gains and filters only. Drivers, transducers, amplifiers and the room are not modelled.">Electrical sum</span>
+  <span class="calc-note"><span class="electrical-label">Calculated</span>
+    <span class="muted">delay, polarity, levels and filters only; speakers, shakers, amplifiers and the room aren't included</span>{{ help("calc-response") }}</span>
 </div>
 
 <div class="system-view" x-data='systemView({{ system_cfg|tojson }})' hx-trigger="sse:desired, sse:sync">
   <section class="card" aria-labelledby="overlay-title">
     <div class="card-head">
-      <h2 id="overlay-title">Outputs <span class="muted">and their electrical sum</span></h2>
+      <h2 id="overlay-title">Outputs <span class="muted">and their calculated sum</span></h2>
       <span class="seg" role="group" aria-label="Plot">
         <button type="button" class="btn-small" :class="{ 'is-current': mode === 'magnitude' }" @click="setMode('magnitude')">Magnitude</button>
         <button type="button" class="btn-small" :class="{ 'is-current': mode === 'phase' }" @click="setMode('phase')">Phase</button>
         <button type="button" class="btn-small" :class="{ 'is-current': mode === 'group_delay' }" @click="setMode('group_delay')">Group delay</button>
-      </span>
+      </span>{{ help("mag-phase") }}
     </div>
     <fieldset class="system-outputs">
       <legend>Outputs in the sum</legend>
@@ -79,18 +81,20 @@
                 @click="setView('full')">Full 10 Hz&ndash;20 kHz</button>
       </span>
       <span class="seg" role="group" aria-label="Vertical scale">
-        <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Auto-fit</button>
-        <button type="button" class="btn-small" @click="resetY()" title="Back to the default scale">Reset</button>
+        <button type="button" class="btn-small" @click="autoFit()">Auto-fit</button>
+        <button type="button" class="btn-small" @click="resetY()">Reset</button>
       </span>
     </div>
-    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the selected outputs and their sum"></div>
+    <div class="graph-box" x-ref="graph" aria-label="Calculated response of the selected outputs and their sum"></div>
     <ul class="graph-warnings" x-show="warnings.length" x-cloak>
       <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
     </ul>
+    <p class="hint" x-show="warnings.some((w) => w.includes('rounding note'))" x-cloak>What is a rounding
+      note?{{ help("rounding") }}</p>
     <p class="field-error" x-show="error" x-text="error" x-cloak></p>
     <p class="hint" x-show="empty" x-cloak>No output is selected (muted outputs can't be).</p>
-    <p class="hint"><strong>Electrical sum</strong>: the complex sum of the selected outputs' full chains (routing, input and
-      output PEQ, crossover, FIR, polarity, delay and gain) on preset {{ preset + 1 }}. It ignores drivers, transducers,
+    <p class="hint"><strong>Sum</strong>: the calculated sum of the selected outputs' full chains (routing, input and
+      output EQ, band filters, FIR, polarity, delay and level) on preset {{ preset + 1 }}. It ignores speakers, shakers,
       amplifiers and the room, so it shows how delay and polarity line up, not what you will hear or feel.</p>
   </section>
 
@@ -126,7 +130,7 @@
         </div>
       </div>
     </template>
-    <p class="hint">&Delta;&phi; is the first output's phase minus the second's (electrical, delay and polarity included).
+    <p class="hint">&Delta;&phi; is the first output's phase minus the second's (calculated, delay and polarity included).
       Where it is larger than {{ threshold|int }}&deg; the two partly cancel; adjust the delay or flip the polarity of one
       output to move or remove these regions. The level difference matters too: a region where one output is much
       quieter than the other cancels little.</p>

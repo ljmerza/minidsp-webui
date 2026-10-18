@@ -141,7 +141,7 @@ async def test_partial_run_shows_drift_first(http, bridge):
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
     assert r.status_code == 200
     html = r.text
-    assert "1 setting(s) differ" in html
+    assert "1 changed on device" in html
     assert html.index("outputs.0.gain_db") < html.index("outputs.1.gain_db")
     assert 'class="row-failed"' in html
     assert "−6.02 dB" in html
@@ -152,7 +152,7 @@ async def test_partial_run_shows_drift_first(http, bridge):
 
 async def test_partial_clean_run(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
-    assert "no drift found" in r.text
+    assert "nothing changed on device" in r.text
     assert "Forget these values" not in r.text
 
 
@@ -236,7 +236,7 @@ async def test_partial_offers_and_accepts_device_values(http, bridge, shaker):  
     shaker.writer.invalidate(0, ["outputs.0.delay_ms"])
     bridge.memory[M2X4HD_MAP.output_delay[0]] = f32(0.0)
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
-    assert "no drift; 1 never-confirmed setting(s)" in r.text
+    assert "nothing changed on device; 1 unknown setting(s)" in r.text
     assert 'id="verify-use"' in r.text
     r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": ["outputs.0.delay_ms"]})
     assert r.status_code == 200

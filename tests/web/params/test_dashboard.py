@@ -80,7 +80,7 @@ async def test_gain_nudges_stop_at_the_ceiling_and_the_floor(ctx):
     html = (await ctx.http.get(FRAGMENT)).text
     assert 'data-ceiling="3.0"' in _card_tag(html, 1)
     at_ceiling = _button(_card(html, 1), "nudge", "0.5")
-    assert "disabled" in at_ceiling and "ceiling (3.0 dB)" in at_ceiling
+    assert "disabled" in at_ceiling and "At its level limit (+3.0 dB)" in _card(html, 1)
     assert "disabled" in _button(_card(html, 2), "nudge", "-0.5")
     assert "disabled" not in _button(_card(html, 2), "nudge", "0.5")
     # a raise past the ceiling is refused by the edit endpoint even if a stale card offered it

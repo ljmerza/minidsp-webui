@@ -229,7 +229,7 @@ describe('outputCards', () => {
     confirmAnswer = false;
     page.click(muteButton(card));
     assert.equal(confirms.length, 1);
-    assert.match(confirms[0], /Out 3 has never been synced/);
+    assert.match(confirms[0], /Out 3 has never been sent/);
     assert.equal(calls.length, 0);
     assert.equal(card.dataset.mute, 'true');
 

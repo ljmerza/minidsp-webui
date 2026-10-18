@@ -24,7 +24,7 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
-from app.web import devices
+from app.web import devices, glossary
 from app.web.nav import build_nav
 from app.web.templating import graph_defaults, templates
 
@@ -238,8 +238,22 @@ async def device_page(request: Request, serial: int | None = None) -> HTMLRespon
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DEVICE_TOPICS)
-    ctx.update(title="Device", **device_info_context(request, session))
+    ctx.update(title="Device & sync", **device_info_context(request, session))
     return templates.TemplateResponse(request, "device.html", ctx)
+
+
+# The header (master, device) is the only live part of the glossary page.
+HELP_TOPICS = ("master", "device")
+
+
+@router.get("/help", response_class=HTMLResponse, name="help_page")
+async def help_page(request: Request) -> HTMLResponse:
+    """The glossary (design §13): every term from app/web/glossary.py, grouped, each with an ``id`` anchor that the
+    toggletips' "More →" links point at. Plain HTML, so it works without JavaScript."""
+    session = _pick_session(request, None)
+    ctx = page_context(request, session, HELP_TOPICS)
+    ctx.update(title="Glossary", groups=glossary.grouped(), terms=glossary.TERMS)
+    return templates.TemplateResponse(request, "help.html", ctx)
 
 
 # --- partials ---------------------------------------------------------------------------------------------------------

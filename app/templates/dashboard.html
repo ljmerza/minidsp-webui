@@ -19,7 +19,7 @@
 
   <section class="card meters-card" aria-labelledby="levels-title">
     <div class="card-head">
-      <h2 id="levels-title">Levels</h2>
+      <h2 id="levels-title">Levels{{ help("meter") }}</h2>
       <span class="meters-state" x-show="stale" x-cloak>no signal data</span>
       <button type="button" class="btn-small" @click="resetAllClips()" :disabled="!anyClip()">Reset clip</button>
     </div>
@@ -45,14 +45,16 @@
         </div>
       {% endfor %}
     </div>
-    <p class="hint">dBFS, peak hold 1.5 s. A grey CLIP box turns red when its channel reaches &minus;1 dBFS and stays
-      red until you press it (or Reset clip).</p>
+    <p class="hint">dBFS{{ help("dbfs") }}, peak hold 1.5 s. A grey CLIP box{{ help("clip") }} turns red when its
+      channel reaches &minus;1 dBFS and stays red until you press it (or Reset clip).</p>
   </section>
 
   {#- The cards are re-fetched on sync / desired events; dashboard.js also refreshes them when the active preset
       changes (the "master" stream carries every volume tick, so it filters those) and drives the quick controls. -#}
   <section class="card outputs-card" aria-labelledby="outputs-title" x-data="outputCards" hx-trigger="sse:master">
     <h2 id="outputs-title">Outputs</h2>
+    <p class="hint terms-line">Output level{{ help("level") }} &middot; Delay{{ help("delay") }} &middot;
+      Band (crossover){{ help("band") }} &middot; Status{{ help("status") }}</p>
     <div class="output-cards-box" data-output-cards hx-get="{{ outputs_url }}"
          hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh" hx-swap="innerHTML">
       {% include "partials/dashboard_outputs.html" %}
@@ -67,20 +69,20 @@
   <section class="card response-card" aria-labelledby="response-title"
            x-data='responseView({{ response_cfg|tojson }})' hx-trigger="sse:sync, sse:master">
     <div class="card-head">
-      <h2 id="response-title">Response <span class="muted">(<span x-text="title"></span>, electrical)</span></h2>
+      <h2 id="response-title">Calculated response <span class="muted">(<span x-text="title"></span>)</span>{{ help("calc-response") }}</h2>
       <span class="seg" role="group" aria-label="Plot">
         <button type="button" class="btn-small" :class="{ 'is-current': mode === 'magnitude' }" @click="setMode('magnitude')">dB</button>
         <button type="button" class="btn-small" :class="{ 'is-current': mode === 'phase' }" @click="setMode('phase')">Phase</button>
-        <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Fit</button>
+        <button type="button" class="btn-small" @click="autoFit()">Fit</button>
       </span>
     </div>
     {%- set range_text = "10 Hz–20 kHz" if response_view == "full" else "5–300 Hz" %}
-    <div class="graph-box" x-ref="graph" aria-label="Electrical response of the un-muted outputs, {{ range_text }}"></div>
+    <div class="graph-box" x-ref="graph" aria-label="Calculated response of the un-muted outputs, {{ range_text }}"></div>
     {{ fx.warnings() }}
     <p class="field-error" x-show="error" x-text="error" x-cloak></p>
     <p class="hint" x-show="empty" x-cloak>Every output is muted.</p>
-    <p class="hint">{{ range_text }}, active preset: each un-muted output and their electrical sum (delay and polarity
-      included; drivers and the room are not).</p>
+    <p class="hint">{{ range_text }}, playing preset: each un-muted output and their calculated sum (delay and polarity
+      included; speakers, shakers and the room are not).</p>
   </section>
 </div>
 {% endif %}

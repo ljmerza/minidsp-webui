@@ -8,16 +8,16 @@
     {%- if reasons and reasons.get(p) and ns.reason is none %}{% set ns.reason = reasons.get(p) %}{% endif -%}
   {%- endfor -%}
   {%- set st = worst_status(ns.found) -%}
-  <span class="sync-badge sync-{{ st }}{% if compact %} is-compact{% endif %}" data-sync-for="{{ paths|join(' ') }}"
-        title="{{ status_text[st]|capitalize }}{% if ns.reason %}: {{ ns.reason }}{% endif %}">
+  <span class="sync-badge sync-{{ st }}{% if compact %} is-compact{% endif %}" data-sync-for="{{ paths|join(' ') }}">
     <span class="sync-icon" aria-hidden="true">{{ status_icon[st] }}</span>
     <span class="sync-text{% if compact %} visually-hidden{% endif %}">{{ status_text[st] }}</span>
+    {%- if ns.reason and st == "failed" %}<span class="sync-reason visually-hidden">: {{ ns.reason }}</span>{% endif %}
   </span>
 {%- endmacro %}
 
-{% macro gain_control(id, path, value, label, gain_min, ceiling, gain_max, statuses, reasons) -%}
+{% macro gain_control(id, path, value, label, gain_min, ceiling, gain_max, statuses, reasons, term=none) -%}
   <div class="param param-gain">
-    <label class="param-label" for="{{ id }}">{{ label }}</label>
+    <span class="param-head"><label class="param-label" for="{{ id }}">{{ label }}</label>{% if term %}{{ help(term) }}{% endif %}</span>
     <div class="gain-row">
       <input type="range" id="{{ id }}" data-path="{{ path }}" data-type="number" data-gain
              min="{{ gain_min }}" max="{{ ceiling }}" step="0.1" value="{{ value }}"
@@ -31,14 +31,14 @@
     </div>
     <p class="hint">
       {{ gain_min|db }} to {{ ceiling|db(signed=true) }}
-      {%- if ceiling < gain_max %} &middot; <span class="ceiling-note">ceiling {{ ceiling|db(signed=true) }} (device allows {{ gain_max|db(signed=true) }}; <a href="{{ root }}/settings">Settings</a>)</span>{% endif %}
+      {%- if ceiling < gain_max %} &middot; <span class="ceiling-note">level limit {{ ceiling|db(signed=true) }} (device allows {{ gain_max|db(signed=true) }}; <a href="{{ root }}/settings">Settings</a>)</span>{{ help("level-limit") }}{% endif %}
     </p>
   </div>
 {%- endmacro %}
 
-{% macro toggle(id, path, checked, label, on_text, off_text, statuses, reasons, confirm_unmute=none, undo_name=none) -%}
+{% macro toggle(id, path, checked, label, on_text, off_text, statuses, reasons, confirm_unmute=none, undo_name=none, term=none) -%}
   <div class="param param-toggle">
-    <span class="param-label" id="{{ id }}-label">{{ label }}</span>
+    <span class="param-head"><span class="param-label" id="{{ id }}-label">{{ label }}</span>{% if term %}{{ help(term) }}{% endif %}</span>
     <label class="switch">
       <input type="checkbox" id="{{ id }}" data-path="{{ path }}" data-type="bool" role="switch"
              aria-labelledby="{{ id }}-label"{% if checked %} checked{% endif %}
@@ -51,16 +51,16 @@
   </div>
 {%- endmacro %}
 
-{% macro delay_control(id, path, value_ms, sample_rate, max_ms, statuses, reasons, label="Delay") -%}
+{% macro delay_control(id, path, value_ms, sample_rate, max_ms, statuses, reasons, label="Delay", term="delay") -%}
   <div class="param param-delay">
-    <label class="param-label" for="{{ id }}">{{ label }}</label>
+    <span class="param-head"><label class="param-label" for="{{ id }}">{{ label }}</label>{% if term %}{{ help(term) }}{% endif %}</span>
     <div class="gain-row">
       <span class="num-field">
         <input type="number" id="{{ id }}" data-path="{{ path }}" data-type="number" data-delay inputmode="decimal"
                min="0" max="{{ '%.3f'|format(max_ms) }}" step="0.01" value="{{ '%.2f'|format(value_ms) }}">
         <span class="unit">ms</span>
       </span>
-      <span class="samples">= <span data-samples-for="{{ path }}">{{ (value_ms * sample_rate / 1000)|round|int }}</span> samples</span>
+      <span class="samples">= <span data-samples-for="{{ path }}">{{ (value_ms * sample_rate / 1000)|round|int }}</span> samples{{ help("samples") }}</span>
       {{ sync_badge([path], statuses, reasons) }}
     </div>
   </div>

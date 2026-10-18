@@ -45,10 +45,10 @@ def test_use_the_devices_values_confirms_names_and_undo_writes_nothing(screen: P
     with screen.expect_response(
         lambda r: r.request.method == "GET" and r.url.endswith(f"/ui/devices/{api.serial}/verify")
     ):
-        screen.get_by_role("button", name="Check device").click()
-    expect(screen.locator("#verify-result")).to_contain_text("differ")
+        screen.get_by_role("button", name="Check device", exact=True).click()
+    expect(screen.locator("#verify-result")).to_contain_text("changed on device")
 
-    screen.get_by_role("button", name="Use the device's values…").click()
+    screen.get_by_role("button", name="Use the device's values…", exact=True).click()
     dialog = screen.get_by_role("dialog")
     expect(dialog).to_be_visible()
     expect(dialog.get_by_role("heading", level=2)).to_have_text("Use the device's values for 1 setting?")

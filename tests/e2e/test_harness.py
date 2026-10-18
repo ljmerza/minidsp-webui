@@ -22,6 +22,7 @@ PAGES = [
     "/profiles",
     "/device",
     "/settings",
+    "/help",
 ]
 
 # axe findings in today's UI that later phase 9 PRs fix (design §16.2: "dimmed blocks use a lighter text colour, not

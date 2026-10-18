@@ -153,7 +153,7 @@
 
       confirmUnmute(card) {
         const name = card.dataset.name || 'This output';
-        const why = 'has never been synced, so its gain on the device is unknown';
+        const why = 'has never been sent, so its level on the device is unknown';
         return window.confirm(`${name} ${why}. Un-mute it anyway?`);
       },
 
@@ -181,7 +181,7 @@
           const icon = badge.querySelector('.sync-icon');
           const label = badge.querySelector('.sync-text');
           if (icon) icon.textContent = ICON.pending;
-          if (label) label.textContent = 'pending';
+          if (label) label.textContent = 'sending';
         }
       },
 

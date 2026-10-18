@@ -28,7 +28,7 @@
     <div><dt>Presets</dt><dd>{{ p.n_presets }}</dd></div>
     <div><dt>Sources</dt><dd>{{ p.sources|join(", ") }}</dd></div>
     <div><dt>Sample rate</dt><dd>{{ (p.sample_rate / 1000)|num(0) }} kHz</dd></div>
-    <div><dt>PEQ bands</dt><dd>{{ p.peq_per_input }} per input, {{ p.peq_per_output }} per output</dd></div>
+    <div><dt>EQ bands</dt><dd>{{ p.peq_per_input }} per input, {{ p.peq_per_output }} per output</dd></div>
     <div><dt>Crossover</dt><dd>{{ p.crossover_groups }} groups &times; {{ p.crossover_biquads }} biquads per output</dd></div>
     <div><dt>Max delay</dt><dd>{{ p.delay_max_samples }} samples ({{ (p.delay_max_samples * 1000 / p.sample_rate)|num(1) }} ms)</dd></div>
     <div><dt>Master volume</dt><dd>{{ p.master_volume_min_db|db }} to {{ p.master_volume_max_db|db }}, {{ p.master_volume_step_db|db }} steps</dd></div>

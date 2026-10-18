@@ -144,12 +144,12 @@
 </script>
 <div class="rew" x-data='rewButtons({{ rew_cfg|tojson }})'>
   <div class="peq-actions">
-    <button type="button" @click="$refs.file.click()" :disabled="busy"
-            title="Import biquad coefficients exported by REW (miniDSP format, 96 kHz)">Import REW&hellip;</button>
+    <button type="button" @click="$refs.file.click()" :disabled="busy">Import REW&hellip;</button>
     <input type="file" accept=".txt,text/plain" x-ref="file" hidden @change="choose($event)">
-    <button type="button" @click="exportFile()"
-            title="{{ 'Both crossover groups' if rew_xover else 'Every band' }} as REW biquad text; bypassed ones as pass-through">Export REW</button>
+    <button type="button" @click="exportFile()">Export REW</button>{{ help("rew") }}
   </div>
+  <p class="hint">Import reads filter numbers REW exported in its miniDSP format (96 kHz). Export writes
+    {{ 'both band filters' if rew_xover else 'every band' }} as REW text; ones that are off are written as pass-through.</p>
 
   <fieldset class="drawer" x-show="parsed" x-cloak>
     <legend>Import <span x-text="fileName"></span>: <span x-text="summary()"></span></legend>
@@ -173,12 +173,12 @@
 
         <div class="drawer-actions" x-show="parsed.ok">
           {% if rew_xover %}
-          <label>Group
+          <label>Band filter
             <select x-model="index" @change="pick = ''">
               <option value="all">Both</option>
               <template x-for="g in groupOptions" :key="g"><option :value="g" x-text="g + 1"></option></template>
             </select></label>
-          <label>Biquad
+          <label>Stage
             <select x-model="biquad" @change="pick = ''">
               <option value="all">All</option>
               <template x-for="k in biquadOptions" :key="k"><option :value="k" x-text="k + 1"></option></template>
@@ -204,7 +204,7 @@
           <button type="button" class="btn-small" @click="cancel()">Cancel</button>
         </div>
         <p class="hint">
-          {%- if rew_xover %} Slots fill group by group in file order; slots left in the chosen range become pass-through.
+          {%- if rew_xover %} Stages fill filter by filter in file order; stages left in the chosen range become pass-through.
           {%- else %} Filters fill the bands in file order. {% endif %}
           Coefficients are used exactly as written (miniDSP convention, 96 kHz). Imported filters are enabled only once
           the device has confirmed their coefficients.</p>

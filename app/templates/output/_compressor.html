@@ -12,15 +12,18 @@
 
 <div class="compressor" x-data='compressorEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
   <div class="card-head">
-    <h2>Compressor</h2>
-    <span class="xover-presets" role="group" aria-label="Presets">
-      <span class="hdr-label">Presets</span>
+    <h2>Compressor (limiter){{ help("compressor") }}</h2>
+    <span class="xover-presets" role="group" aria-labelledby="comp-templates-{{ channel.index }}">
+      <span class="hdr-label" id="comp-templates-{{ channel.index }}">Templates</span>
       <template x-for="(p, key) in presets" :key="key">
-        <button type="button" class="btn-small" @click="applyPreset(key)" :disabled="inflight" :title="p.note"
+        <button type="button" class="btn-small" @click="applyPreset(key)" :disabled="inflight"
                 x-text="p.label"></button>
       </template>
     </span>
   </div>
+  <ul class="template-notes">
+    <template x-for="(p, key) in presets" :key="key"><li><span x-text="p.label"></span>: <span x-text="p.note"></span></li></template>
+  </ul>
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
 
   <section class="xover-group" :class="{ 'is-bypassed': bypass }" aria-label="Compressor settings"
@@ -28,9 +31,9 @@
     <header class="xover-head">
       <h3>Dynamics</h3>
       <span class="xover-label" x-text="bypass ? 'bypassed' : `limits up to ${reduction().toFixed(1)} dB at 0 dBFS`"></span>
-      <span class="sync-badge is-compact" :class="`sync-${status()}`" :title="status()">
+      <span class="sync-badge is-compact" :class="`sync-${status()}`">
         <span class="sync-icon" aria-hidden="true" x-text="icon()"></span>
-        <span class="sync-text visually-hidden" x-text="status()"></span>
+        <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status()] || status()"></span>
       </span>
       <label class="enable">
         <input type="checkbox" :checked="!bypass" :disabled="!loaded || inflight" @change="setEnabled($event.target.checked)">
@@ -51,24 +54,24 @@
                  x-model="thresholdText" @input="onThresholdInput()" @change="commitThreshold()">
           <button type="button" class="step-btn" @click="stepThreshold(1)" :disabled="!canStep(1)"
                   aria-label="Threshold 1 dB higher">+</button>
-          <span class="unit">dBFS</span>
-          <span class="sync-icon" :class="`sync-${status('threshold_db')}`" :title="status('threshold_db')" x-text="icon('threshold_db')"></span></span>
+          <span class="unit">dBFS</span>{{ help("dbfs") }}
+          <span class="sync-icon" :class="`sync-${status('threshold_db')}`" aria-hidden="true" x-text="icon('threshold_db')"></span><span class="visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status('threshold_db')] || status('threshold_db')"></span></span>
       </div>
       <label>Ratio
         <span class="num-field"><input type="number" class="num" inputmode="decimal" step="0.5"
                :min="range('ratio')[0]" :max="range('ratio')[1]" :class="{ 'is-invalid': invalid('ratio') }"
                x-model.number="form.ratio" @input="render()" @change="commit('ratio')"> <span class="unit">:1</span>
-          <span class="sync-icon" :class="`sync-${status('ratio')}`" :title="status('ratio')" x-text="icon('ratio')"></span></span></label>
+          <span class="sync-icon" :class="`sync-${status('ratio')}`" aria-hidden="true" x-text="icon('ratio')"></span><span class="visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status('ratio')] || status('ratio')"></span></span></label>
       <label>Attack
         <span class="num-field"><input type="number" class="num" inputmode="decimal" step="1"
                :min="range('attack_ms')[0]" :max="range('attack_ms')[1]" :class="{ 'is-invalid': invalid('attack_ms') }"
                x-model.number="form.attack_ms" @change="commit('attack_ms')"> <span class="unit">ms</span>
-          <span class="sync-icon" :class="`sync-${status('attack_ms')}`" :title="status('attack_ms')" x-text="icon('attack_ms')"></span></span></label>
+          <span class="sync-icon" :class="`sync-${status('attack_ms')}`" aria-hidden="true" x-text="icon('attack_ms')"></span><span class="visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status('attack_ms')] || status('attack_ms')"></span></span></label>
       <label>Release
         <span class="num-field"><input type="number" class="num" inputmode="decimal" step="1"
                :min="range('release_ms')[0]" :max="range('release_ms')[1]" :class="{ 'is-invalid': invalid('release_ms') }"
                x-model.number="form.release_ms" @change="commit('release_ms')"> <span class="unit">ms</span>
-          <span class="sync-icon" :class="`sync-${status('release_ms')}`" :title="status('release_ms')" x-text="icon('release_ms')"></span></span></label>
+          <span class="sync-icon" :class="`sync-${status('release_ms')}`" aria-hidden="true" x-text="icon('release_ms')"></span><span class="visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status('release_ms')] || status('release_ms')"></span></span></label>
     </div>
     <label class="visually-hidden" for="comp-threshold-{{ channel.index }}">Threshold slider</label>
     <input id="comp-threshold-{{ channel.index }}" type="range" step="0.5"

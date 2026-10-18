@@ -10,7 +10,7 @@
 
 <div class="fir" x-data='firEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
   <div class="card-head">
-    <h2>FIR <span class="muted">(experimental)</span></h2>
+    <h2>FIR filter <span class="muted">(experimental)</span>{{ help("fir") }}</h2>
   </div>
   <p class="banner banner-warn">FIR is unverified on this device. Try it on a muted, unused output first.</p>
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
@@ -46,9 +46,9 @@
         <h3>On the device</h3>
         <span class="xover-label"
               x-text="hasFilter() ? (state.preview ? summary(state.preview, state.blob) : (state.blob_missing ? 'stored taps missing' : `${state.blob ? state.blob.n_taps : '?'} taps`)) : 'no filter loaded'"></span>
-        <span class="sync-badge is-compact" :class="`sync-${status()}`" :title="status()">
+        <span class="sync-badge is-compact" :class="`sync-${status()}`">
           <span class="sync-icon" aria-hidden="true" x-text="icon()"></span>
-          <span class="sync-text visually-hidden" x-text="status()"></span>
+          <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status()] || status()"></span>
         </span>
         <label class="enable">
           <input type="checkbox" :checked="state && !state.bypass" :disabled="busy || !hasFilter()"
@@ -73,14 +73,13 @@
           <button type="button" class="btn-small" :class="{ 'is-current': responseMode === 'phase' }"
                   :aria-pressed="(responseMode === 'phase').toString()" @click="setMode('phase')">Phase</button>
           <button type="button" class="btn-small" :class="{ 'is-current': responseMode === 'excess' }"
-                  :aria-pressed="(responseMode === 'excess').toString()" @click="setMode('excess')"
-                  title="Phase with the latency estimate removed">Phase &minus; latency</button>
+                  :aria-pressed="(responseMode === 'excess').toString()" @click="setMode('excess')">Phase &minus; latency</button>
         </span>
       </div>
       <h3 x-text="modeTitle()">Magnitude (dB)</h3>
       <div class="graph-canvas" x-ref="response" role="img" aria-label="FIR frequency response"></div>
     </div>
-    <p class="hint">Latency assumes a linear-phase filter when the impulse is symmetric, otherwise the position of its
+    <p class="hint">"Phase &minus; latency" is the phase with the latency estimate removed. Latency assumes a linear-phase filter when the impulse is symmetric, otherwise the position of its
       largest tap. The device mutes while it loads FIR taps.</p>
   </div>
 </div>

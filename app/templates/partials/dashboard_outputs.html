@@ -18,13 +18,13 @@
       </div>
       <dl class="output-params">
         {% if card %}
-          <div><dt>Gain</dt><dd data-gain-text>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
+          <div><dt>Output level</dt><dd data-gain-text>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
           <div><dt>Delay</dt><dd>{{ card.delay_ms|num(2) }} ms</dd></div>
-          <div><dt>Crossover</dt><dd>{{ card.crossover }}</dd></div>
+          <div><dt>Band (crossover)</dt><dd>{{ card.crossover }}</dd></div>
         {% else %}
-          <div><dt>Gain</dt><dd>&mdash;</dd></div>
+          <div><dt>Output level</dt><dd>&mdash;</dd></div>
           <div><dt>Delay</dt><dd>&mdash;</dd></div>
-          <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+          <div><dt>Band (crossover)</dt><dd>&mdash;</dd></div>
         {% endif %}
       </dl>
       {% if card and outputs_edit_url %}
@@ -34,20 +34,19 @@
             {{- "Muted" if card.mute else "Mute" -}}
           </button>
           <button type="button" class="btn-small" data-action="nudge" data-step="-0.5"
-                  aria-label="{{ name }} gain down 0.5 dB"{% if card.gain_db <= card.gain_min %} disabled{% endif %}>&minus;0.5 dB</button>
+                  aria-label="{{ name }} level down 0.5 dB"{% if card.gain_db <= card.gain_min %} disabled{% endif %}>&minus;0.5 dB</button>
           <button type="button" class="btn-small" data-action="nudge" data-step="0.5"
-                  aria-label="{{ name }} gain up 0.5 dB"{% if card.gain_db >= card.ceiling %} disabled
-                  title="At this output's gain ceiling ({{ card.ceiling|db }})"{% endif %}>+0.5 dB</button>
+                  aria-label="{{ name }} level up 0.5 dB"{% if card.gain_db >= card.ceiling %} disabled{% endif %}>+0.5 dB</button>
         </div>
+        {% if card.gain_db >= card.ceiling %}<p class="hint output-limit">At its level limit ({{ card.ceiling|db(signed=true) }}).{{ help("level-limit") }}</p>{% endif %}
       {% endif %}
       <div class="output-foot">
         {% if card %}
-          <span class="sync-badge sync-{{ card.sync }}" data-sync-badge
-                title="Sync status of this output's settings (active preset)">
-            <span class="sync-icon" aria-hidden="true">{{ card.sync_icon }}</span> <span class="sync-text">{{ card.sync }}</span>
+          <span class="sync-badge sync-{{ card.sync }}" data-sync-badge>
+            <span class="sync-icon" aria-hidden="true">{{ card.sync_icon }}</span> <span class="sync-text">{{ status_text[card.sync] }}</span>
           </span>
         {% else %}
-          <span class="sync-badge sync-unknown" title="Preset state is not loaded">
+          <span class="sync-badge sync-unknown">
             <span aria-hidden="true">&ndash;</span> not tracked yet
           </span>
         {% endif %}

@@ -17,9 +17,9 @@
   {% include "partials/channel_strip.html" %}
 
   <section class="card" aria-labelledby="peq-title">
-    <h2 id="peq-title">PEQ <span class="muted">{{ session.profile.peq_per_input }} bands</span></h2>
+    <h2 id="peq-title">EQ <span class="muted">{{ session.profile.peq_per_input }} bands</span>{{ help("eq") }}</h2>
     {{ fx.editor("inputs", channel.index, channel.color, channel.name, view="full") }}
-    <p class="hint">The graph is this input's PEQ only; gain and mute are not included. Every output this input is routed
+    <p class="hint">The graph is this input's EQ only; its level and mute are not included. Every output this input is routed
       to hears it.</p>
   </section>
 </div>

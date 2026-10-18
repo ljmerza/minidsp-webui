@@ -666,14 +666,14 @@ def outcome_note(session: DeviceSession, preset: int, flush: FlushResult | None)
     summary = session.sync_summary(preset)
     counts = summary["counts"]
     if flush is not None and flush.staged and not summary["active"]:
-        return f" Staged until preset {preset + 1} is active.", "info"
+        return f" Waiting until preset {preset + 1} plays.", "info"
     if not (counts.get("pending") or counts.get("failed")):
         return "", "info"
     error = summary.get("error")
     return (
-        f" Not finished: {counts.get('pending', 0)} pending, {counts.get('failed', 0)} failed"
+        f" Not finished: {counts.get('pending', 0)} sending, {counts.get('failed', 0)} failed"
         + (f" ({error})" if error else "")
-        + ". The sync status shows what is left.",
+        + ". The status shows what is left.",
         "warning",
     )
 
@@ -691,7 +691,7 @@ def load_question(info: dict[str, Any], preset: int, activate: bool) -> str:
         if activate and not info["active"]:
             question += f" Switch the device to {slot}?"
         return question
-    lines = [f"Load “{name}” into {slot}?", ""]
+    lines = [f"Store “{name}” in {slot}?", ""]
     shown = info.get("change_lines") or []
     if shown:
         count = info["changes"]
@@ -704,7 +704,7 @@ def load_question(info: dict[str, Any], preset: int, activate: bool) -> str:
         lines += [f"{info['confirmation']}. Pressing OK confirms it.", ""]
     if info["unknown"]:
         lines.append(
-            f"Preset {preset + 1} also has {info['unknown']} setting(s) the app hasn't confirmed on the device; "
+            f"Preset {preset + 1} also has {info['unknown']} setting(s) the app hasn't sent to the device yet; "
             "they're all sent too."
         )
     lines.append(_apply_note(preset, info["active"], info["mute_wrap"], activate))
@@ -757,7 +757,7 @@ async def load_profile(request: Request, profile_id: int) -> Response:
     flush = result.edit.flush
     note, level = outcome_note(session, body.preset, flush)
     switched = f" Switched to preset {body.preset + 1}." if result.activated else ""
-    message = f"Loaded “{result.profile.name}” into preset {body.preset + 1}.{switched}{note}"
+    message = f"Stored “{result.profile.name}” in preset {body.preset + 1}.{switched}{note}"
     return _json(
         {
             "ok": True,

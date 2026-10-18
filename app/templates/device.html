@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Device</h1>
+<h1>Device &amp; sync</h1>
 <section id="device-info" class="card" aria-live="polite"
          hx-get="{{ device_info_url }}" hx-trigger="sse:device" hx-swap="innerHTML">
   {% include "partials/device_info.html" %}
@@ -68,19 +68,19 @@
   {%- set adopt_first = session.needs_adoption is defined and session.needs_adoption %}
   {% if adopt_first %}
   <section id="adopt" class="card" aria-labelledby="adopt-title">
-    <h2 id="adopt-title">Adopt wizard</h2>
+    <h2 id="adopt-title">Set up this device{{ help("set-up") }}</h2>
     <div hx-get="{{ ui }}/adopt" hx-trigger="load" hx-swap="outerHTML"><p class="muted">Loading&hellip;</p></div>
   </section>
   {% endif %}
   <section id="sync" class="card" aria-labelledby="sync-title">
-    <h2 id="sync-title">Sync</h2>
+    <h2 id="sync-title">Status{{ help("status") }}</h2>
     <div hx-get="{{ ui }}/sync-panel{% if q and q.isdigit() %}?preset={{ q }}{% endif %}" hx-trigger="load" hx-swap="outerHTML">
       <p class="muted">Loading&hellip;</p>
     </div>
   </section>
 
   <section id="verify" class="card" aria-labelledby="verify-title">
-    <h2 id="verify-title">Check device</h2>
+    <h2 id="verify-title">Check device{{ help("check-device") }}</h2>
     {#- The partial (#verify-panel) replaces itself on its own posts; a nightly or API run re-renders it here. -#}
     <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
       <p class="muted">Loading&hellip;</p>
@@ -89,7 +89,7 @@
 
   {% if not adopt_first %}
   <section id="adopt" class="card" aria-labelledby="adopt-title">
-    <h2 id="adopt-title">Adopt wizard</h2>
+    <h2 id="adopt-title">Set up this device{{ help("set-up") }}</h2>
     <div hx-get="{{ ui }}/adopt" hx-trigger="load" hx-swap="outerHTML"><p class="muted">Loading&hellip;</p></div>
   </section>
   {% endif %}
