@@ -230,7 +230,7 @@ class Bank:
 def parse_bank(text: str, profile: DeviceProfile) -> Bank:
     match = _BANK.fullmatch(text.strip())
     if match is None:
-        raise RewImportError(f"unknown bank {text!r}; expected inputs.N.peq, outputs.N.peq or outputs.N.crossover")
+        raise RewImportError("unknown bank; expected inputs.N.peq, outputs.N.peq or outputs.N.crossover")
     side, channel, kind = match.group(1), int(match.group(2)), match.group(3)
     if kind == "crossover" and side != "outputs":
         raise RewImportError("only outputs have a crossover")

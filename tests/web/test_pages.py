@@ -45,6 +45,11 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     assert 'hx-trigger="sse:levels"' in html
     for name in ("In 1", "In 2", "Out 1", "Out 2", "Out 3", "Out 4"):
         assert f'aria-label="{name} level"' in html
+    # idle clip boxes are neutral and always read "CLIP"; meters.js turns one red (is-on) when it latches
+    assert html.count('class="clip-led"') == 6
+    assert html.count('<span aria-hidden="true">CLIP</span>') == 6
+    assert "&ndash;" not in html.split('id="levels-title"')[1].split("</section>")[0]
+    assert "A grey CLIP box turns red" in html
     assert html.count('class="output-card"') == 4
 
     # output cards: re-fetched on sync / desired events; dashboard.js handles preset switches and the quick controls

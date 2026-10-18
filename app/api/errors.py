@@ -1,6 +1,7 @@
 """Map service-layer exceptions to HTTP responses."""
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.daemon.client import DaemonRejected, DaemonUnavailable, DeviceNotFound
@@ -13,6 +14,17 @@ def _json(status: int, detail: str, **extra: object) -> JSONResponse:
 
 async def _validation(_: Request, exc: Exception) -> JSONResponse:
     return _json(422, str(exc))
+
+
+async def _request_validation(_: Request, exc: Exception) -> JSONResponse:
+    """FastAPI's 422, minus what was sent: its default body repeats each offending value (``input``, and the whole
+    body for a malformed one), so only where (``loc``), what (``msg``) and the error ``type`` are kept."""
+    assert isinstance(exc, RequestValidationError)
+    errors = [
+        {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type", "")}
+        for err in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 async def _confirmation(_: Request, exc: Exception) -> JSONResponse:
@@ -53,6 +65,7 @@ async def _not_implemented(_: Request, exc: Exception) -> JSONResponse:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(RequestValidationError, _request_validation)
     app.add_exception_handler(MasterValidationError, _validation)
     app.add_exception_handler(ConfirmationRequired, _confirmation)
     app.add_exception_handler(PresetSwitchInProgress, _switching)

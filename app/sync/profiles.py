@@ -39,7 +39,15 @@ from app.model.master import MasterStatus
 from app.state import Profile, ProfileNameTaken, Repo, Revision
 from app.state.db import utcnow_iso
 from app.state.repo import UNSET
-from app.sync.session import BULK_TIMEOUT_S, DesiredValidationError, DeviceSession, EditResult, parse_doc
+from app.sync.session import (
+    BULK_TIMEOUT_S,
+    DesiredValidationError,
+    DeviceSession,
+    EditResult,
+    describe_apply_error,
+    parse_doc,
+    script_error_problems,
+)
 
 __all__ = [
     "EXPORT_FORMAT",
@@ -276,7 +284,7 @@ async def create_profile(
     if (device := _device_profile(product_name)) is not None:
         doc = normalize_delays(check_doc(doc, device), device)
     elif product_name:
-        raise ProfileError(f"unsupported device model {product_name!r}")
+        raise ProfileError("unsupported device model")
     return await repo.create_profile(name, doc, description=_clean_description(description), product_name=product_name)
 
 
@@ -360,7 +368,7 @@ async def import_profile(repo: Repo | None, data: Any, *, name: str | None = Non
         raise ProfileError(f'not a profile export (expected "format": "{EXPORT_FORMAT}")')
     version = data.get("version")
     if not isinstance(version, int) or not 1 <= version <= EXPORT_VERSION:
-        raise ProfileError(f"unsupported profile export version {version!r}")
+        raise ProfileError(f"unsupported profile export version (expected 1..{EXPORT_VERSION})")
     config = data.get("config")
     if not isinstance(config, Mapping):
         raise ProfileError("the export has no config document")
@@ -389,7 +397,7 @@ def _script_device(product_name: str | None) -> DeviceProfile:
     if not product_name:
         return M2X4HD
     if (device := _device_profile(product_name)) is None:
-        raise ProfileError(f"unsupported device model {product_name!r}")
+        raise ProfileError("unsupported device model")
     return device
 
 
@@ -419,15 +427,13 @@ async def import_profile_script(
     base = _clean_name(name)
     parsed = parse_script(text, device)
     if parsed.errors:
-        raise DesiredValidationError(
-            "the script has errors", [f"line {e.line}: {e.message} ({e.text})" for e in parsed.errors]
-        )
+        raise DesiredValidationError("the script has errors", script_error_problems(parsed.errors))
     if not parsed.ops:
         raise ProfileError("the script contains no preset settings")
     try:
         doc = parsed.apply(default_config_doc(device))
     except (PathError, ValidationError) as exc:
-        raise ProfileError(f"the script can't be applied: {exc}") from None
+        raise ProfileError(f"the script can't be applied: {describe_apply_error(exc)}") from None
     doc = await asyncio.to_thread(annotate_designs, doc)
     profile = await create_profile(
         repo,
@@ -698,12 +704,12 @@ def parse_source(text: str) -> tuple[str, int, int | None]:
     kind = parts[0]
     nums = parts[1:]
     if not all(n.isascii() and n.isdigit() for n in nums):
-        raise SourceError(f"bad diff source {text!r}")
+        raise SourceError("bad diff source: use profile:ID, preset:P or revision:P:R")
     if kind in ("profile", "preset") and len(nums) == 1:
         return kind, int(nums[0]), None
     if kind == "revision" and len(nums) == 2:
         return kind, int(nums[0]), int(nums[1])
-    raise SourceError(f"bad diff source {text!r}: use profile:ID, preset:P or revision:P:R")
+    raise SourceError("bad diff source: use profile:ID, preset:P or revision:P:R")
 
 
 async def resolve_source(text: str, *, repo: Repo | None, session: DeviceSession | None) -> DiffSide:

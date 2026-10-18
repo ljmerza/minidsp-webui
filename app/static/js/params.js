@@ -17,12 +17,22 @@
   const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
   const KEY_STEP = 0.5;
   const KEY_STEP_FINE = 0.1;
+  const LEVELS_STALE_MS = 2500; // routing page: output levels older than this don't count as signal
 
   const readJson = (root, selector, fallback) => {
     const el = root.querySelector(selector);
     if (!el) return fallback;
     try {
       return JSON.parse(el.textContent);
+    } catch {
+      return fallback;
+    }
+  };
+
+  const readJsonAttr = (text, fallback) => {
+    try {
+      const value = JSON.parse(text);
+      return Array.isArray(value) ? value : fallback;
     } catch {
       return fallback;
     }
@@ -47,6 +57,8 @@
       this.localAt = new Map(); // path -> time of the last local change
       this.statusAt = new Map(); // path -> time of the last status from the server's event stream
       this.dragging = null;
+      this.levels = readJsonAttr(root.dataset.outputLevels, []); // routing page only (sse:levels)
+      this.levelsAt = this.levels.length ? performance.now() : -Infinity;
 
       root.addEventListener('input', (e) => this.onInput(e));
       root.addEventListener('change', (e) => this.onChange(e));
@@ -57,6 +69,7 @@
       window.addEventListener('pointerup', () => { this.dragging = null; }, true);
       root.addEventListener('sse:sync', (e) => this.onSyncEvent(e.detail));
       root.addEventListener('sse:desired', (e) => this.onDesiredEvent(e.detail));
+      root.addEventListener('sse:levels', (e) => this.onLevelsEvent(e.detail));
       root.addEventListener('click', (e) => this.onClick(e));
       this.renderBadges();
       this.updateRouting();
@@ -151,6 +164,19 @@
       }
     }
 
+    onLevelsEvent(event) {
+      const data = parseEvent(event);
+      if (!data || !Array.isArray(data.o)) return;
+      this.levels = data.o;
+      this.levelsAt = performance.now();
+    }
+
+    outputLevel(o) {
+      if (performance.now() - this.levelsAt > LEVELS_STALE_MS) return null;
+      const v = this.levels[o];
+      return typeof v === 'number' ? v : null;
+    }
+
     isBusy(path, now = performance.now()) {
       const ch = this.channels.get(path);
       if (ch && (ch.timer || ch.inflight || ch.queued)) return true;
@@ -185,8 +211,31 @@
         el.checked = true;
         return;
       }
+      if (el.dataset.type === 'bool' && el.hasAttribute('data-route-output') && value === false && !this.confirmRouteOff(el)) {
+        el.checked = true; // cancelled: the cell stays on and nothing is sent
+        return;
+      }
       this.showValue(path, value, el);
       this.schedule(path, value, { commit: true, immediate: true });
+    }
+
+    // Turning off an output's last route silences it, and the device can't report routing back (see routing.js).
+    confirmRouteOff(el) {
+      const guard = window.mdsp && window.mdsp.routing;
+      if (!guard) return true;
+      const o = el.dataset.routeOutput;
+      const routes = [];
+      for (const cell of this.root.querySelectorAll(`[data-route-output="${o}"]`)) {
+        routes[Number(cell.dataset.routeInput)] = cell === el ? true : cell.checked;
+      }
+      const message = guard.disableWarning({
+        routes,
+        input: Number(el.dataset.routeInput),
+        name: el.dataset.routeTitle || `Out ${Number(o) + 1}`,
+        muted: this.desired[`outputs.${o}.mute`] === true,
+        level: this.outputLevel(Number(o)),
+      });
+      return !message || window.confirm(message);
     }
 
     // Un-muting an output whose gain or mute was never confirmed on the device plays whatever it holds.

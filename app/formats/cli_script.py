@@ -167,15 +167,15 @@ class _Args:
 
     def end(self) -> None:
         if self:
-            raise _LineError(f"unexpected extra arguments: {' '.join(self._words[self._pos :])}")
+            raise _LineError("unexpected extra arguments")
 
 
 def _number(token: str, what: str) -> float:
     if not _NUMBER.fullmatch(token):
-        raise _LineError(f"{what}: {token!r} is not a finite number")
+        raise _LineError(f"{what}: not a finite number")
     value = float(token)
     if value in (float("inf"), float("-inf")):
-        raise _LineError(f"{what}: {token!r} is out of range")
+        raise _LineError(f"{what}: out of range")
     return value
 
 
@@ -183,12 +183,12 @@ def _bool(token: str, what: str) -> bool:
     try:
         return _BOOLS[token.lower()]
     except KeyError:
-        raise _LineError(f"{what}: expected on or off, got {token!r}") from None
+        raise _LineError(f"{what}: expected on or off") from None
 
 
 def _index(token: str, count: int, what: str) -> int:
     if not _INDEX.fullmatch(token):
-        raise _LineError(f"{what}: {token!r} is not an index")
+        raise _LineError(f"{what}: not an index")
     idx = int(token)
     if idx >= count:
         raise _LineError(f"{what} {idx} out of range (0..{count - 1})")
@@ -232,7 +232,7 @@ def _parse_peq(args: _Args, base: str, count: int) -> _Ops:
         ]
     if action == "import":
         raise _Ignored("'peq … import' reads a file on the DSP host; use the REW import instead")
-    raise _LineError(f"unknown peq action {action!r}")
+    raise _LineError("unknown peq action")
 
 
 def _parse_crossover(args: _Args, base: str, profile: DeviceProfile) -> _Ops:
@@ -259,7 +259,7 @@ def _parse_crossover(args: _Args, base: str, profile: DeviceProfile) -> _Ops:
         return ops
     if action == "import":
         raise _Ignored("'crossover … import' reads a file on the DSP host; use the REW import instead")
-    raise _LineError(f"unknown crossover action {action!r}")
+    raise _LineError("unknown crossover action")
 
 
 def _parse_compressor(args: _Args, base: str) -> _Ops:
@@ -274,7 +274,7 @@ def _parse_compressor(args: _Args, base: str) -> _Ops:
             flag, raw = token, None
         name = _COMPRESSOR_FLAGS.get(flag)
         if name is None:
-            raise _LineError(f"unknown compressor option {token!r}")
+            raise _LineError("unknown compressor option")
         if name in values:
             raise _LineError(f"compressor option {flag} given twice")
         raw = args.next(f"value for {flag}") if raw is None else raw
@@ -314,7 +314,7 @@ def _parse_output(args: _Args, profile: DeviceProfile) -> _Ops:
         value = _bool(args.next(f"{sub} value"), sub)
         args.end()
         return [(f"{base}.{sub}", value)]
-    raise _LineError(f"unknown output command {sub!r}")
+    raise _LineError("unknown output command")
 
 
 def _parse_input(args: _Args, profile: DeviceProfile) -> _Ops:
@@ -342,8 +342,8 @@ def _parse_input(args: _Args, profile: DeviceProfile) -> _Ops:
             value = _number(args.next("gain"), "gain")
             args.end()
             return [(f"{base}.routing.{m}.gain_db", value)]
-        raise _LineError(f"unknown routing action {action!r}")
-    raise _LineError(f"unknown input command {sub!r}")
+        raise _LineError("unknown routing action")
+    raise _LineError("unknown input command")
 
 
 def _parse_line(line: str, profile: DeviceProfile) -> _Ops:
@@ -368,7 +368,7 @@ def _parse_line(line: str, profile: DeviceProfile) -> _Ops:
         return _parse_input(args, profile)
     if command in _MASTER_COMMANDS:
         raise _Ignored(f"{_MASTER_COMMANDS[command]} isn't part of a preset config; ignored")
-    raise _LineError(f"unknown command {words[0]!r}")
+    raise _LineError("unknown command")
 
 
 def _logical_lines(text: str) -> Iterator[tuple[int, str]]:

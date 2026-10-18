@@ -1,4 +1,5 @@
-"""ALLOWED_HOSTS: refuse requests whose Host header is a name the user didn't list (DNS rebinding)."""
+"""ALLOWED_HOSTS: refuse requests whose Host header is a name the user didn't list (DNS rebinding). On by default;
+``*`` opts out."""
 
 import pytest
 
@@ -18,9 +19,39 @@ async def test_a_rebound_host_is_refused_when_allowed_hosts_is_set(settings, cli
         assert (await http.get("/healthz", headers={"Host": "localhost"})).status_code == 200
 
 
-async def test_without_allowed_hosts_any_host_is_served(settings, client, daemon):
+async def test_by_default_only_ip_addresses_and_localhost_are_served(settings, client, daemon):
+    assert settings.allowed_hosts == ""
+    async with running(settings, client, daemon) as (_, http):
+        for host in ("192.0.2.10:8480", "192.0.2.10", "[2001:db8::1]:8480", "[::1]", "localhost:8480", "LOCALHOST"):
+            assert (await http.get("/api/v1/devices", headers={"Host": host})).status_code == 200, host
+        response = await http.get("/api/v1/devices", headers={"Host": "attacker.example:8480"})
+        assert response.status_code == 400 and "ALLOWED_HOSTS" in response.text
+        assert (await http.get("/api/v1/backup/db", headers=REBOUND)).status_code == 400
+        assert (await http.get("/", headers={"Host": "minidsp.example.lan"})).status_code == 400
+        # the image's HEALTHCHECK asks 127.0.0.1
+        assert (await http.get("/healthz", headers={"Host": "127.0.0.1:8480"})).status_code == 200
+
+
+async def test_a_star_turns_the_check_off(settings, client, daemon):
+    settings.allowed_hosts = "*"
     async with running(settings, client, daemon) as (_, http):
         assert (await http.get("/api/v1/devices", headers={"Host": "attacker.example:8480"})).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("", frozenset()),
+        ("  ", frozenset()),
+        ("Minidsp.LAN., other.example", frozenset({"minidsp.lan", "other.example"})),
+        ("*", None),
+        ("minidsp.lan, *", None),
+    ],
+)
+def test_parse_allowed_hosts(value, expected):
+    from app.api.hosts import parse_allowed_hosts
+
+    assert parse_allowed_hosts(value) == expected
 
 
 @pytest.mark.parametrize(

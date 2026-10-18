@@ -170,7 +170,7 @@ def _parse_range(text: str | None) -> tuple[float | None, float | None, str | No
             raise ValueError
         return float(lo), float(hi), None
     except ValueError:
-        detail = f"range must be LOW-HIGH in Hz, sub or full; got {text!r}"
+        detail = "range must be LOW-HIGH in Hz, sub or full"
         raise HTTPException(status_code=422, detail=detail) from None
 
 

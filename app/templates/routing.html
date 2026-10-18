@@ -8,7 +8,7 @@
 {% else %}
 {% include "partials/adopt_banner.html" %}
 <div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
-     hx-trigger="sse:sync, sse:desired">
+     data-output-levels='{{ initial_output_levels|tojson }}' hx-trigger="sse:sync, sse:desired, sse:levels">
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
 
@@ -23,13 +23,11 @@
             <th scope="col"><span class="visually-hidden">Input</span></th>
             {% for name in output_names %}
               {%- set o = loop.index0 -%}
-              {%- set ns = namespace(any=false) -%}
-              {%- for _ in input_names %}{% if values["inputs.%d.routing.%d.enabled"|format(loop.index0, o)] %}{% set ns.any = true %}{% endif %}{% endfor %}
               <th scope="col" style="--chan: {{ output_colors[o] }}">
                 <span class="chan-dot" aria-hidden="true"></span>{{ name }}
                 <span class="silent-warning" data-silent-output="{{ o }}" role="img"
                       aria-label="No input is routed to {{ name }}: it will be silent"
-                      title="No input is routed to {{ name }}: it will be silent"{% if ns.any %} hidden{% endif %}>&#9888;</span>
+                      title="No input is routed to {{ name }}: it will be silent"{% if routed[o] %} hidden{% endif %}>&#9888;</span>
               </th>
             {% endfor %}
           </tr>
@@ -47,7 +45,8 @@
                 <td class="route-cell{% if on %} is-on{% endif %}" data-route-cell>
                   <label class="route-toggle">
                     <input type="checkbox" data-path="{{ ep }}" data-type="bool"
-                           data-route-output="{{ o }}"{% if on %} checked{% endif %}>
+                           data-route-output="{{ o }}" data-route-input="{{ i }}"
+                           data-route-title="{{ output_titles[o] }}"{% if on %} checked{% endif %}>
                     <span class="visually-hidden">Route {{ in_name }} to {{ out_name }}</span>
                   </label>
                   <span class="num-field route-gain">
@@ -66,7 +65,8 @@
       </table>
     </div>
     <p class="hint">Tick a cell to route the input to that output; the gain applies to that route only.
-      Routing gains are limited by the destination output's ceiling.</p>
+      Routing gains are limited by the destination output's ceiling. Routes can't be read back from the device, so
+      turning off an un-muted or playing output's last route asks first.</p>
   </section>
 
   {% if input_names|length > 1 %}
@@ -89,5 +89,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ root }}/static/js/routing.js?v={{ asset_version }}"></script>
 <script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
 {% endblock %}

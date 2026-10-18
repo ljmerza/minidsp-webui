@@ -146,7 +146,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.state.usb_probe = None
     register_exception_handlers(app)
     app.add_middleware(BodyLimitMiddleware)  # caps upload/import bodies before they are spooled or parsed
-    if allowed_hosts := parse_allowed_hosts(settings.allowed_hosts):
+    allowed_hosts = parse_allowed_hosts(settings.allowed_hosts)
+    if allowed_hosts is not None:  # None: ALLOWED_HOSTS=* opted out of the check
         app.add_middleware(AllowedHostsMiddleware, allowed=allowed_hosts)  # outermost: refuses rebound host names
     app.include_router(v1.build_router())
     app.include_router(web.router)

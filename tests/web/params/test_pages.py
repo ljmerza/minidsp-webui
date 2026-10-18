@@ -2,7 +2,10 @@
 
 import re
 
+from app.main import STATIC_DIR
+from app.model.master import StatusSummary
 from app.sync.session import AdoptMode
+from app.web.params import ROUTE_LIVE_DBFS, output_routed, would_silence_output
 
 from .conftest import SERIAL
 
@@ -29,14 +32,66 @@ async def test_routing_matrix_shows_the_desired_routes(ctx):
     assert html.count("data-silent-output=") == 4
     assert all("hidden" in _tag(html, rf'data-silent-output="{o}"') for o in range(4))
     assert "data-mono-sum" in html and "data-mono-target" in html
-    assert "/static/js/params.js" in html
-    assert "topics=master%2Cdevice%2Csync%2Cdesired" in html
+    assert "/static/js/params.js" in html and "/static/js/routing.js" in html
+    # the routing guard needs live output levels, so this page also subscribes to them
+    assert "topics=master%2Cdevice%2Csync%2Cdesired%2Clevels" in html
+    assert 'hx-trigger="sse:sync, sse:desired, sse:levels"' in html
+    assert "data-output-levels='[]'" in html
 
 
 async def test_silent_output_warning(ctx):
     await ctx.session.edit(0, {"inputs": {"0": {"routing": {"0": {"enabled": False}}}}})
     html = (await ctx.http.get("/routing")).text
     assert "hidden" not in _tag(html, 'data-silent-output="0"')
+
+
+async def test_route_cells_carry_what_the_routing_guard_needs(ctx):
+    await ctx.session.set_channel_meta("output", 1, name="Sub")
+    html = (await ctx.http.get("/routing")).text
+    cell = _tag(html, r'data-path="inputs\.1\.routing\.1\.enabled"')
+    assert 'data-route-output="1"' in cell and 'data-route-input="1"' in cell
+    assert 'data-route-title="Out 2 (Sub)"' in cell
+    assert 'data-route-title="Out 1"' in _tag(html, r'data-path="inputs\.0\.routing\.0\.enabled"')
+
+
+async def test_routing_page_passes_the_current_output_levels(ctx):
+    ctx.session.monitor.status = StatusSummary(
+        master=ctx.session.master, input_levels=[-18.0, -104.0], output_levels=[-6.5, -20.0, -120.0, -95.0]
+    )
+    html = (await ctx.http.get("/routing")).text
+    assert "data-output-levels='[-6.5, -20.0, -120.0, -95.0]'" in html
+
+
+def _routes(*enabled: tuple[int, int]) -> dict[str, bool]:
+    values = {f"inputs.{i}.routing.{o}.enabled": False for i in range(2) for o in range(4)}
+    values.update({f"inputs.{i}.routing.{o}.enabled": True for i, o in enabled})
+    return values
+
+
+def test_output_routed():
+    values = _routes((0, 0), (1, 0), (0, 1))
+    assert output_routed(values, 2, 0) and output_routed(values, 2, 1)
+    assert not output_routed(values, 2, 2)
+    assert output_routed(values, 2, 0, without=0)  # In 2 still feeds Out 1
+    assert not output_routed(values, 2, 1, without=0)
+    assert not output_routed({}, 2, 0)  # missing paths count as off
+
+
+def test_would_silence_output():
+    values = _routes((0, 0), (1, 0), (0, 1))
+    assert not would_silence_output(values, 2, 0, 0)  # Out 1 keeps In 2
+    assert would_silence_output(values, 2, 0, 1)  # In 1 is Out 2's only route
+    # Out 2 fed by In 2 only: turning off In 1 (already off) still leaves In 2, turning off In 2 silences it
+    values = _routes((1, 1))
+    assert not would_silence_output(values, 2, 0, 1)
+    assert would_silence_output(values, 2, 1, 1)
+    # an output nothing routes to is silent whatever is turned off
+    assert would_silence_output(values, 2, 0, 3)
+
+
+def test_live_threshold_matches_the_js_mirror():
+    js = (STATIC_DIR / "js" / "routing.js").read_text()
+    assert re.search(rf"const LIVE_DBFS = {int(ROUTE_LIVE_DBFS)};", js)
 
 
 async def test_pages_edit_the_active_preset_by_default_and_any_preset_on_request(ctx):

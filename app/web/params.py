@@ -8,6 +8,7 @@ that fails to *sync* is kept (the badge shows it and the sync bar offers a retry
 """
 
 import math
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -32,9 +33,11 @@ from app.sync.session import (
 )
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
+    EDIT_TOPICS,
     channel_color,
     channel_label,
     channel_names,
+    default_label,
     device_preset,
     edit_page_context,
     is_htmx,
@@ -99,6 +102,31 @@ def simple_values(session: DeviceSession, preset: int) -> dict[str, Any]:
         values[f"outputs.{n}.invert"] = ch.invert
         values[f"outputs.{n}.delay_ms"] = ch.delay_ms
     return values
+
+
+# Routing guard (UI only: the edit API and HA/MQTT clients are not affected). Routing enables can't be read back from
+# the device, so a route switched off by accident silences an output with nothing to show for it. Before a route is
+# turned off, the routing page asks if that leaves the output with no enabled route while it is un-muted or shows
+# signal above this level. Mirrored by app/static/js/routing.js (LIVE_DBFS, wouldSilence).
+ROUTE_LIVE_DBFS = -100.0
+
+
+def output_routed(values: Mapping[str, Any], n_inputs: int, output: int, *, without: int | None = None) -> bool:
+    """Whether any input (other than ``without``) has an enabled route to ``output`` in ``values`` (see
+    `simple_values`)."""
+    return any(bool(values.get(f"inputs.{i}.routing.{output}.enabled")) for i in range(n_inputs) if i != without)
+
+
+def would_silence_output(values: Mapping[str, Any], n_inputs: int, input_index: int, output: int) -> bool:
+    """Whether turning off the route ``input_index`` -> ``output`` leaves ``output`` with no enabled route."""
+    return not output_routed(values, n_inputs, output, without=input_index)
+
+
+def output_title(session: DeviceSession, index: int) -> str:
+    """ "Out 2 (Sub)" when the output has a name in Settings, else "Out 2"."""
+    default = default_label("output", index)
+    name = channel_label(session, "output", index)
+    return default if name == default else f"{default} ({name})"
 
 
 def page_ref(request: Request) -> str:
@@ -183,7 +211,14 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     if session is None or p is None:
         return _error_page(request, "routing.html", ctx)
     ctx = _base_ctx(request, session, p, "Routing", "/routing")
-    ctx["ceilings"] = [session.channel_ceiling("output", o) for o in range(session.profile.n_outputs)]
+    n_in, n_out = session.profile.n_inputs, session.profile.n_outputs
+    ctx["ceilings"] = [session.channel_ceiling("output", o) for o in range(n_out)]
+    ctx["routed"] = [output_routed(ctx["values"], n_in, o) for o in range(n_out)]
+    ctx["output_titles"] = [output_title(session, o) for o in range(n_out)]
+    # Output levels feed the routing guard ("Out 2 currently has signal"), so this page also listens to levels.
+    ctx["sse_url"] = url(request, "/api/v1/events", topics=",".join((*EDIT_TOPICS, "levels")), serial=session.serial)
+    status = session.status
+    ctx["initial_output_levels"] = list(status.output_levels) if status else []
     return render(request, "routing.html", ctx)
 
 
@@ -278,7 +313,7 @@ def patch_from_values(values: dict[str, Any]) -> dict[str, Any]:
     """``{"outputs.0.gain_db": 3}`` -> the merge patch ``{"outputs": {"0": {"gain_db": 3}}}`` (paths merged)."""
     for path in values:
         if not path or any(not part for part in path.split(".")):
-            raise DesiredValidationError("invalid edit", [f"{path!r}: not a document path"])
+            raise DesiredValidationError("invalid edit", ["not a document path (empty path segment)"])
     ordered = sorted(values)
     for a, b in zip(ordered, ordered[1:], strict=False):
         if b.startswith(f"{a}."):

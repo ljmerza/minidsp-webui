@@ -505,7 +505,7 @@ def parse_range(text: str | None, default: str) -> tuple[float, float]:
             raise ValueError
         lo, hi = float(lo_text), float(hi_text)
     except ValueError:
-        raise ValueError(f"range must be sub, full or LOW-HIGH in Hz; got {text!r}") from None
+        raise ValueError("range must be sub, full or LOW-HIGH in Hz") from None
     if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi <= 24_000):
         raise ValueError(f"range {lo:g}-{hi:g} Hz must satisfy 0 < low < high <= 24000 Hz")
     return lo, hi
