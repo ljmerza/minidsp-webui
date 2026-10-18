@@ -1,7 +1,8 @@
 # minidsp-webui
 
 minidsp-webui is a self-hosted web UI for miniDSP devices (built around the **2x4 HD**) that runs on top of
-[minidsp-rs](https://github.com/mrene/minidsp-rs)'s `minidspd` daemon on Linux, for example on a Raspberry Pi.
+[minidsp-rs](https://github.com/mrene/minidsp-rs)'s `minidspd` daemon on Linux, for example on a Raspberry Pi. The
+Docker image bundles `minidspd` and talks to the miniDSP over USB itself, so one container is all you need.
 It gives you live meters, every per-channel DSP setting and draggable PEQ/crossover response graphs in the browser, plus
 Home Assistant entities over MQTT discovery, so you don't need the Windows plugin app.
 
@@ -82,8 +83,79 @@ Works with minidspd 0.1.12, the current minidsp-rs release.
 
 ## Setup
 
-`minidspd` binds to loopback by default, so run the container on the machine that runs the daemon, with host
-networking. [`docker-compose.example.yml`](docker-compose.example.yml) is a complete example:
+### All-in-one install
+
+The image bundles `minidspd` 0.1.12 from minidsp-rs and runs it next to the app, so the host needs only Docker: no
+minidsp-rs package, no host networking. The container talks to the miniDSP over USB itself, and the daemon's own API
+stays inside the container on `127.0.0.1:5380`. [`docker-compose.example.yml`](docker-compose.example.yml) is a complete
+example. The essentials, for **rootful Docker** (the usual install):
+
+```yaml
+services:
+  minidsp-webui:
+    image: ghcr.io/ljmerza/minidsp-webui:main
+    ports: ["8480:8480"]
+    volumes:
+      - ./data:/data
+      - /dev/bus/usb:/dev/bus/usb        # the whole tree, so a re-plug (new device number) is still visible
+    device_cgroup_rules: ["c 189:* rmw"] # allow USB device nodes (major 189)
+    group_add: ["46"]                    # the gid that owns the device node on the host (see below)
+    tmpfs: ["/run/minidsp:mode=1777,size=1m"] # the generated daemon config stays in RAM
+    restart: unless-stopped
+    mem_limit: 256m
+```
+
+Then open `http://<host>:8480`. Images are published for `linux/amd64` and `linux/arm64`.
+
+Before the first start:
+
+1. **Only one process can own the miniDSP.** If minidsp-rs is installed on the host, stop its daemon:
+   `sudo systemctl disable --now minidsp`. The `minidsp` CLI is still available as `docker exec minidsp-webui minidsp`.
+2. **Give the device node a group.** The container runs as uid 1000 and opens the device through `group_add`. The
+   minidsp-rs package installs a udev rule that does this (`GROUP="plugdev"`, mode 0660). Without the package, add your
+   own, e.g. `/etc/udev/rules.d/90-minidsp.rules`:
+
+   ```
+   SUBSYSTEM=="usb", ATTR{idVendor}=="2752", GROUP="plugdev", MODE="0660"
+   ```
+
+   Apply it with `sudo udevadm control --reload && sudo udevadm trigger --action=add --subsystem-match=usb
+   --attr-match=idVendor=2752` (or re-plug the device). Put the group's numeric id in `group_add`:
+   `getent group plugdev | cut -d: -f3` (46 on Debian and Raspberry Pi OS).
+3. **The data directory must be writable by uid 1000:** `mkdir -p data && sudo chown 1000:1000 data`.
+
+The alternative to `group_add` is running the container as root (`user: "0:0"`), still with the cgroup rule.
+
+#### Rootless Docker
+
+With rootless Docker, the host's root and `plugdev` aren't mapped into the container: the device node shows up as
+`nobody:nogroup` and `group_add` can't help. Instead, give the device to the user that runs Docker and run the container
+as root. Container root is that unprivileged host user, so this grants nothing beyond what your user already has.
+
+1. udev rule, e.g. `/etc/udev/rules.d/90-minidsp.rules` (replace `youruser`):
+
+   ```
+   SUBSYSTEM=="usb", ATTR{idVendor}=="2752", OWNER="youruser", MODE="0660"
+   ```
+
+   Apply it with `sudo udevadm control --reload && sudo udevadm trigger --action=add --subsystem-match=usb
+   --attr-match=idVendor=2752`, or re-plug the device. A plain `udevadm trigger` (a "change" event) doesn't re-apply
+   `OWNER`, and that is also true when you remove the rule again: re-plug or use `--action=add`.
+2. In the compose file: add `user: "0:0"`. Drop `group_add`. `device_cgroup_rules` has no effect under rootless Docker,
+   so it can stay or go.
+3. The data directory just needs to belong to your user (container root writes as your user), so no `chown` is needed.
+
+#### Reaching the bundled daemon from the host
+
+To keep using the `minidsp` CLI on the host with `--daemon-url`, set `MINIDSPD_HTTP_BIND: "0.0.0.0:5380"` and publish
+the port on loopback only: `ports: ["8480:8480", "127.0.0.1:5380:5380"]`. The daemon's API has no authentication, so
+never publish it on all interfaces. `docker exec minidsp-webui minidsp` works without any of this.
+
+### Using a host minidspd instead (external mode)
+
+To keep running `minidspd` on the host (installed from the minidsp-rs package), set `MINIDSPD_MODE=external`. The app
+then behaves as before the bundled daemon existed. `minidspd` binds to loopback by default, so run the container with
+host networking on the machine that runs the daemon:
 
 ```yaml
 services:
@@ -91,28 +163,33 @@ services:
     image: ghcr.io/ljmerza/minidsp-webui:main
     network_mode: host
     environment:
+      MINIDSPD_MODE: external
       MINIDSPD_URL: http://127.0.0.1:5380
-      WEBUI_PORT: "8480"
     volumes:
       - ./data:/data
     restart: unless-stopped
     mem_limit: 256m
 ```
 
-Then open `http://<host>:8480`. Images are published for `linux/amd64` and `linux/arm64`.
+The container needs no USB access in this mode. Setting `MINIDSPD_URL` without `MINIDSPD_MODE` also selects external
+mode, so compose files written before the all-in-one image keep working.
+
+### Demo mode (no hardware)
+
+`MINIDSPD_MOCK=true` adds minidspd's built-in mock 2x4HD (serial 911111). No USB device or mount is needed:
+
+```bash
+docker run --rm -p 8480:8480 -e MINIDSPD_MOCK=true ghcr.io/ljmerza/minidsp-webui:main
+```
+
+The mock has no audio path and only roughly emulates the device. State goes to the container's `/data`, so it is lost
+with the container unless you mount a volume.
+
+### Security
 
 The app has no login. Anyone who can reach the port can change the device, so keep it on a trusted network or put
 it behind a reverse proxy that adds authentication. When proxying, turn buffering off for `/api/v1/events` (nginx:
 `proxy_buffering off;`), or live updates stall.
-
-The container runs as uid 1000 and needs no USB access or privileges (the daemon owns the device). With **rootless
-Docker**, uid 1000 in the container maps to a different uid on the host, so a data directory owned by your user isn't
-writable. The app then falls back to in-memory state: `/api/v1/health` reports `"state": "memory"` and the UI shows a
-banner. Fix the ownership once:
-
-```bash
-docker run --rm --user 0 --entrypoint chown -v "$PWD/data:/data" ghcr.io/ljmerza/minidsp-webui:main 1000:1000 /data
-```
 
 ### Health
 
@@ -122,6 +199,38 @@ docker run --rm --user 0 --entrypoint chown -v "$PWD/data:/data" ghcr.io/ljmerza
   unreachable, device missing, live stream reconnecting, settings that failed to write, or state that isn't being
   saved. The app keeps retrying on its own in all of these cases, and the UI shows a banner meanwhile. Add
   `?strict=true` to get a 503 whenever the status isn't `ok` (for external monitoring).
+- The bundled daemon shows up as `daemon_mode` (`embedded` or `external`), `daemon_process` (`running`, `restarting`,
+  `failed`, `starting`, `stopped`, or `external` in external mode), `daemon_restarts`, `daemon_pid` and
+  `daemon_last_exit`. USB is reported as `usb_device_visible`, `usb_access` (`ok`, `denied`, `not_mounted`, `absent`
+  or `unknown`) and a readable `usb_detail`. The Device page shows the same.
+- If `minidspd` exits, the app restarts it after 1 s, backing off to 30 s while it keeps failing. Five restarts within
+  five minutes log an error and turn `daemon_process` to `failed` until a run lasts.
+
+### Troubleshooting
+
+- **`usb_access: denied` with EPERM:** rootful Docker without `device_cgroup_rules: ["c 189:* rmw"]`.
+- **`usb_access: denied` with EACCES:** the container user can't open the node. `usb_detail` shows the node's owner and
+  mode and the container's uid and groups. Rootful: fix the udev rule's `GROUP` and the gid in `group_add`. Rootless:
+  check the `OWNER` rule and `user: "0:0"`, and that the rule was applied (`--action=add` or a re-plug).
+- **`usb_access: not_mounted`:** `/dev/bus/usb` isn't mounted into the container, or the device was plugged in after a
+  `--device` mount of a single node. Mount the whole `/dev/bus/usb` tree.
+- **`usb_access: absent`:** no miniDSP (USB vendor `2752`) is plugged into the host. Check `lsusb` on the host.
+- **The device is visible but never shows up in the UI:** another `minidspd` (on the host, or in a second container)
+  still owns it. Stop it, then restart the container.
+- **After unplugging and re-plugging the device:** the daemon polls USB every few seconds, but whether it picks the
+  device up again inside a container hasn't been verified on every setup. If it doesn't come back within about 10 s,
+  restart the container. `usb_device_visible` tells you whether the container can see it at all.
+- **`daemon_process: failed` with "cannot write the minidspd config":** `MINIDSPD_EXTRA_CONFIG` isn't valid TOML, sets
+  the HTTP address (use `MINIDSPD_HTTP_BIND`) or has an `http_server` that isn't a table. This one isn't retried; fix
+  the setting and restart.
+- **`daemon_process: running` but the daemon is unreachable, with "HTTP/TCP listener error" in `daemon_process_error`:**
+  the daemon couldn't open its HTTP port (usually another process already uses `MINIDSPD_HTTP_BIND`'s port). USB
+  discovery keeps running, so the process stays up. `MINIDSPD_HTTP_BIND` must be an IP address and port; hostnames
+  such as `localhost` are refused at startup.
+- **Logs:** the daemon's warnings and errors appear in `docker logs` under the `minidspd` logger. A warning the daemon
+  repeats (it retries a device it can't open every second) is logged once, then at most every 5 minutes with a repeat
+  count. Its info output is dropped, so idle disk writes stay at zero. Set `RUST_LOG=info` (or `debug`) on the
+  container to see more.
 
 ### Upgrading
 
@@ -137,7 +246,6 @@ there take precedence over the environment.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MINIDSPD_URL` | `http://127.0.0.1:5380` | minidspd HTTP API |
 | `WEBUI_BIND` | `0.0.0.0` | Listen address |
 | `WEBUI_PORT` | `8480` | Listen port |
 | `DB_PATH` | `/data/minidsp-webui.sqlite3` | SQLite database; nightly backups go to `backups/` next to it |
@@ -147,6 +255,19 @@ there take precedence over the environment.
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices (it retries faster while something is missing) |
 | `MONITOR_BACKOFF_MIN_S` / `MONITOR_BACKOFF_MAX_S` | `0.5` / `10` | Reconnect backoff for a device's live status stream |
 | `LEVELS_IDLE_GRACE_S` | `5` | How long the level meters stay on after the last viewer leaves (level polling uses USB bandwidth) |
+
+#### Daemon
+
+| Variable | Default | Description |
+|---|---|---|
+| `MINIDSPD_MODE` | `embedded` | `embedded` runs the bundled `minidspd`; `external` uses `MINIDSPD_URL`. Unset with `MINIDSPD_URL` set means `external` |
+| `MINIDSPD_URL` | `http://127.0.0.1:5380` | External mode: the minidspd HTTP API. Ignored in embedded mode |
+| `MINIDSPD_MOCK` | `false` | Embedded mode: add minidspd's mock 2x4HD (demo without hardware) |
+| `MINIDSPD_HTTP_BIND` | `127.0.0.1:5380` | Embedded mode: where the daemon's API listens inside the container. `0.0.0.0:5380` to publish it (loopback only!) |
+| `MINIDSPD_DISCOVERY` | `false` | Embedded mode: pick up network devices (WI-DG) that advertise themselves |
+| `MINIDSPD_EXTRA_CONFIG` | _(empty)_ | Embedded mode: raw TOML merged into the generated [daemon config](https://github.com/mrene/minidsp-rs/blob/master/docs/config.example.toml), e.g. a `[[static_device]]` |
+| `MINIDSPD_CONFIG_DIR` | `/run/minidsp` | Embedded mode: where the generated config is written; mount a tmpfs there (falls back to `/dev/shm`) |
+| `MINIDSPD_BINARY` | `minidspd` | Embedded mode: the daemon executable |
 
 #### Sync
 
@@ -197,10 +318,14 @@ make test                # unit tests, no docker needed
 make dev-up              # mock minidspd on 127.0.0.1:15380 + the UI with hot reload on 127.0.0.1:8480
 make test-integration    # integration tests against the dev stack (starts and stops it as needed)
 make dev-down
+make dev-up-embedded     # the all-in-one variant: bundled minidspd + mock device, UI on 127.0.0.1:8481
+make test-embedded       # build the image and test it in embedded + mock mode
 ```
 
 The dev stack (`docker-compose.dev.yml`) runs the real `minidspd` 0.1.12 against its built-in mock device, so no
-hardware is needed. `tests/integration/MOCK_NOTES.md` lists what the mock does and doesn't simulate. To run the app
+hardware is needed. Its `webui` service runs in external mode against a separate mock daemon container; the
+`embedded` profile runs the image the way production does, with the bundled daemon and its mock device.
+`tests/integration/MOCK_NOTES.md` lists what the mock does and doesn't simulate. To run the app
 outside Docker against it: `MINIDSPD_URL=http://127.0.0.1:15380 DB_PATH=.devdata/local.sqlite3 uv run python -m
 app.main`.
 
@@ -211,7 +336,8 @@ a real broker.
 ### How it works
 
 - A FastAPI backend talks to `minidspd`'s HTTP API (default `http://127.0.0.1:5380`) and keeps one live status
-  stream open per device.
+  stream open per device. In the all-in-one image the app also runs that `minidspd` as a child process: it writes the
+  daemon's config to a tmpfs, restarts it if it exits and stops it on shutdown (`tini` is PID 1).
 - Desired state, the last confirmed device state, history, profiles and the event log live in SQLite. Database
   writes are debounced and the event log is trimmed daily, to spare SD cards.
 - One writer per device coalesces edits (a slider drag becomes a few writes, not hundreds), checks the active preset

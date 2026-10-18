@@ -5,14 +5,25 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.daemon.embedded import DEFAULT_CONFIG_DIR, DEFAULT_HTTP_BIND, EmbeddedConfigError, daemon_url_for_bind
+
 
 class Settings(BaseSettings):
     """Every setting comes from an environment variable of the same name (upper-case)."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Daemon / server
+    # Daemon / server. MINIDSPD_MODE: "embedded" runs the bundled minidspd as a child process (the all-in-one image),
+    # "external" talks to MINIDSPD_URL. Unset, it is "external" when MINIDSPD_URL is set (deployments from before the
+    # embedded daemon keep working) and "embedded" otherwise. In embedded mode MINIDSPD_URL follows MINIDSPD_HTTP_BIND.
+    minidspd_mode: Literal["embedded", "external"] | None = None
     minidspd_url: str = "http://127.0.0.1:5380"
+    minidspd_mock: bool = False  # embedded: add minidspd's mock 2x4HD (demo / dev without hardware)
+    minidspd_http_bind: str = DEFAULT_HTTP_BIND  # embedded: where the daemon's HTTP API listens inside the container
+    minidspd_discovery: bool = False  # embedded: let the daemon pick up network devices (WI-DG) that advertise
+    minidspd_extra_config: str = ""  # embedded: raw TOML merged into the generated daemon config (escape hatch)
+    minidspd_binary: str = "minidspd"
+    minidspd_config_dir: str = DEFAULT_CONFIG_DIR  # a tmpfs in the image; falls back to a temp dir if not writable
     daemon_timeout_s: float = 5.0
     webui_bind: str = "0.0.0.0"
     webui_port: int = 8480
@@ -70,6 +81,21 @@ class Settings(BaseSettings):
         if self.gain_min_db >= self.gain_max_db:
             raise ValueError(f"GAIN_MIN_DB ({self.gain_min_db}) must be below GAIN_MAX_DB ({self.gain_max_db})")
         return self
+
+    @model_validator(mode="after")
+    def _resolve_daemon_mode(self) -> "Settings":
+        if self.minidspd_mode is None:
+            self.minidspd_mode = "external" if "minidspd_url" in self.model_fields_set else "embedded"
+        if self.minidspd_mode == "embedded":
+            try:
+                self.minidspd_url = daemon_url_for_bind(self.minidspd_http_bind)
+            except EmbeddedConfigError as exc:
+                raise ValueError(str(exc)) from None
+        return self
+
+    @property
+    def embedded_daemon(self) -> bool:
+        return self.minidspd_mode == "embedded"
 
     @field_validator("verify_at")
     @classmethod

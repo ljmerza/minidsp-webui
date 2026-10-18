@@ -1,25 +1,33 @@
 COMPOSE_DEV := docker compose -f docker-compose.dev.yml
+EMBEDDED_IMAGE ?= minidsp-webui:embedded-test
 
-.PHONY: help dev-up dev-down dev-logs lint format test test-integration
+.PHONY: help dev-up dev-up-embedded dev-down dev-logs lint format test test-integration image test-embedded
 
 help:
 	@echo "dev-up            build and start the dev stack (mock minidspd on 127.0.0.1:15380, webui on 127.0.0.1:8480)"
-	@echo "dev-down          stop and remove the dev stack"
+	@echo "dev-up-embedded   build and start the all-in-one dev UI (bundled minidspd + mock device) on 127.0.0.1:8481"
+	@echo "dev-down          stop and remove the dev stack (both variants)"
 	@echo "dev-logs          follow the dev stack's logs"
 	@echo "lint              ruff check + format check"
 	@echo "format            ruff format + import sorting"
 	@echo "test              unit tests (no docker needed)"
 	@echo "test-integration  integration tests against the dev stack (starts/stops it if it isn't running)"
+	@echo "image             build the production image as \$$(EMBEDDED_IMAGE) for linux/amd64"
+	@echo "test-embedded     build the image and run it in embedded+mock mode (tests/integration/test_embedded.py)"
 
 dev-up:
 	mkdir -p .devdata
 	$(COMPOSE_DEV) up -d --build --wait
 
+dev-up-embedded:
+	mkdir -p .devdata
+	$(COMPOSE_DEV) --profile embedded up -d --build --wait webui-embedded
+
 dev-down:
-	$(COMPOSE_DEV) down --remove-orphans
+	$(COMPOSE_DEV) --profile embedded down --remove-orphans
 
 dev-logs:
-	$(COMPOSE_DEV) logs -f --tail=200
+	$(COMPOSE_DEV) --profile embedded logs -f --tail=200
 
 lint:
 	uv run ruff check .
@@ -34,3 +42,9 @@ test:
 
 test-integration:
 	scripts/test-integration.sh
+
+image:
+	docker build --platform linux/amd64 -t $(EMBEDDED_IMAGE) .
+
+test-embedded: image
+	EMBEDDED_IMAGE=$(EMBEDDED_IMAGE) uv run pytest -m integration tests/integration/test_embedded.py -rfxX

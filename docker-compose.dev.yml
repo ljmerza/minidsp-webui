@@ -1,5 +1,10 @@
 # Dev stack: the web UI (hot reload) against a mock minidspd. No hardware needed.
 #   make dev-up / make dev-down / make test-integration
+#
+# Two ways to run it:
+#   - default: `webui` in external mode against the separate `minidspd-mock` container (what the integration tests use)
+#   - profile "embedded": `webui-embedded` runs the bundled minidspd itself with its mock 2x4HD and no USB, like the
+#     all-in-one image does in production (`make dev-up-embedded`, http://127.0.0.1:8481 by default)
 name: minidsp-webui-dev
 
 services:
@@ -17,6 +22,7 @@ services:
     build: .
     image: minidsp-webui-dev/webui:dev
     environment:
+      MINIDSPD_MODE: external
       MINIDSPD_URL: http://minidspd-mock:5380
       DB_PATH: /data/dev.sqlite3
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -37,3 +43,27 @@ services:
     depends_on:
       minidspd-mock:
         condition: service_healthy
+
+  webui-embedded:
+    profiles: ["embedded"]
+    build: .
+    image: minidsp-webui-dev/webui:dev
+    environment:
+      MINIDSPD_MODE: embedded
+      MINIDSPD_MOCK: "true"
+      DB_PATH: /data/dev-embedded.sqlite3
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./app:/app/app
+      - ./.devdata:/data
+      - ./migrations:/app/migrations:ro
+    tmpfs:
+      - /run/minidsp:mode=1777,size=1m
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8480", "--reload", "--reload-dir", "/app/app"]
+    ports:
+      - "${WEBUI_DEV_BIND:-127.0.0.1}:${WEBUI_EMBEDDED_PORT:-8481}:8480"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8480/healthz', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

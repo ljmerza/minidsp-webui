@@ -43,8 +43,11 @@ async def ctx(tmp_path):
         try:
             async with app.router.lifespan_context(app):
                 manager = app.state.manager
-                for _ in range(100):
-                    if manager.get(SERIAL):
+                # Discovery registers the session before it loads state and calls start(); wait for start(), or a
+                # status arriving in between would never reach the master audit's baseline.
+                for _ in range(500):
+                    found = manager.get(SERIAL)
+                    if found is not None and found._watcher is not None:
                         break
                     await asyncio.sleep(0.01)
                 session = manager.get(SERIAL)
