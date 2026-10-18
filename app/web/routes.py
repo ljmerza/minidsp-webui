@@ -221,15 +221,17 @@ async def dashboard_outputs_context(
     }
 
 
-@router.get("/", response_class=HTMLResponse, name="dashboard")
+@router.get("/meters", response_class=HTMLResponse, name="meters")
 async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse:
+    """Meters & graph: the dashboard that was the start page until Home took ``/`` (phase 9 design §12.3). The
+    signal-flow diagram it carried for a while lives on Home now."""
     session = _pick_session(request, serial)
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DASHBOARD_TOPICS)
     status = session.status if session else None
     ctx.update(
-        title="Dashboard",
+        title="Meters & graph",
         input_names=[child.label for child in _nav_children(ctx["nav"], "/inputs")],
         response_view=graph_defaults(request)["view"] or "sub",
         initial_levels={
@@ -237,7 +239,6 @@ async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse
             "o": list(status.output_levels) if status else [],
         },
         **await dashboard_outputs_context(request, session, ctx["nav"]),
-        **await flow.flow_context(request, session),
     )
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 

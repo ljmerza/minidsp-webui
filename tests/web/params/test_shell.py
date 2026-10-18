@@ -51,8 +51,9 @@ async def test_sidebar_has_the_three_groups_and_keeps_every_page(ctx):
         assert f">{label}</a>" in settings and f'href="{path}"' in settings, label
     assert "Combined response" in settings  # listed (not mounted in this test app)
     assert 'href="/outputs/1"' in settings and 'href="/inputs/2"' in settings
-    # Pages later PRs add aren't listed until they exist.
-    assert "Guided tasks" not in nav and "Meters &amp; graph" not in nav
+    # Pages later PRs add aren't listed until they exist; Meters & graph (PR 9) is.
+    assert "Guided tasks" not in nav
+    assert '<a href="/meters">Meters &amp; graph</a>' in settings and '<a href="/outputs">Outputs</a>' in settings
     assert '<a href="/routing" aria-current="page">Routing</a>' in nav
 
 
@@ -86,7 +87,7 @@ def test_help_me_lists_seven_tasks_then_the_glossary_with_fallbacks_until_the_wi
         "Glossary",
     ]
     assert entries[-1]["href"] == "/help"
-    today = {"/", "/profiles", "/device#adopt", "/outputs/1?tab=peq", "/outputs/1?tab=delay"}
+    today = {"/", "/outputs", "/meters", "/profiles", "/device#adopt", "/outputs/1?tab=peq", "/outputs/1?tab=delay"}
     assert {e["href"] for e in entries[:-1]} <= today
 
 
@@ -150,7 +151,7 @@ async def test_header_rows_mute_all_clip_and_help_me(ctx):
     assert 'id="hdr-helpme-list"' in top and "Set up this device" in top and 'href="/help">Glossary' in top
     assert 'id="master-mute"' in bottom and '<span class="mute-word">Mute all</span>' in bottom
     assert 'id="master-volume"' in bottom and 'class="hdr-sheet-toggle vol-open"' in bottom
-    assert "hdr-clip-led" in bottom and 'href="/#levels-title">Show the meters' in bottom
+    assert "hdr-clip-led" in bottom and 'href="/meters">Show the meters' in bottom  # Meters & graph (design §12.3)
     # The phone's "P1 ▾" and short status word.
     assert re.search(r"P1 &#9662;", top)
     assert '<span class="st-short" aria-hidden="true">' in top

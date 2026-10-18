@@ -27,10 +27,10 @@ class GuidedTask:
 # its entry opens the page where that job is done today.
 TASKS: tuple[GuidedTask, ...] = (
     GuidedTask("diagnose", "Something wrong?", "/"),
-    GuidedTask("louder", "Make one louder", "/"),
+    GuidedTask("louder", "Make one louder", "/outputs"),
     GuidedTask("eq-cut", "Fix a boom", "/outputs/1?tab=peq"),
     GuidedTask("line-up", "Line up shakers", "/outputs/1?tab=delay"),
-    GuidedTask("set-levels", "Set levels", "/"),
+    GuidedTask("set-levels", "Set levels", "/meters"),
     GuidedTask("profiles", "Save or load a setup", "/profiles"),
     GuidedTask("adopt", "Set up this device", "/device#adopt"),
 )

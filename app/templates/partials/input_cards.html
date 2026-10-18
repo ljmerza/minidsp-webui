@@ -1,0 +1,52 @@
+{#- The input cards of /inputs (phase 9 design §4.5): each input's sentence from the summary engine ("Level 0 dB, no
+    EQ. Sent to Shakers (+4 dB), Out 3 and Out 4."), its meter, any problems with their fixes, and a link to its
+    full page. Re-fetched from /ui/home/inputs. Context: app/web/home.py inputs_context(). -#}
+{%- macro input_fix(fx) -%}
+  {%- if fx.values and inputs_edit_url -%}
+    <button type="button" class="btn-small home-fix" data-shell-fix data-url="{{ inputs_edit_url }}"
+            data-preset="{{ inputs_preset }}" data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}'
+            data-done="{{ fx.done }}">{{ fx.label }}</button>
+  {%- elif fx.href -%}
+    <a class="btn-link btn-small home-fix" href="{{ fx.href }}">{{ fx.label }}</a>
+  {%- endif -%}
+{%- endmacro -%}
+{% if inputs is none %}
+  <p class="hint home-waiting">Waiting for the device's settings&hellip;</p>
+{% else %}
+  <ul class="home-cards input-cards">
+    {% for v in inputs %}
+      {%- set i = v.i -%}
+      <li class="output-card home-card input-card" id="home-in{{ i.index + 1 }}" data-input="{{ i.index }}">
+        <div class="home-card-head output-head">
+          <h3><a href="{{ v.href }}">{{ i.name }}</a></h3>
+          {% if i.unused %}
+            <span class="home-badge"><span class="health-badge health-not_in_use"><span class="health-glyph" aria-hidden="true">&#9676;</span> Not in use</span>{{ help("not-in-use") }}</span>
+          {% elif i.muted %}
+            <span class="home-badge"><span class="health-badge health-muted"><span class="health-glyph" aria-hidden="true">&#128263;</span> Muted</span>{{ help("mute") }}</span>
+          {% endif %}
+        </div>
+        <p class="output-sentence">{{ i.sentence }}</p>
+        {% for p in v.issues %}
+          <p class="output-reason health-{{ 'silent' if p.level == 'problem' else 'check' }}">{{ p.text }}
+            {%- for fx in v.issue_fixes[loop.index0] %} {{ input_fix(fx) }}{% endfor %}</p>
+        {% endfor %}
+        {% for p in v.notes %}
+          <p class="home-note"><span aria-hidden="true">&#9432;</span> {{ p.text }}
+            {%- for fx in v.note_fixes[loop.index0] %} {{ input_fix(fx) }}{% endfor %}</p>
+        {% endfor %}
+        <div class="home-card-meter">
+          <span class="home-meter" role="meter" aria-label="{{ i.name }} level" aria-valuemin="-120" aria-valuemax="0"
+                aria-valuenow="-120" :aria-valuenow="meterNow('{{ v.key }}')" :aria-valuetext="readout('{{ v.key }}')">
+            <span class="home-meter-track" aria-hidden="true"><span class="home-meter-bar" :style="hbarStyle('{{ v.key }}')"></span></span>
+            <span class="home-meter-value" aria-hidden="true" x-text="readout('{{ v.key }}')">&mdash;</span>
+          </span>
+          <button type="button" class="home-clip" :class="{ 'is-on': clip.{{ v.key }} }" @click="resetClip('{{ v.key }}')"
+                  aria-label="{{ i.name }} CLIP light" :aria-label="clipLabel('{{ v.key }}')">
+            <span aria-hidden="true">CLIP <span x-text="clip.{{ v.key }} ? '●' : '○'">&#9675;</span></span>
+          </button>
+        </div>
+        <p class="home-card-link"><a href="{{ v.href }}">All settings for {{ i.name }} <span aria-hidden="true">&rarr;</span></a></p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

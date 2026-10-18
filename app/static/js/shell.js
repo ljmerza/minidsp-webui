@@ -278,12 +278,18 @@
       return;
     }
     const { url, preset } = button.dataset;
-    const toggle = document.querySelector('#app-header .hdr-problems .hdr-sheet-toggle');
+    // The same fixes sit on Home (its health line and cards, /inputs): focus then stays on the page, on the card or
+    // the health line the button was in, since the button itself is about to be re-rendered.
+    const onPage = !button.closest('#app-header');
+    const scope = onPage ? button.closest('[data-fix-scope]') : null;
+    const toggle = onPage
+      ? button.closest('[data-output], [data-input]') || (scope && scope.querySelector('[tabindex="-1"]'))
+      : document.querySelector('#app-header .hdr-problems .hdr-sheet-toggle');
     button.setAttribute('aria-disabled', 'true');
     const ok = await send(url, values);
     button.removeAttribute('aria-disabled');
     if (!ok) return;
-    if (openSheet) openSheet.close(false);
+    if (openSheet && !onPage) openSheet.close(false);
     if (toggle && toggle.isConnected) toggle.focus();
     refreshHeader();
     const toast = mdsp().toast;

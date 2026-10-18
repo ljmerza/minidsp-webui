@@ -8,7 +8,7 @@
 {% else %}
 <ul class="profile-list">
   {% for p in l.profiles %}
-  <li class="profile-item" data-profile-id="{{ p.id }}" data-profile-name="{{ p.name }}">
+  <li class="profile-item" id="profile-{{ p.id }}" data-profile-id="{{ p.id }}" data-profile-name="{{ p.name }}">
     <div class="profile-head">
       <h3>{{ p.name }}</h3>
       {% if p.product_name %}<span class="muted">{{ p.product_name }}</span>{% endif %}

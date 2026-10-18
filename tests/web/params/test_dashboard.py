@@ -1,4 +1,4 @@
-"""Dashboard output cards and sidebar names backed by the real preset state."""
+"""Meters & graph (the old dashboard, now at /meters) output cards and sidebar names backed by the real preset state."""
 
 import re
 
@@ -29,7 +29,7 @@ def _button(card: str, action: str, step: str | None = None) -> str:
 
 
 async def test_output_cards_show_desired_values_and_sync(ctx):
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     assert "not tracked yet" not in html
     first = _card(html, 0)
     assert "sync-unknown" in first and "bypassed" in first
@@ -37,7 +37,7 @@ async def test_output_cards_show_desired_values_and_sync(ctx):
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     await ctx.session.edit(0, {"outputs": {"1": {"gain_db": -4.5, "delay_ms": 1.5}}})
     await ctx.settle()
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     second = _card(html, 1)
     assert "−4.5 dB" in second and "1.50 ms" in second
     assert "sync-synced" in second
@@ -45,14 +45,14 @@ async def test_output_cards_show_desired_values_and_sync(ctx):
 
 async def test_saved_channel_names_appear_in_nav_and_dashboard(ctx):
     await ctx.session.set_channel_meta("output", 3, name="Shakers")
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     assert 'href="/outputs/4"' in html
     assert re.search(r'href="/outputs/4"[^>]*>\s*Shakers', html)
     assert "<h3>Shakers</h3>" in html
 
 
 async def test_output_cards_have_quick_mute_and_gain_nudge_for_the_active_preset(ctx):
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     assert f'data-edit-url="/ui/devices/{SERIAL}/presets/0/edit"' in html and 'data-preset="0"' in html
     tag = _card_tag(html, 0)
     assert 'data-output="0"' in tag and 'data-gain="0.0"' in tag and 'data-mute="false"' in tag
@@ -89,7 +89,7 @@ async def test_gain_nudges_stop_at_the_ceiling_and_the_floor(ctx):
 
 
 async def test_cards_fragment_follows_edits_from_elsewhere_and_the_active_preset(ctx):
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     assert "−6.0 dB" not in _card(html, 3)
 
     await ctx.session.edit(0, {"outputs": {"3": {"gain_db": -6.0}}}, source="mqtt")  # Home Assistant, another tab...
@@ -148,7 +148,7 @@ async def test_output_cards_say_what_each_output_does_and_flag_the_silent_one(ct
 
     # "Not in use" folds the muted output's note into its badge
     await ctx.session.set_channel_meta("output", 2, unused=True)
-    out3 = _card((await ctx.http.get("/")).text, 2)
+    out3 = _card((await ctx.http.get("/meters")).text, 2)
     assert "Not in use: muted." in out3 and 'data-health-badge="not_in_use"' in out3
 
     # fixing the route turns the Sub ready

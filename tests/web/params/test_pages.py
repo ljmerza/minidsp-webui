@@ -150,10 +150,13 @@ async def test_output_page_strip_and_delay_tab(ctx):
 async def test_unknown_channel_and_redirects(ctx):
     assert (await ctx.http.get("/outputs/5")).status_code == 404
     assert (await ctx.http.get("/inputs/0")).status_code == 404
+    # a link that names a preset still opens that preset's first channel; the bare URL is the overview (design §4.5)
     response = await ctx.http.get("/outputs?preset=2", follow_redirects=False)
     assert response.status_code == 307 and response.headers["location"] == "/outputs/1?preset=2"
+    response = await ctx.http.get("/inputs?preset=1", follow_redirects=False)
+    assert response.status_code == 307 and response.headers["location"] == "/inputs/1?preset=1"
     response = await ctx.http.get("/inputs", follow_redirects=False)
-    assert response.headers["location"] == "/inputs/1"
+    assert response.status_code == 200 and "<h1>Inputs</h1>" in response.text
 
 
 async def test_unknown_serial_is_404(ctx):

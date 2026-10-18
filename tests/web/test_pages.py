@@ -18,7 +18,7 @@ def _attr(html: str, element_id: str) -> str:
 
 
 async def test_dashboard_renders_header_meters_and_cards(http):
-    response = await http.get("/")
+    response = await http.get("/meters")  # Meters & graph: the dashboard that was "/" until Home (phase 9 design §12.3)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     html = response.text
@@ -208,7 +208,7 @@ async def test_dashboard_outputs_fragment(http):
 
 async def test_graph_defaults_reach_every_page(manager):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=make_app(manager)), base_url="http://t") as http:
-        html = (await http.get("/")).text
+        html = (await http.get("/meters")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view=""' in body and 'data-graph-db="24"' in body  # "auto": each page keeps its own view
     assert '"view": "sub"' in html and "5–300 Hz, playing preset" in html
@@ -216,7 +216,7 @@ async def test_graph_defaults_reach_every_page(manager):
     settings = Settings(_env_file=None, minidspd_url="http://daemon.invalid:5380", graph_view="full", graph_db_range=30)
     app = make_app(manager, settings)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as http:
-        html = (await http.get("/")).text
+        html = (await http.get("/meters")).text
         device = (await http.get("/device")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view="full"' in body and 'data-graph-db="30"' in body
@@ -231,7 +231,7 @@ async def test_device_page_without_device():
     assert "No device" in html and "connecting" in html
 
 
-@pytest.mark.parametrize("path", ["/", "/device"])
+@pytest.mark.parametrize("path", ["/", "/meters", "/inputs", "/outputs", "/device"])
 async def test_unknown_serial_is_404(http, path):
     response = await http.get(path, params={"serial": 1})
     assert response.status_code == 404

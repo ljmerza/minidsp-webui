@@ -11,6 +11,9 @@ from tests.e2e.server import AppServer
 # Every page, as it is linked from the navigation.
 PAGES = [
     "/",
+    "/meters",
+    "/inputs",
+    "/outputs",
     "/outputs/1",
     "/outputs/1?tab=crossover",
     "/outputs/1?tab=peq",
@@ -28,7 +31,7 @@ PAGES = [
 # axe findings in today's UI that later phase 9 PRs fix (design §16.2: "dimmed blocks use a lighter text colour, not
 # opacity"; PR 15 reworks the graphs, PR 17 runs axe on every page). Anything else on these pages fails the test.
 KNOWN_VIOLATIONS: dict[str, set[str]] = {
-    "/": {"color-contrast"},  # the dim CLIP lamps on the meters
+    "/meters": {"color-contrast"},  # the dim CLIP lamps on the meters
     "/outputs/1?tab=peq": {"color-contrast"},  # dimmed (bypassed) PEQ rows
     "/inputs/1": {"color-contrast"},  # dimmed (bypassed) PEQ rows
     "/system": {"aria-prohibited-attr"},  # aria-label on the graph's plain <div>

@@ -1,12 +1,8 @@
 {% extends "base.html" %}
 {% import "components/peq_editor.html" as fx with context %}
 
-{% block head %}
-<link rel="stylesheet" href="{{ root }}/static/css/flow.css?v={{ asset_version }}">
-{% endblock %}
-
 {% block content %}
-<h1 class="visually-hidden">Dashboard</h1>
+<h1 class="visually-hidden">Meters &amp; graph</h1>
 
 {% if session is none %}
   <section class="card empty-state">
@@ -20,8 +16,6 @@
 <div class="dashboard"
      x-data='levelMeters({{ {"inputs": input_names, "outputs": output_names, "initial": initial_levels}|tojson }})'
      hx-trigger="sse:levels">
-
-  {% include "partials/flow_card.html" %}
 
   <section class="card meters-card" aria-labelledby="levels-title">
     <div class="card-head">
@@ -97,6 +91,5 @@
 {% block scripts %}
 <script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
 <script src="{{ root }}/static/js/dashboard.js?v={{ asset_version }}"></script>
-<script src="{{ root }}/static/js/flow.js?v={{ asset_version }}"></script>
 {% if session is not none %}{{ fx.assets() }}{% endif %}
 {% endblock %}

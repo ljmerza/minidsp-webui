@@ -97,6 +97,19 @@
           return `clip-path: inset(${((1 - fraction) * 100).toFixed(2)}% 0 0 0)`;
         },
 
+        // A horizontal bar (Home's cards and meter strip): the same scale, filling from the left.
+        hbarStyle(key) {
+          const fraction = this.stale ? 0 : meterFraction(this.level[key]);
+          return `clip-path: inset(0 ${((1 - fraction) * 100).toFixed(2)}% 0 0)`;
+        },
+
+        // aria-valuenow of a role="meter" (dBFS on the meter's −120…0 scale; the floor without data).
+        meterNow(key) {
+          const v = this.level[key];
+          if (this.stale || v === null || !Number.isFinite(v)) return FLOOR_DB;
+          return Math.round(Math.max(FLOOR_DB, Math.min(0, v)) * 10) / 10;
+        },
+
         peakStyle(key) {
           return `bottom: ${(meterFraction(this.peak[key]) * 100).toFixed(2)}%`;
         },

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{#- /outputs (phase 9 design §4.5): every output as a Home card, larger and none folded; each links to its full page.
+    Context from app/web/home.py. The cards' meters bind to this page's levelMeters component. -#}
+
+{% block head %}
+<link rel="stylesheet" href="{{ root }}/static/css/home.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+<h1>Outputs</h1>
+{% if session is none %}
+  <section class="card empty-state">
+    <h2>No device</h2>
+    <p>{{ conn_label }}. This page fills in as soon as minidspd reports a supported device.</p>
+  </section>
+{% else %}
+<div class="home home-overview"
+     x-data='levelMeters({{ {"inputs": input_names, "outputs": output_names, "initial": initial_levels}|tojson }})'
+     hx-trigger="sse:levels">
+  <h2 class="visually-hidden" id="overview-title">Outputs of the playing preset</h2>
+  <p class="hint home-overview-hint">The playing preset's outputs. Open one for all its settings (band, EQ, delay,
+    compressor and the response graph).</p>
+  <section class="home-outputs" aria-labelledby="overview-title" x-data="outputCards" hx-trigger="sse:master">
+    <div class="home-cards-box" data-output-cards hx-get="{{ cards_url }}"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh" hx-swap="innerHTML">
+      {% include "partials/home_cards.html" %}
+    </div>
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/dashboard.js?v={{ asset_version }}"></script>
+{% endblock %}

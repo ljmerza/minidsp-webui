@@ -1,0 +1,162 @@
+/* Home (phase 9 design §4) and the /inputs and /outputs overview pages. Dark theme; mobile first. */
+
+.home { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+.home .card { margin: 0; }
+.home-more { font-size: 0.9rem; white-space: nowrap; }
+.home-sub { font-size: 0.95rem; margin: 0.9rem 0 0.4rem; }
+
+/* --- health line ------------------------------------------------------------------------------------------------- */
+
+.home-health-card { padding-top: 0.7rem; padding-bottom: 0.7rem; }
+.home-health-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.home-health-item { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
+.home-health-text { flex: 1 1 22rem; min-width: 0; }
+.home-health-item.health-problem .home-health-text { color: var(--bad); }
+.home-health-item.health-caution .home-health-text { color: var(--warn); }
+.home-health-item.health-info .home-health-text { color: var(--text-muted); }
+.home-health-glyph { display: inline-block; min-width: 1.3em; }
+.home-health-fixes { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
+.home-health-ok { margin: 0; color: var(--ok); }
+.home-health-none { margin: 0; color: var(--text-muted); }
+.home-health-foot { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem 1rem; margin-top: 0.5rem; }
+.home-health-foot:empty { display: none; }
+.home-notes { flex: 1 1 20rem; }
+.home-notes summary { cursor: pointer; color: var(--text-muted); min-height: 2rem; display: inline-flex; align-items: center; gap: 0.3rem; }
+.home-notes .home-health-list { margin-top: 0.4rem; }
+.home-diagnose { margin-left: auto; }
+
+/* --- output cards ------------------------------------------------------------------------------------------------ */
+
+.home-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 700px) { .home-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .home-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .home-cards.is-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.home-card { padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.35rem; scroll-margin-top: 7rem; }
+.home-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-card:target { border-color: var(--accent); }
+.home-card-head { align-items: center; flex-wrap: wrap; }
+.home-card-head h3 a { color: var(--text); text-decoration: none; }
+.home-card-head h3 a:hover, .home-card-head h3 a:focus-visible { text-decoration: underline; }
+.home-badge { display: inline-flex; align-items: center; gap: 0.15rem; }
+.home-card .output-sentence { margin: 0; }
+.home-card .output-reason { margin: 0; }
+.home-fix { color: var(--text); }
+.home-card-fixes { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; margin-left: 0.35rem; }
+
+/* Level, total: big −/+ around the number (56 px on phones, design §16). */
+.home-level { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.75rem; margin-top: 0.35rem; }
+.home-step { min-width: 3rem; min-height: 3rem; font-size: 1.5rem; line-height: 1; padding: 0 0.6rem; font-weight: 600; }
+.home-total { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.home-total-value { font-size: 1.6rem; font-weight: 650; letter-spacing: 0.01em; white-space: nowrap; }
+.home-total-label { font-size: 0.85rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 0.15rem; }
+.home-breakdown { margin: 0; text-align: center; color: var(--text-muted); font-size: 0.85rem; }
+.home-notes-box:empty { display: none; }
+.home-note { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--text); }
+.home-note[data-note="routes"] { color: var(--warn); }
+.home-note-max { color: var(--warn); }
+.home-headroom { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+.home-headroom.health-caution { color: var(--warn); }
+.home-headroom.health-problem { color: var(--bad); }
+
+/* The output's meter and CLIP light. */
+.home-card-meter { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.2rem; }
+.home-meter { display: inline-flex; align-items: center; gap: 0.4rem; flex: 1 1 auto; min-width: 0; }
+.home-meter-track { position: relative; flex: 1 1 auto; min-width: 3rem; height: 0.55rem; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.home-meter-bar { position: absolute; inset: 0;
+  background: linear-gradient(to right, var(--meter-green) 0%, var(--meter-green) 77.5%, var(--meter-yellow) 77.5%,
+    var(--meter-yellow) 94.4%, var(--meter-red) 94.4%);
+  transition: clip-path 0.12s linear; }
+@media (prefers-reduced-motion: reduce) { .home-meter-bar { transition: none; } }
+.home-meter-value { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; min-width: 5.2rem; }
+.home-clip { white-space: nowrap; min-height: 2rem; padding: 0.1rem 0.5rem; font-size: 0.75rem; letter-spacing: 0.04em; color: var(--text-muted); }
+.home-clip.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #000; font-weight: 700; }
+
+/* Mute keeps one width and sits well away from Adjust (P20). */
+.home-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.35rem; }
+.home-mute { width: 6rem; justify-content: center; min-height: 2.75rem; }
+.home-mute.is-muted { background: var(--bg-input); border-color: var(--warn); color: var(--warn); }
+.home-adjust { position: relative; margin-left: auto; }
+.home-adjust summary { list-style: none; display: inline-flex; align-items: center; gap: 0.3rem; min-height: 2.75rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); cursor: pointer; }
+.home-adjust summary::-webkit-details-marker { display: none; }
+.home-adjust summary:hover { border-color: var(--accent); }
+.home-adjust-menu { position: absolute; right: 0; bottom: calc(100% + 0.3rem); z-index: 15; list-style: none; margin: 0;
+  padding: 0.3rem 0; min-width: 13rem; background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.home-adjust-menu a { display: flex; align-items: center; min-height: 2.5rem; padding: 0.2rem 0.9rem; color: var(--text);
+  text-decoration: none; }
+.home-adjust-menu a:hover, .home-adjust-menu a:focus-visible { background: var(--bg-input); }
+.home-card-link { margin: 0.2rem 0 0; font-size: 0.9rem; }
+
+/* The folded "Not in use" line. */
+.home-fold { grid-column: 1 / -1; align-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; padding: 0.6rem 0.9rem;
+  border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-muted); }
+.home-fold-names { color: var(--text); font-weight: 600; }
+.home-fold-btn { margin-left: auto; min-height: 2.75rem; }
+.home-first-run { padding: 0.5rem 0; }
+.home-first-run p { margin: 0 0 0.6rem; }
+.home-first-run-btn { min-height: 2.75rem; display: inline-flex; align-items: center; }
+
+/* --- meter strip ------------------------------------------------------------------------------------------------- */
+
+.home-strip { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+.home-strip-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-bottom: 0.4rem; }
+.home-strip-head h2 { margin: 0 auto 0 0; font-size: 1rem; }
+.home-strip-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+.home-strip-item { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.home-strip-name { flex: 0 0 5.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+.home-meter.is-small .home-meter-value { min-width: 4.8rem; font-size: 0.75rem; }
+
+/* --- presets & profiles, guided tasks ---------------------------------------------------------------------------- */
+
+.home-pair { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1000px) { .home-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.home-playing { margin: 0 0 0.4rem; }
+.home-waiting-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.home-waiting-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
+.home-waiting-actions { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
+.home-profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.home-profile, .home-profile-save { min-height: 2.75rem; display: inline-flex; align-items: center; padding: 0.2rem 0.9rem; }
+.home-task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.home-task-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; }
+.home-task { min-width: 11rem; min-height: 2.75rem; display: inline-flex; align-items: center; padding: 0.2rem 0.9rem; }
+.home-task-hint { color: var(--text-muted); font-size: 0.85rem; }
+.home-overview-hint { margin: 0 0 var(--gap); }
+
+/* --- phone (design §4.2, §16) ------------------------------------------------------------------------------------ */
+
+@media (max-width: 599px), (pointer: coarse) {
+  .home-step { min-width: 56px; min-height: 56px; }
+  .home-clip { min-height: 44px; min-width: 44px; }
+  .home-notes summary { min-height: 44px; }
+  .home-adjust-menu a { min-height: 44px; }
+  .home-more { display: inline-flex; align-items: center; min-height: 44px; }
+}
+@media (max-width: 599px) {
+  /* The first phone screen holds the health line, the flow list and the first card's level control (design §4.2):
+     the cards stand on their own (no wrapping card), the health line keeps one fix per item (the rest are on the
+     cards and in the problems pill), and spacing is tighter. */
+  .home { gap: 0.35rem; }
+  .home-health-card { padding: 0.5rem 0.75rem; }
+  .home-health-list { gap: 0.3rem; }
+  .home-health-item { gap: 0.25rem 0.5rem; }
+  .home-health-fixes > :not(:first-child) { display: none; }
+  .home-health-item.health-caution .home-health-fixes { display: none; } /* "Set levels…" is on the card too */
+  .home .flow-card { padding: 0.6rem 0.75rem; }
+  .home .flow-card .card-head { margin-bottom: 0.3rem; }
+  .home .flow-list-unrouted { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+  .home .flow-list-unrouted .flow-list-fix { margin-top: 0; }
+  .home-health-foot { margin-top: 0; }
+  .home-notes { display: none; } /* notes stay in the header's problems list (design §4.2 shows none here) */
+  .home-outputs { padding: 0; border: 0; background: none; }
+  .home-outputs > .card-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .home-card { padding: 0.55rem 0.75rem; gap: 0.2rem; }
+  .home-level { margin-top: 0.15rem; }
+  .home-total-value { font-size: 1.5rem; }
+  .home-strip-list { grid-template-columns: minmax(0, 1fr); }
+  .home-task { min-width: 0; flex: 1 1 auto; }
+  .home-task-hint { flex: 1 1 100%; }
+  .home-diagnose { margin-left: 0; }
+}

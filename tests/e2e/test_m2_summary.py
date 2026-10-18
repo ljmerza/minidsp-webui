@@ -1,5 +1,6 @@
-"""Phase 9 PR 6 (summary and diagnosis engine) in a real browser: the dashboard's output cards say what each output
-does and flag the silent one, and the summary API reads the same.
+"""Phase 9 PR 6 (summary and diagnosis engine) in a real browser: the output cards of Meters & graph (the old
+dashboard, at /meters since PR 9) say what each output does and flag the silent one, and the summary API reads the
+same.
 
 The state is the one the walkthroughs left the mock in (design 4.1 / 6.2): In 1 feeds Shakers (+4 dB route, +12 dB
 output, 20-80 Hz Linkwitz-Riley 24 dB/oct, a 4 dB cut at 40 Hz, 8.75 ms), Out 3 and Out 4 (both muted); the Sub's
@@ -69,7 +70,7 @@ def test_the_summary_api_reads_the_worked_examples(api: Api):
 
 
 def test_the_cards_say_what_each_output_does(screen: Page, shoot):
-    visit(screen, "/")
+    visit(screen, "/meters")
     cards = screen.locator(".output-card")
     for n, (name, sentence) in enumerate(WORKED_EXAMPLES.items()):
         card = cards.nth(n)
@@ -101,7 +102,7 @@ def test_marking_an_output_not_in_use_folds_its_note(screen: Page, api: Api, sho
     expect(screen.locator("#settings-channels .form-saved")).to_have_text("Saved.")
     assert api._ok(api.http.get(f"{api.dev}/presets/0/summary"))["outputs"][3]["badge"] == "not_in_use"
 
-    visit(screen, "/")
+    visit(screen, "/meters")
     out4 = screen.locator(".output-card").nth(3)
     expect(out4.locator(".output-sentence")).to_have_text("Not in use: muted.")
     expect(out4.locator("[data-health-badge]")).to_have_text("◌ Not in use")

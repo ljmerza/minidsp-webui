@@ -83,7 +83,7 @@ async def test_input_page_has_the_peq_editor(ctx):
 
 
 async def test_dashboard_response_widget(ctx):
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     cfg = _component(html, "responseView")
     assert cfg["url"] == f"/ui/devices/{SERIAL}/response"
     assert cfg["view"] == "sub" and cfg["preset"] is None

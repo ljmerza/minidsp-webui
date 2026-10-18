@@ -453,6 +453,9 @@ textarea { width: 100%; font-family: var(--mono); font-size: 0.85rem; resize: ve
 .settings-form .field { margin-bottom: var(--gap); }
 .settings-form .field > label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
 .settings-form .check { display: block; margin: 0.5rem 0; }
+/* Settings → Start page (phase 9 design §12.2). */
+.start-page { border: 0; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+.start-page .check { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; flex-wrap: wrap; }
 .settings-form .check .hint { display: block; margin: 0.15rem 0 0 1.6rem; }
 .settings-table input[type="text"] { width: 100%; min-width: 8rem; }
 

@@ -149,7 +149,7 @@ def test_terms_have_toggletips_on_the_editing_pages(screen: Page, shoot):
         ("/outputs/1?tab=crossover", "output-band", ["Band (crossover)", "Templates", "Steepness"]),
         ("/outputs/1?tab=peq", "output-eq", ["EQ", "Filter type", "Width (Q)", "Cut / Boost"]),
         ("/outputs/1?tab=compressor", "output-compressor", ["Compressor (limiter)", "dBFS"]),
-        ("/", "dashboard", ["Meter / peak hold", "CLIP light", "Calculated response"]),
+        ("/meters", "dashboard", ["Meter / peak hold", "CLIP light", "Calculated response"]),
         ("/profiles", "profiles", ["Profile", "Store / Store and play now"]),
         ("/system", "combined-response", ["Calculated response", "Magnitude / phase"]),
         ("/settings", "settings", ["Level limit"]),

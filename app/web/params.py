@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from app.api.deps import require_same_origin
@@ -224,14 +224,8 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     return render(request, "routing.html", ctx)
 
 
-@router.get("/inputs", include_in_schema=False)
-async def inputs_index(request: Request) -> RedirectResponse:
-    return RedirectResponse(url(request, "/inputs/1", **dict(request.query_params)), status_code=307)
-
-
-@router.get("/outputs", include_in_schema=False)
-async def outputs_index(request: Request) -> RedirectResponse:
-    return RedirectResponse(url(request, "/outputs/1", **dict(request.query_params)), status_code=307)
+# /inputs and /outputs are the overview pages (phase 9 design §4.5, app/web/home.py); they used to redirect to the
+# first channel.
 
 
 def _channel_ctx(request: Request, session: DeviceSession, kind: str, index: int) -> dict[str, Any]:

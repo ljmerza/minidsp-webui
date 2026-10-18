@@ -123,7 +123,7 @@ def test_outputs_marked_not_in_use_fold_into_one_line(screen: Page, shoot):
 
 
 EXPECTED_BLOCKS = [
-    ("level", "Level +16 ▲max", "/outputs/1#gain-output-0"),
+    ("level", "Level +16 ▲max", "#home-out1"),  # on Home the Level block goes to the output's card (design §5.4)
     ("band", "Band 20–80 Hz", "/outputs/1?tab=crossover"),
     ("eq", "EQ 1 cut", "/outputs/1?tab=peq"),
     ("delay", "Delay 8.75", "/outputs/1?tab=delay"),
@@ -193,13 +193,13 @@ def test_the_diagram_is_accessible_and_says_each_route_once(screen: Page):
         expect(svg).to_have_attribute("aria-hidden", "true")
     tree = screen.locator(".flow-card").aria_snapshot()
     assert tree.count("+4 dB") == 1, tree  # in "Fed by In 1 at +4 dB", not again from the line's label
-    meter = screen.get_by_role("meter", name="Shakers level")
+    meter = flow(screen).get_by_role("meter", name="Shakers level")  # Home's cards and strip have their own
     expect(meter).to_have_attribute("aria-valuetext", re.compile(r"dBFS$|^no signal$"))
 
 
 def test_a_clip_is_announced_once(desktop: Page):
     visit(desktop, "/")
-    desktop.evaluate("() => { Alpine.$data(document.querySelector('.dashboard')).clip.o0 = true; }")
+    desktop.evaluate("() => { Alpine.$data(document.querySelector('[data-home]')).clip.o0 = true; }")
     status = desktop.locator(".flow-card [role=status]")
     expect(status).to_have_text("Shakers clipped")
     chip = row(desktop, "Shakers").get_by_role("button", name="Shakers clipped, press to reset")

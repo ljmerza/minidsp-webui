@@ -1,0 +1,100 @@
+{#- One output card (phase 9 design §4.1 / §4.3), shared by Home and /outputs. ``c`` is app/web/home.py card_view():
+    the summary's sentence and badge, Level, total with the −/+ level rule, the at-limit notes, the headroom line, the
+    output's meter and CLIP light (bound to the page's levelMeters component), Mute and Adjust ▾.
+    static/js/dashboard.js (outputCards) drives the buttons; the data-* attributes carry what it needs. -#}
+{%- macro card_fix(fx, edit_url, preset) -%}
+  {%- if fx.values and edit_url -%}
+    <button type="button" class="btn-small home-fix" data-shell-fix data-url="{{ edit_url }}" data-preset="{{ preset }}"
+            data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
+  {%- elif fx.href -%}
+    <a class="btn-link btn-small home-fix" href="{{ fx.href }}">{{ fx.label }}</a>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro output_card(c, edit_url, preset, extra_attrs="", overview=false) -%}
+{%- set o = c.o -%}
+{%- set st = c.state -%}
+{%- set t = o.total -%}
+{%- set plus_note = "routes" if c.plus.target == "routes" else ("max" if c.plus.disabled else "") -%}
+<li class="output-card home-card" id="{{ c.anchor }}" tabindex="-1" data-output="{{ o.index }}" data-name="{{ o.name }}"
+    data-gain="{{ t.output }}" data-mute="{{ o.muted|tojson }}" data-ceiling="{{ t.ceiling }}"
+    data-gain-min="{{ st.gain_min if st else -72 }}" data-never-synced="{{ (st.never_synced if st else false)|tojson }}"
+    data-routes='{{ c.routes_json|tojson }}' {{ extra_attrs|safe }}>
+  <div class="home-card-head output-head">
+    <h3><a href="{{ c.href }}">{{ o.name }}</a></h3>
+    <span class="home-badge">
+      <span class="health-badge health-{{ o.badge }}" data-health-badge="{{ o.badge }}">
+        <span class="health-glyph" aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}
+      </span>
+      {#- One literal help() per badge, so tests/web/test_glossary.py can check every id. -#}
+      {%- if o.badge == "silent" %}{{ help("b-silent") }}{% elif o.badge == "overload" %}{{ help("b-overload") }}
+      {%- elif o.badge == "muted" %}{{ help("b-muted") }}{% elif o.badge == "not_in_use" %}{{ help("b-not-in-use") }}
+      {%- elif o.badge == "check" %}{{ help("b-check") }}{% elif o.badge == "ready" %}{{ help("b-ready") }}{% endif %}
+    </span>
+  </div>
+  <p class="output-sentence">{{ o.sentence }}</p>
+  {% if c.reason %}
+    <p class="output-reason health-{{ o.badge }}">{{ c.reason.text }}
+      {%- if c.reason_fixes %}<span class="home-card-fixes">{% for fx in c.reason_fixes %} {{ card_fix(fx, edit_url, preset) }}{% endfor %}</span>{% endif -%}
+    </p>
+  {% endif %}
+
+  <div class="home-level" role="group" aria-labelledby="{{ c.anchor }}-level">
+    <button type="button" class="home-step" data-action="level" data-step="-0.5"
+            aria-label="{{ o.name }}: lower the output level by 0.5 dB" aria-describedby="{{ c.anchor }}-total"
+            {%- if c.minus.disabled or not edit_url %} disabled{% endif %}><span aria-hidden="true">&minus;</span></button>
+    <span class="home-total">
+      <span class="home-total-value" id="{{ c.anchor }}-total" data-total-text>{{ t.text }}</span>
+      <span class="home-total-label"><span id="{{ c.anchor }}-level">Level, total</span>{{ help("total") }}</span>
+    </span>
+    <button type="button" class="home-step" data-action="level" data-step="0.5"
+            aria-label="{{ o.name }}: raise the level by 0.5 dB" aria-describedby="{{ c.anchor }}-total {{ c.anchor }}-plus-note"
+            {%- if c.plus.disabled or not edit_url %} disabled{% endif %}><span aria-hidden="true">+</span></button>
+  </div>
+  <p class="home-breakdown" data-breakdown>{{ t.breakdown }}</p>
+  <div id="{{ c.anchor }}-plus-note" class="home-notes-box">
+    {% if c.routes_note %}
+    <p class="home-note" data-note="routes"{% if plus_note != "routes" %} hidden{% endif %}>
+      <span aria-hidden="true">&#9650;</span> {{ c.routes_note }}{{ help("level-limit") }}
+    </p>
+    {% endif %}
+    <p class="home-note home-note-max" data-note="max"{% if plus_note != "max" %} hidden{% endif %}>
+      {{ c.max_note }} <a href="{{ c.lower_href }}">Lower the other outputs&hellip;</a>
+    </p>
+    <p class="home-note" data-note="min"{% if not c.minus.disabled %} hidden{% endif %}>{{ c.min_note }}</p>
+  </div>
+  {% if c.headroom %}
+    <p class="home-headroom health-{{ c.headroom.level }}">
+      {%- if c.headroom.level in ("caution", "problem") %}<span aria-hidden="true">&#9888;</span> {% endif %}{{ c.headroom.text }}{{ help("headroom") }}
+    </p>
+  {% endif %}
+
+  <div class="home-card-meter">
+    <span class="home-meter" role="meter" aria-label="{{ o.name }} level" aria-valuemin="-120" aria-valuemax="0"
+          aria-valuenow="-120" :aria-valuenow="meterNow('{{ c.key }}')" :aria-valuetext="readout('{{ c.key }}')">
+      <span class="home-meter-track" aria-hidden="true"><span class="home-meter-bar" :style="hbarStyle('{{ c.key }}')"></span></span>
+      <span class="home-meter-value" aria-hidden="true" x-text="readout('{{ c.key }}')">&mdash;</span>
+    </span>
+    <button type="button" class="home-clip" :class="{ 'is-on': clip.{{ c.key }} }" @click="resetClip('{{ c.key }}')"
+            aria-label="{{ o.name }} CLIP light" :aria-label="clipLabel('{{ c.key }}')">
+      <span aria-hidden="true">CLIP <span x-text="clip.{{ c.key }} ? '●' : '○'">&#9675;</span></span>
+    </button>
+  </div>
+
+  <div class="home-card-actions">
+    {% if st and edit_url %}
+      <button type="button" class="btn-small mute home-mute{% if o.muted %} is-muted{% endif %}" data-action="mute"
+              aria-pressed="{{ 'true' if o.muted else 'false' }}" aria-label="Mute {{ o.name }}">
+        {{- "Muted" if o.muted else "Mute" -}}
+      </button>
+    {% endif %}
+    <details class="home-adjust" data-adjust>
+      <summary class="btn-small">Adjust <span aria-hidden="true">&#9662;</span><span class="visually-hidden"> {{ o.name }}</span></summary>
+      <ul class="home-adjust-menu">
+        {% for link in c.adjust %}<li><a href="{{ link.href }}">{{ link.label }}</a></li>{% endfor %}
+      </ul>
+    </details>
+  </div>
+  {% if overview %}<p class="home-card-link"><a href="{{ c.href }}">All settings for {{ o.name }} <span aria-hidden="true">&rarr;</span></a></p>{% endif %}
+</li>
+{%- endmacro -%}

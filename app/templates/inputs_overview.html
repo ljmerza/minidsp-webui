@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{#- /inputs (phase 9 design §4.5): one card per input saying where it is sent, in words; each links to its full page.
+    Context from app/web/home.py. -#}
+
+{% block head %}
+<link rel="stylesheet" href="{{ root }}/static/css/home.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+<h1>Inputs</h1>
+{% if session is none %}
+  <section class="card empty-state">
+    <h2>No device</h2>
+    <p>{{ conn_label }}. This page fills in as soon as minidspd reports a supported device.</p>
+  </section>
+{% else %}
+<div class="home home-overview"
+     x-data='levelMeters({{ {"inputs": input_names, "outputs": output_names, "initial": initial_levels}|tojson }})'
+     hx-trigger="sse:levels">
+  <h2 class="visually-hidden" id="overview-title">Inputs of the playing preset</h2>
+  <p class="hint home-overview-hint">The playing preset's inputs. Open one for its level, EQ and routing.</p>
+  <section class="home-inputs" aria-labelledby="overview-title">
+    <div class="home-cards-box" hx-get="{{ inputs_url }}"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, sse:master throttle:1000ms, mdsp-sync-changed from:body, refresh"
+         hx-swap="innerHTML">
+      {% include "partials/input_cards.html" %}
+    </div>
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+{% endblock %}

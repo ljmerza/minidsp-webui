@@ -14,6 +14,22 @@
   {% endif %}
 </section>
 
+{#- The Start page (phase 9 design §12.2): per browser, kept in localStorage by static/js/start.js. -#}
+<section class="card start-page-card" aria-labelledby="start-title" x-data="startPage">
+  <h2 id="start-title">Start page</h2>
+  <fieldset class="start-page" aria-describedby="start-hint">
+    <legend class="visually-hidden">Page this browser opens on</legend>
+    <label class="check"><input type="radio" name="start_page" value="home" :checked="value === 'home'"
+           @change="choose('home')" checked> Home <span class="muted">(what each output does, problems, quick levels)</span></label>
+    <label class="check"><input type="radio" name="start_page" value="meters" :checked="value === 'meters'"
+           @change="choose('meters')"> Meters &amp; graph <span class="muted">(the meters and the response graph)</span></label>
+  </fieldset>
+  <p class="hint" id="start-hint">Where this browser lands when you open the app from a bookmark or a home-screen icon.
+    It is saved in this browser only, so your phone and your computer can differ. Home is always one tap away in the
+    menu.</p>
+  <p class="form-saved" role="status" x-text="saved"></p>
+</section>
+
 <section class="card" aria-labelledby="runtime-title">
   <h2 id="runtime-title">Safety, sync &amp; graphs</h2>
   {% include "partials/settings_runtime.html" %}
@@ -33,4 +49,8 @@
   <h2 id="advanced-title">Advanced</h2>
   {% include "partials/settings_fir.html" %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/start.js?v={{ asset_version }}"></script>
 {% endblock %}
