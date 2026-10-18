@@ -36,12 +36,14 @@ async def test_device_page_uses_one_feed_that_keeps_the_header_sync_badge_curren
     body_feed = re.search(r'<body[^>]*sse-connect="([^"]+)"', html).group(1)
     assert "sync" in body_feed.split("topics=", 1)[1].split("&", 1)[0].split("%2C")
     header = html.split('id="app-header"', 1)[1].split("</header>", 1)[0]
-    assert 'hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"' in header
+    assert "sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body" in header
 
 
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
     html = (await ctx.http.get(f"{UI}/sync-panel")).text
-    assert 'id="syncbar"' in html and 'id="sync-table"' in html
+    assert 'id="sync-overview"' in html and "216 unknown" in html
+    html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
+    assert 'id="sync-table"' in html
     assert "outputs.0.gain_db" in html and "Out 1 output level" in html
     assert "sync-unknown" in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)

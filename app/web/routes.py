@@ -244,8 +244,23 @@ async def device_page(request: Request, serial: int | None = None) -> HTMLRespon
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DEVICE_TOPICS)
-    ctx.update(title="Device & sync", **device_info_context(request, session))
+    ctx.update(
+        title="Device & sync", sync_preset=_shown_preset(request, session), **device_info_context(request, session)
+    )
     return templates.TemplateResponse(request, "device.html", ctx)
+
+
+def _shown_preset(request: Request, session: DeviceSession | None) -> int | None:
+    """The 0-based preset the Device & sync page shows: ``?preset=`` (1-based), else the playing one, else the first.
+    None for an unknown preset (the sync panel then answers 404)."""
+    if session is None:
+        return None
+    raw = request.query_params.get("preset")
+    if raw is None or not raw.isdigit():
+        playing = session.master.preset if session.master is not None else None
+        return playing if isinstance(playing, int) and 0 <= playing < session.profile.n_presets else 0
+    preset = int(raw) - 1
+    return preset if 0 <= preset < session.profile.n_presets else None
 
 
 # The header (master, device) is the only live part of the glossary page.

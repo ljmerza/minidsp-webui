@@ -1277,8 +1277,8 @@ def session_summary(session: Any, preset: int | None = None, *, levels: Levels |
         preset = master.preset if master is not None and master.preset is not None else 0
     if not 0 <= preset < session.profile.n_presets:
         return None
-    from app.sync import verify  # local imports: both import the session module, which doesn't need this one
-    from app.sync.session import StateUnavailable
+    from app.sync.session import StateUnavailable  # local imports: it imports the session module
+    from app.sync.status import changed_paths
 
     try:
         doc = session.desired(preset)
@@ -1292,7 +1292,8 @@ def session_summary(session: Any, preset: int | None = None, *, levels: Levels |
         getattr(session, "channel_meta", {}),
         getattr(session, "settings", None),
         statuses,
-        verify.last_report(session.serial),
+        # The last check's still-open changes, as the one status model (app/sync/status.py) counts them.
+        {"preset": preset, "paths": sorted(changed_paths(session, preset))},
         levels,
         preset=preset,
         master=master,

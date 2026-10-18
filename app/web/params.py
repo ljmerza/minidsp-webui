@@ -31,6 +31,7 @@ from app.sync.session import (
     StateUnavailable,
     UnknownPreset,
 )
+from app.sync.status import status_view
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
     EDIT_TOPICS,
@@ -426,6 +427,8 @@ async def edit_values(request: Request, serial: int, preset: int) -> Response:
 
 # --- sync bar (per-page preset status, retry, push, switch & apply) --------------------------------------------------
 
+DEVICE_PAGE = "/device"  # its sync bar is the status overview (`syncbar_response`)
+
 
 def syncbar_context(request: Request, session: DeviceSession, preset: int, page: str | None) -> dict[str, Any]:
     serial = session.serial
@@ -469,7 +472,12 @@ def syncbar_response(
     error: str | None = None,
 ) -> Response:
     ctx = {"bar": syncbar_context(request, session, preset, _safe_page(page)), "message": message}
-    return render(request, "partials/syncbar.html", ctx, status_code=status_code, error=error)
+    template = "partials/syncbar.html"
+    if ctx["bar"]["page"] == DEVICE_PAGE:
+        # The Device & sync page shows the status overview instead (phase 9 design §11.1, app/web/sync_ui.py).
+        template = "partials/sync_overview.html"
+        ctx["view"] = status_view(session, preset)
+    return render(request, template, ctx, status_code=status_code, error=error)
 
 
 async def _preset_session(request: Request, serial: int, preset: int) -> DeviceSession | Response:

@@ -1,7 +1,7 @@
 {#- Device info. Rendered by /device and refreshed on SSE "device" events via /ui/device-info. -#}
 {% if info is not none %}
   {%- set p = info.profile -%}
-  <h2>{{ info.product_name }} <span class="muted">#{{ info.serial }}</span></h2>
+  <h3>{{ info.product_name }} <span class="muted">#{{ info.serial }}</span></h3>
   <dl class="info-grid">
     <div><dt>Product</dt><dd>{{ info.product_name }}</dd></div>
     <div><dt>Serial</dt><dd>{{ info.serial }}</dd></div>
@@ -22,7 +22,7 @@
     <div><dt>Device URL</dt><dd>{% if info.url %}<code>{{ info.url }}</code>{% else %}&mdash;{% endif %}</dd></div>
   </dl>
 
-  <h3>Capabilities</h3>
+  <h4>Capabilities</h4>
   <dl class="info-grid">
     <div><dt>Inputs / outputs</dt><dd>{{ p.n_inputs }} in, {{ p.n_outputs }} out</dd></div>
     <div><dt>Presets</dt><dd>{{ p.n_presets }}</dd></div>
@@ -36,7 +36,7 @@
     <div><dt>FIR</dt><dd>{{ "supported" if p.fir_supported else "not enabled" }}</dd></div>
   </dl>
 {% else %}
-  <h2>No device</h2>
+  <h3>No device</h3>
   <dl class="info-grid">
     <div><dt>minidspd</dt><dd><code>{{ daemon_url }}</code></dd></div>
     {% if daemon_version %}<div><dt>minidspd version</dt><dd>{{ daemon_version }}</dd></div>{% endif %}
@@ -47,7 +47,7 @@
 {% endif %}
 
 {% if unsupported_devices %}
-  <h3>Unsupported devices on minidspd</h3>
+  <h4>Unsupported devices on minidspd</h4>
   <ul>
     {% for d in unsupported_devices %}
       <li>{{ d.product_name or "unknown product" }}{% if d.serial is not none %} #{{ d.serial }}{% endif %} &mdash; <code>{{ d.url }}</code></li>

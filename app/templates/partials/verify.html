@@ -1,18 +1,10 @@
-{#- Check device (docs 03 §9, docs 05 §8, phase9 design §11). Rendered by /ui/devices/{serial}/verify and replaced by its
-     own posts. "Use the device's values…" opens a confirm dialog (verify_accept_confirm.html) in #verify-dialog-slot. -#}
+{#- The last check (docs 03 §9, docs 05 §8, phase9 design §11.1). Rendered by /ui/devices/{serial}/verify and replaced
+     by its own posts and by the Check device button above it (sync_panel.html). ``check`` is its CheckSummary (the
+     result in words, app/sync/status.py). "Use the device's values…" opens a confirm dialog (verify_accept_confirm.html)
+     in #verify-dialog-slot; the readings themselves are under Technical details. -#}
 <div id="verify-panel" class="verify">
-  <div class="card-head">
-    <p class="hint">Reads the playing preset back from the device and compares it with what the app last sent.
-      Nothing is written. On/off switches, routing, compressor ratio/attack/release and FIR can't be checked{{ help("st-cant-check") }}.</p>
-    {% if supported %}
-      <button type="button" id="verify-run" class="btn-small" hx-post="{{ verify_url }}" hx-target="#verify-panel" hx-swap="outerHTML"
-              hx-disabled-elt="this" hx-indicator="#verify-busy">Check device</button>
-      <span id="verify-busy" class="htmx-indicator" role="status"><span class="spinner" aria-hidden="true"></span><span class="visually-hidden">Reading&hellip;</span></span>
-    {% endif %}
-  </div>
-
   {% if not supported %}
-    <p class="muted">Readback isn't available for this device model.</p>
+    <p class="muted">Readback isn't available for this device model, so Check device can't run.</p>
   {% endif %}
   {% if error %}<div class="form-errors" role="alert"><p>Check device failed: {{ error }}</p></div>{% endif %}
   {% if message %}<p id="verify-message" class="verify-message" tabindex="-1" data-autofocus>{{ message }}</p>{% endif %}
@@ -20,31 +12,29 @@
   {% if report %}
     {%- set c = counts -%}
     {%- set status = report.status -%}
-    <div class="adopt-result{% if status != 'ok' %} is-warn{% endif %}" role="status">
-      <h3 id="verify-result" tabindex="-1" data-autofocus>Preset {{ report.preset + 1 }}:
-        {% if status == "drift" %}{{ c.drift }} changed on device
-        {%- elif status == "mismatch" %}nothing changed on device; {{ mismatch_count }} unknown setting(s) differ from the app's values
-        {%- elif status == "unverified" %}nothing to compare: no setting has been sent yet
-        {%- else %}nothing changed on device{% endif %}</h3>
-      <p>{{ c.ok }} match, {{ c.drift }} changed on device{{ help("st-changed") }}, {{ c.unknown }} unknown{{ help("st-unknown") }}
-        ({{ mismatch_count }} of them differ from the app's values), {{ c.unverifiable }} can't be checked.
-        Checked {{ report.checked_at|replace("T", " ")|truncate(19, true, "") }} UTC ({{ report.source }},
-        {{ report.reads }} read(s), {{ report.duration_ms|round|int }} ms).</p>
+    <div class="adopt-result{% if check.changed or check.differ %} is-warn{% endif %}" role="status">
+      <h4 id="verify-result" tabindex="-1" data-autofocus>{{ check.time }} UTC, preset {{ report.preset + 1 }}:
+        {{ check.result }}</h4>
+      {% if check.cant_check_text %}
+        <p class="verify-cant-check"><span class="sync-mark sync-cant-check"><span aria-hidden="true">⊘</span></span>
+          {{ check.cant_check_text }}{{ help("st-cant-check") }} That isn't an error: the app trusts what it sent.</p>
+      {% endif %}
       {% if status in ("mismatch", "unverified") %}
         <p class="hint">Unknown settings weren't sent by the app, so they don't count as changed on device. They stop
           being unknown when the app sends them, when you set up this device with Remember, or when you use the device's
-          values below. To overwrite them instead, send them from the status table.</p>
+          values below. To overwrite them instead, send them from the table below.</p>
       {% endif %}
-      {% if report.drifted or accept_paths or refused %}
+      {% if drift_paths or accept_paths or refused %}
         {#- Forget is spaced away from "Use the device's values…", which sits after a divider (design §11.1). -#}
         <div class="verify-actions">
-          {% if report.drifted %}
+          {% if drift_paths %}
             <form class="verify-action" hx-post="{{ mark_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
               <input type="hidden" name="preset" value="{{ report.preset }}">
               {% for p in drift_paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
               <button type="submit" id="verify-forget" class="btn-small">Forget these values</button>{{ help("forget") }}
-              <span class="hint">Marks the {{ drift_paths|length }} changed setting(s) Unknown, so the app stops
-                assuming it knows them. Nothing changes on the device; send them from the status table to overwrite it.</span>
+              <span class="hint">Marks the {{ drift_paths|length }} changed setting{{ "s" if drift_paths|length != 1 }}
+                Unknown, so the app stops assuming it knows them. Nothing changes on the device; send them from the table
+                below to overwrite it.</span>
             </form>
           {% endif %}
           {% if accept_paths or refused %}
@@ -56,7 +46,7 @@
               {% for p in accept_paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
               <button type="submit" id="verify-use" class="btn-small" aria-haspopup="dialog">Use the device's values&hellip;</button>{{ help("use-device") }}
               <span class="hint">Makes the app's values equal to what the device reported for {{ accept_count }}
-                setting(s). You see the list first. Nothing is sent to the device, and you can undo it for 30 seconds.</span>
+                setting{{ "s" if accept_count != 1 }}. You see the list first. Nothing is sent to the device, and you can undo it for 30 seconds.</span>
             </form>
           {% endif %}
           {% if refused %}
@@ -71,36 +61,44 @@
 
     <div id="verify-dialog-slot"></div>
 
-    {% if rows %}
-      <div class="table-scroll">
-        <table class="data-table">
-          <thead>
-            <tr><th scope="col">Setting</th><th scope="col">Last sent{{ help("last-sent") }}</th><th scope="col">Device reads</th><th scope="col">Result</th></tr>
-          </thead>
-          <tbody>
-            {% for r in rows %}
-              <tr{% if r.status == "drift" %} class="row-failed"{% endif %}>
-                <td><span class="param-name">{{ r.label }}</span><code class="param-path">{{ r.path }}</code></td>
-                <td class="val">{{ r.expected }}</td>
-                <td class="val">{{ r.actual }}</td>
-                <td><span class="sync-badge sync-{{ r.badge }}"><span class="sync-icon" aria-hidden="true">{{ r.icon }}</span><span class="sync-text">{{ r.text }}</span></span>
-                  {% if r.note %}<div class="{{ 'reason' if r.status == 'drift' else 'hint' }}">{{ r.note }}</div>{% endif %}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% endif %}
+    <details class="verify-tech" id="verify-tech" data-keep-open>
+      <summary>Technical details: every reading</summary>
+      <p class="hint">{{ c.ok }} match, {{ c.drift }} changed on device{{ help("st-changed") }}, {{ c.unknown }}
+        unknown{{ help("st-unknown") }} ({{ mismatch_count }} of them differ from the app's values), {{ c.unverifiable }}
+        can't be checked. Checked {{ report.checked_at|replace("T", " ")|truncate(19, true, "") }} UTC
+        ({{ report.source }}, {{ report.reads }} read{{ "s" if report.reads != 1 }}, {{ report.duration_ms|round|int }} ms).</p>
+      {% if rows %}
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr><th scope="col">Setting</th><th scope="col">Last sent{{ help("last-sent") }}</th><th scope="col">Device reads</th><th scope="col">Result</th></tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+                <tr{% if r.status == "drift" %} class="row-failed"{% endif %}>
+                  <td><span class="param-name">{{ r.label }}</span><code class="param-path">{{ r.path }}</code></td>
+                  <td class="val">{{ r.expected }}</td>
+                  <td class="val">{{ r.actual }}</td>
+                  <td><span class="sync-badge sync-{{ r.badge }}"><span class="sync-icon" aria-hidden="true">{{ r.icon }}</span><span class="sync-text">{{ r.text }}</span></span>
+                    {% if r.note %}<div class="{{ 'reason' if r.status == 'drift' else 'hint' }}">{{ r.note }}</div>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
 
-    {% if unverifiable %}
-      <details>
-        <summary>{{ unverifiable|length }} setting(s) can't be checked</summary>
-        <ul class="issues">
-          {% for r in unverifiable %}<li>{{ r.label }}: {{ r.note }}</li>{% endfor %}
-        </ul>
-      </details>
-    {% endif %}
+      {% if unverifiable %}
+        <details>
+          <summary>{{ unverifiable|length }} setting{{ "s" if unverifiable|length != 1 }} can't be checked</summary>
+          <ul class="issues">
+            {% for r in unverifiable %}<li>{{ r.label }}: {{ r.note }}</li>{% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+    </details>
   {% elif supported %}
-    <p class="muted">Not checked since the app started.</p>
+    <p class="muted">Not checked since the app started. Check device reads the playing preset back and compares it
+      with what the app sent; nothing is written.</p>
   {% endif %}
 </div>

@@ -152,7 +152,7 @@ async def test_partial_run_shows_drift_first(http, bridge):
 
 async def test_partial_clean_run(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
-    assert "nothing changed on device" in r.text
+    assert "everything the device can report matches" in r.text and "can&#39;t be checked" in r.text
     assert "Forget these values" not in r.text
 
 
@@ -236,7 +236,7 @@ async def test_partial_offers_and_accepts_device_values(http, bridge, shaker):  
     shaker.writer.invalidate(0, ["outputs.0.delay_ms"])
     bridge.memory[M2X4HD_MAP.output_delay[0]] = f32(0.0)
     r = await http.post(f"/ui/devices/{SERIAL}/verify")
-    assert "nothing changed on device; 1 unknown setting(s)" in r.text
+    assert "nothing changed on device; 1 unknown setting differs from the app&#39;s values" in r.text
     assert 'id="verify-use"' in r.text
     r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": ["outputs.0.delay_ms"]})
     assert r.status_code == 200

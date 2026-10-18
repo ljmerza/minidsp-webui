@@ -10,6 +10,7 @@ from jinja2 import pass_context
 from markupsafe import Markup
 
 from app import __version__
+from app.sync.status import status_view
 from app.sync.summary import session_summary
 from app.web.glossary import help_button
 
@@ -106,3 +107,5 @@ templates.env.filters["duration"] = fmt_duration
 templates.env.filters["meter_pct"] = lambda db: f"{meter_fraction(db) * 100:.2f}%"
 # The plain-language summary of a preset (app/sync/summary.py): ``preset_summary(session, preset=None)``.
 templates.env.globals["preset_summary"] = session_summary
+# What the device holds of a preset, by the one status model (app/sync/status.py): ``sync_view(session, preset=None)``.
+templates.env.globals["sync_view"] = status_view

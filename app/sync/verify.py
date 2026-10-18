@@ -371,6 +371,9 @@ class VerifyReport:
     source: str = "ui"
     marked_unknown: list[str] = field(default_factory=list)
     accepted: list[str] = field(default_factory=list)
+    # The writer's `writes_sent` when the shadow was read: a path the writer sent after it is no longer "changed on
+    # device" (app/sync/status.py). None when unknown (e.g. a report built by hand).
+    writes_at: int | None = None
 
     @property
     def counts(self) -> dict[str, int]:
@@ -579,6 +582,7 @@ class Readback:
     reads: int
     started: float
     checked_at: str
+    writes_at: int | None = None
 
     def items(
         self,
@@ -606,6 +610,7 @@ class Readback:
             reads=self.reads,
             items=items,
             source=source,
+            writes_at=self.writes_at,
         )
 
 
@@ -639,6 +644,7 @@ async def _read(
             state = session.writer.state(preset)
             applied = dict(state.applied)
             current = dict(state.values(session.profile))
+            writes_at = session.writer.writes_sent
             probes, unreadable, reads = plan(current if values is None else values, mmap)
             blocks = await _read_blocks(session, reader, reads)
             if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
@@ -649,7 +655,16 @@ async def _read(
                 raise VerifyError("the active preset changed while reading; try again")
         read_count = reader.reads
     return Readback(
-        preset, applied, current, probes, unreadable, list(blocks.values()), read_count, started, checked_at
+        preset,
+        applied,
+        current,
+        probes,
+        unreadable,
+        list(blocks.values()),
+        read_count,
+        started,
+        checked_at,
+        writes_at=writes_at,
     )
 
 

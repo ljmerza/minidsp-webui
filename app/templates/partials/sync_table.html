@@ -1,45 +1,96 @@
-{#- Sync table (docs 05 §8): desired vs. applied shadow per device path. Rendered with ``t``. -#}
-{% import "partials/params_macros.html" as m %}
-{%- set c = t.counts -%}
+{#- Settings by channel (phase 9 design §11.1, §11.3): every device setting of one preset with its status from the one
+    status model (app/sync/status.py), grouped by channel, problems only by default. Values are in words; internal
+    names and raw coefficients only show with "Show technical details". Rendered with ``t``. -#}
 <div class="sync-table" id="sync-table" hx-get="{{ t.table_url }}"
-     hx-trigger="sse:sync throttle:1s, mdsp-sync-changed from:body" hx-target="this" hx-swap="outerHTML">
+     hx-trigger="sse:sync throttle:1s, sse:sync delay:600ms, sse:verify delay:400ms, mdsp-sync-changed from:body"
+     hx-target="this" hx-swap="outerHTML">
   <div class="sync-table-head">
     <div class="filter" role="group" aria-label="Rows to show">
       <button type="button" class="btn-small{% if t.show == 'unsynced' %} is-current{% endif %}"
               aria-pressed="{{ 'true' if t.show == 'unsynced' else 'false' }}"
-              hx-get="{{ t.unsynced_url }}" hx-target="#sync-table">Not sent ({{ c.pending + c.failed + c.unknown }})</button>
+              hx-get="{{ t.unsynced_url }}" hx-target="#sync-table">Problems only ({{ t.problem_count }})</button>
       <button type="button" class="btn-small{% if t.show == 'all' %} is-current{% endif %}"
               aria-pressed="{{ 'true' if t.show == 'all' else 'false' }}"
-              hx-get="{{ t.all_url }}" hx-target="#sync-table">All ({{ c.synced + c.pending + c.failed + c.unknown }})</button>
+              hx-get="{{ t.all_url }}" hx-target="#sync-table">Everything ({{ t.total }})</button>
     </div>
-    <p class="hint">"Last sent" is the value the app last sent or confirmed; &mdash; means unknown (never sent,
-      e.g. still a factory value). <a href="#verify">Check device</a> reads the readable settings back and can use
-      the device's values. Send writes one setting again.</p>
+    <label class="sync-tech-switch"><input type="checkbox" class="sync-tech-toggle" id="sync-tech" data-keep-state>
+      Show technical details <span class="muted">(internal names, raw values)</span></label>
+    <p class="hint">Sent settings show no mark. "Last sent"{{ help("last-sent") }} is what the app last sent, not a
+      reading; <a href="#verify">Check device</a> compares it with the device.</p>
   </div>
-  {% if t.rows %}
-    <div class="table-scroll">
-      <table class="data-table sync-rows">
-        <thead>
-          <tr><th scope="col">Setting</th><th scope="col">App's value</th><th scope="col">Last sent{{ help("last-sent") }}</th>
-              <th scope="col">Status{{ help("status") }}</th><th scope="col"><span class="visually-hidden">Action</span></th></tr>
-        </thead>
-        <tbody>
-          {% for r in t.rows %}
-            <tr class="row-{{ r.status }}">
-              <td><span class="param-name">{{ r.label }}</span><code class="param-path">{{ r.path }}</code></td>
-              <td class="val">{{ r.desired }}</td>
-              <td class="val">{{ r.applied }}</td>
-              <td>{{ m.sync_badge([r.path], {r.path: r.status}) }}{% if r.reason %}<div class="reason">{{ r.reason }}</div>{% endif %}</td>
-              <td><button type="button" class="btn-small" hx-post="{{ t.push_path_url }}"
-                          {% if r.confirm %}hx-confirm="{{ r.confirm }}"
-                          hx-vals='{{ {"path": r.path, "confirm": "1"}|tojson }}'{% else %}hx-vals='{{ {"path": r.path}|tojson }}'{% endif %}
-                          hx-target="#sync-table" aria-label="Send {{ r.label }}">Send</button></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
+
+  {% if t.show == "unsynced" and not t.rows %}
     <p class="muted">Every setting of preset {{ t.preset + 1 }} is sent.</p>
+  {% else %}
+    {% for g in t.groups %}
+      {% if not g.rows %}
+        <p class="sync-group is-clean"><span class="sync-group-name">{{ g.name }}</span> <span class="muted">all sent</span></p>
+      {% else %}
+        <details class="sync-group{% if g.problems %} has-problems{% endif %}" id="{{ g.id }}" data-keep-open{% if g.problems %} open{% endif %}>
+          <summary>
+            <span class="sync-group-name">{{ g.name }}</span>
+            <span class="sync-group-states">
+              {%- for s in g.states %}<span class="sync-mark sync-{{ s.css }}"><span aria-hidden="true">{{ s.glyph }}</span> {{ s.text }}</span>{% else %}<span class="muted">all sent</span>{% endfor -%}
+            </span>
+          </summary>
+          <div class="table-scroll">
+            <table class="data-table sync-rows">
+              <caption class="visually-hidden">{{ g.name }}: settings of preset {{ t.preset + 1 }}</caption>
+              <thead>
+                <tr><th scope="col">Setting</th><th scope="col">App's value</th><th scope="col">Last sent</th>
+                    <th scope="col">Status</th><th scope="col"><span class="visually-hidden">Action</span></th></tr>
+              </thead>
+              <tbody>
+                {% for r in g.rows %}
+                  <tr class="row-{{ r.css }}">
+                    <th scope="row" class="sync-setting"><span class="param-name">{{ r.label }}</span>
+                      <code class="param-path row-tech">{{ r.path }}</code></th>
+                    <td class="val" data-label="App's value">{{ r.desired }}
+                      <span class="row-tech raw">{{ r.tech.app }}</span></td>
+                    <td class="val" data-label="Last sent">{{ r.applied }}
+                      <span class="row-tech raw">{{ r.tech.applied }}</span>
+                      {%- if r.device %}<div class="device-reads">Device reads: <strong>{{ r.device }}</strong>
+                        {%- if r.tech.device %}<span class="row-tech raw">{{ r.tech.device }}</span>{% endif %}</div>{% endif %}</td>
+                    <td data-label="Status">
+                      {%- if r.status == "sent" -%}
+                        <span class="sync-badge sync-synced is-quiet"><span class="visually-hidden">Sent</span></span>
+                      {%- else -%}
+                        <span class="sync-badge sync-{{ r.css }}" data-sync-state="{{ r.status }}"><span class="sync-icon" aria-hidden="true">{{ r.glyph }}</span><span class="sync-text">{{ r.word }}</span></span>
+                      {%- endif -%}
+                      {%- if r.reason %}<div class="reason">{{ r.reason }}</div>{% endif %}</td>
+                    <td class="sync-row-action"><button type="button" class="btn-small" hx-post="{{ t.push_path_url }}"
+                                {% if r.confirm %}hx-confirm="{{ r.confirm }}"
+                                hx-vals='{{ {"path": r.path, "confirm": "1"}|tojson }}'{% else %}hx-vals='{{ {"path": r.path}|tojson }}'{% endif %}
+                                hx-target="#sync-table">
+                      {%- if r.status == "changed" %}Send app's value<span class="visually-hidden">: {{ r.label }}</span>
+                      {%- else %}Send<span class="visually-hidden"> {{ r.label }}</span>{% endif -%}
+                    </button></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if g.changed %}
+            {#- "Use the device's values…" first, "Forget these values" spaced away from it (design §11.1). Both act on
+                the last check (#verify-panel), which has the confirm dialog's slot. -#}
+            <div class="sync-group-actions">
+              {% if g.use %}
+                <form hx-get="{{ t.confirm_url }}" hx-target="#verify-dialog-slot" hx-swap="innerHTML">
+                  <input type="hidden" name="preset" value="{{ t.preset }}">
+                  {% for p in g.use %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+                  <button type="submit" class="btn-small" aria-haspopup="dialog">Use the device's values for
+                    {{ "this setting" if g.use_count == 1 else "these " ~ g.use_count }}<span class="visually-hidden"> on {{ g.name }}</span>&hellip;</button>{{ help("use-device") }}
+                </form>
+              {% endif %}
+              <form class="sync-forget" hx-post="{{ t.mark_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
+                <input type="hidden" name="preset" value="{{ t.preset }}">
+                {% for p in g.changed %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+                <button type="submit" class="btn-small">Forget these values<span class="visually-hidden"> on {{ g.name }}</span></button>{{ help("forget") }}
+              </form>
+            </div>
+          {% endif %}
+        </details>
+      {% endif %}
+    {% endfor %}
   {% endif %}
 </div>
