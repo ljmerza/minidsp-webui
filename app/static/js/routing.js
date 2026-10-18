@@ -51,7 +51,25 @@
     return { values, changes, text };
   }
 
+  // "#in1-out2" (the flow diagram's route links, phase9 design §5.4): the id of a route cell's checkbox, or null.
+  function cellFromHash(hash) {
+    const m = /^#in(\d+)-out(\d+)$/.exec(hash || '');
+    return m ? `in${Number(m[1])}-out${Number(m[2])}` : null;
+  }
+
   window.mdsp = Object.assign(window.mdsp || {}, {
-    routing: { LIVE_DBFS, wouldSilence, isLive, disableWarning, monoPlan },
+    routing: { LIVE_DBFS, wouldSilence, isLive, disableWarning, monoPlan, cellFromHash },
   });
+
+  // Arriving from a route link focuses that cell (the browser only scrolls to it).
+  if (typeof document !== 'undefined' && typeof location !== 'undefined') {
+    const focusCell = () => {
+      const id = cellFromHash(location.hash);
+      const cell = id && document.getElementById(id);
+      if (cell) cell.focus({ preventScroll: false });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', focusCell);
+    else focusCell();
+    window.addEventListener('hashchange', focusCell);
+  }
 })();

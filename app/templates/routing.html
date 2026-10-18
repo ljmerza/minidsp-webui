@@ -43,7 +43,7 @@
                 {%- set on = values[ep] -%}
                 <td class="route-cell{% if on %} is-on{% endif %}" data-route-cell>
                   <label class="route-toggle">
-                    <input type="checkbox" data-path="{{ ep }}" data-type="bool"
+                    <input type="checkbox" id="in{{ i + 1 }}-out{{ o + 1 }}" data-path="{{ ep }}" data-type="bool"
                            data-route-output="{{ o }}" data-route-input="{{ i }}"
                            data-route-name="{{ out_name }}" data-route-input-name="{{ in_name }}"{% if on %} checked{% endif %}>
                     <span class="visually-hidden">Route {{ in_name }} to {{ out_name }}</span>

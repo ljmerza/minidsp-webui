@@ -1,0 +1,218 @@
+{#- The signal-flow diagram (phase 9 design §5), drawn from app/web/flow.py build_flow(). Rendered inside
+    partials/flow_card.html and by /ui/flow. One structure for assistive technology (5.5): each input and each output
+    row is a <section> with an <h3>; the SVG lines are aria-hidden and every route is repeated as text in its row
+    ("Fed by In 1 at +4 dB"). Below 600 px a compact list replaces the diagram, which then opens in its own
+    horizontally scrolling box (Details); only one of the two is ever displayed. -#}
+{%- macro fix_button(fx, cls="btn-small") -%}
+  {%- if fx.values -%}
+    <button type="button" class="{{ cls }} flow-fix" data-flow-fix data-values='{{ fx.values|tojson }}'
+            data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
+  {%- elif fx.href -%}
+    <a class="{{ cls }} flow-fix-link" href="{{ fx.href }}">{{ fx.label }}</a>
+  {%- endif -%}
+{%- endmacro -%}
+
+{%- macro popover(id, title, text, fixes, more, root) -%}
+  <span id="{{ id }}" class="tt-pop flow-pop" role="dialog" aria-labelledby="{{ id }}-t" data-tt-pop hidden>
+    <strong class="tt-title" id="{{ id }}-t">{{ title }}</strong>
+    <span class="tt-text">{{ text }}</span>
+    {%- if fixes %}
+      <span class="flow-pop-actions">{% for fx in fixes %}{{ fix_button(fx) }}{% endfor %}</span>
+    {%- endif %}
+    {%- if more %}
+      <a class="tt-more" href="{{ root }}/help#{{ more }}">More <span aria-hidden="true">&rarr;</span><span class="visually-hidden"> about {{ title }}</span></a>
+    {%- endif %}
+  </span>
+{%- endmacro -%}
+
+{%- macro meter(key, name, cls="") -%}
+  <span class="flow-meter {{ cls }}" role="meter" aria-label="{{ name }} level" aria-valuemin="-120" aria-valuemax="0"
+        aria-valuenow="-120" aria-valuetext="no data"
+        :aria-valuenow="meterNow(level.{{ key }}, stale)" :aria-valuetext="meterText(level.{{ key }}, stale)">
+    <span class="flow-meter-track" aria-hidden="true">
+      <span class="flow-meter-bar" :style="meterBar(level.{{ key }}, stale)"></span>
+      <span class="flow-meter-peak" :style="meterPeak(peak.{{ key }}, stale)"></span>
+    </span>
+    <span class="flow-meter-value" aria-hidden="true" x-text="meterText(level.{{ key }}, stale)">&mdash;</span>
+  </span>
+{%- endmacro -%}
+
+{%- macro clip_chip(key, name) -%}
+  <button type="button" class="flow-clip" :class="{ 'is-on': clip.{{ key }} }" @click="resetClip('{{ key }}')"
+          aria-label="{{ name }} CLIP light" :aria-label="clip.{{ key }} ? '{{ name }} clipped, press to reset' : '{{ name }} not clipping'">
+    <span aria-hidden="true">CLIP <span x-text="clip.{{ key }} ? '●' : '○'">&#9675;</span></span>
+  </button>
+{%- endmacro -%}
+
+{%- if flow is none %}
+  <p class="muted flow-empty">The diagram appears once the app has loaded the device's settings.</p>
+{%- else %}
+{%- set f = flow -%}
+<div class="flow" data-flow data-preset="{{ flow_preset }}" data-edit-url="{{ flow_edit_url }}"
+     data-master-mute="{{ flow_master_mute|tojson if flow_master_mute is not none else '' }}"
+     data-names='{{ f.names|tojson }}'
+     style="--flow-route-w: {{ f.width }}px; --flow-row-h: {{ f.row_h }}px; --flow-row-gap: {{ f.row_gap }}px; --flow-fold-h: {{ f.fold_h }}px; --flow-in-h: {{ f.in_h }}px; --flow-h-folded: {{ f.drawings.folded.height }}px; --flow-h-open: {{ (f.drawings.open or f.drawings.folded).height }}px"
+     :class="{ 'is-open': showUnused, 'is-details': details }">
+
+  {#- Phone: a compact list (design 5.1). -#}
+  <ul class="flow-list" aria-label="How sound flows, in short">
+    {%- for i in f.inputs %}
+      {%- set outs = f.by_input[i.index] -%}
+      {%- set folded = f.folded_by_input[i.index] -%}
+      <li class="flow-list-in">
+        <span class="flow-list-head">
+          <a href="{{ i.href }}" data-flow-key="list-{{ i.key }}">{{ i.name }}</a>
+          {%- if i.muted %} <span class="flow-tag">🔇 Muted</span>{% endif %}
+          {{ meter(i.key, i.name, "is-small") }}
+        </span>
+        {%- if outs or folded %}
+          <ul class="flow-list-outs">
+            {%- for o in outs %}
+              <li><span class="flow-arrow" aria-hidden="true">&rarr;</span><span class="visually-hidden">to</span>
+                <a href="{{ o.href }}">{{ o.name }}</a>
+                <span class="health-badge health-{{ o.badge }}"><span aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}</span>
+                {{ meter(o.key, o.name, "is-small") }}</li>
+            {%- endfor %}
+            {%- if folded %}
+              <li class="flow-list-fold"><span class="flow-arrow" aria-hidden="true">&rarr;</span><span class="visually-hidden">to</span>
+                {{ folded|join(" · ") }} <span class="health-badge health-not_in_use"><span aria-hidden="true">◌</span> Not in use</span></li>
+            {%- endif %}
+          </ul>
+        {%- else %}
+          <p class="flow-list-note"><span aria-hidden="true">ⓘ</span> Not sent anywhere</p>
+        {%- endif %}
+      </li>
+    {%- endfor %}
+    {%- for o in f.unrouted %}
+      <li class="flow-list-unrouted">
+        <span class="flow-list-head"><span class="flow-x" aria-hidden="true">✕</span>
+          <a href="{{ o.href }}">{{ o.name }}</a>
+          <span class="health-badge health-{{ o.badge }}"><span aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}: no input</span></span>
+        {%- if o.route_fix %}<span class="flow-list-fix">{{ fix_button(o.route_fix) }}</span>{% endif %}
+      </li>
+    {%- endfor %}
+  </ul>
+
+  {#- Desktop, and the phone's Details box: the full diagram. -#}
+  <div class="flow-scroll">
+    <div class="flow-grid">
+      <div class="flow-inputs">
+        {%- for i in f.inputs %}
+          <section class="flow-in{% if i.muted %} is-muted{% endif %}" aria-labelledby="{{ f.uid }}-{{ i.key }}"
+                   style="--top-folded: {{ i.tops.folded }}px; --top-open: {{ i.tops.open or i.tops.folded }}px">
+            <h3 class="flow-in-title" id="{{ f.uid }}-{{ i.key }}">
+              <a class="flow-in-name" href="{{ i.href }}" data-flow-key="{{ i.key }}:name">{{ i.name }}</a>
+              {%- if i.muted %} <span class="flow-tag">🔇 Muted</span>{% endif %}
+            </h3>
+            <span class="flow-in-meter">{{ meter(i.key, i.name) }}</span>
+            <span class="flow-in-details">{{ i.details }}</span>
+            {%- if i.note %}
+              <span class="flow-note-wrap">
+                <button type="button" class="flow-note" data-tt-btn aria-expanded="false"
+                        aria-controls="{{ f.uid }}-{{ i.key }}-note" data-flow-key="{{ i.key }}:note"
+                        :class="{ 'is-caution': hasSignal(level.{{ i.key }}, stale) }">
+                  <span aria-hidden="true" x-text="hasSignal(level.{{ i.key }}, stale) ? '⚠' : 'ⓘ'">ⓘ</span> Not sent to any output
+                </button>
+                {{ popover(f.uid ~ "-" ~ i.key ~ "-note", i.name, i.note.text, i.note_fixes, "routing", root) }}
+              </span>
+            {%- endif %}
+          </section>
+        {%- endfor %}
+      </div>
+
+      <div class="flow-routes">
+        {%- for state, d in f.drawings.items() %}
+          <svg class="flow-svg flow-svg-{{ state }}" width="{{ f.width }}" height="{{ d.height }}"
+               viewBox="0 0 {{ f.width }} {{ d.height }}" aria-hidden="true" focusable="false">
+            <defs>
+              {%- for kind in ("on", "muted", "bad") %}
+                <marker id="{{ d.marker }}-{{ state }}-{{ kind }}" class="flow-arrowhead is-{{ kind }}" viewBox="0 0 8 8"
+                        refX="1" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L8 4 L0 8 z"></path>
+                </marker>
+              {%- endfor %}
+            </defs>
+            {%- for line in d.lines %}
+              <a href="{{ root }}/routing{{ line.anchor }}" tabindex="-1" class="flow-line{% if line.muted %} is-muted{% endif %}">
+                <path class="flow-line-hit" d="{{ line.d }}"></path>
+                <path class="flow-line-path" d="{{ line.d }}" marker-end="url(#{{ d.marker }}-{{ state }}-{{ 'muted' if line.muted else 'on' }})"></path>
+                {%- if line.label %}<text class="flow-line-label" x="{{ line.x }}" y="{{ line.y }}" text-anchor="middle">{{ line.label }}</text>{% endif %}
+              </a>
+            {%- endfor %}
+            {%- for stub in d.stubs %}
+              <path class="flow-stub-path" d="{{ stub.d }}" marker-end="url(#{{ d.marker }}-{{ state }}-bad)"></path>
+            {%- endfor %}
+          </svg>
+        {%- endfor %}
+      </div>
+
+      <div class="flow-outputs">
+        {%- for o in f.outputs %}
+          <section class="flow-row badge-{{ o.badge }}{% if o.unused %} is-unused{% endif %}{% if o.muted %} is-muted{% endif %}"
+                   aria-labelledby="{{ f.uid }}-{{ o.key }}" data-flow-row="{{ o.index }}">
+            <div class="flow-row-head">
+              <h3 class="flow-row-title" id="{{ f.uid }}-{{ o.key }}">
+                <a href="{{ o.href }}" data-flow-key="{{ o.key }}:name">{{ o.name }}</a>
+                <button type="button" class="health-badge health-{{ o.badge }} flow-badge" data-tt-btn aria-expanded="false"
+                        aria-controls="{{ o.pid }}-badge" data-flow-key="{{ o.key }}:badge" data-health-badge="{{ o.badge }}">
+                  <span aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}
+                </button>
+              </h3>
+              {{ popover(o.pid ~ "-badge", o.name ~ ": " ~ o.badge_word, o.badge_text, o.badge_fixes, o.badge_term, root) }}
+              <p class="flow-fed">
+                {%- if o.sources %}Fed by
+                  {% for s in o.sources -%}
+                    <a href="{{ s.href }}" data-flow-key="{{ o.key }}:route{{ s.input }}">{{ s.name }} at {{ s.level }}</a>
+                    {%- if s.muted %} ({{ s.name }} muted){% endif %}{% if not loop.last %}{{ " and " if loop.revindex == 2 else ", " }}{% endif %}
+                  {%- endfor %}
+                {%- else %}Fed by <strong>nothing</strong>{% endif -%}
+              </p>
+              {%- if o.route_fix %}{{ fix_button(o.route_fix, "btn-small btn-primary") }}{% endif %}
+              {%- if o.info %}
+                <span class="flow-pop-wrap">
+                  <button type="button" class="flow-note" data-tt-btn aria-expanded="false" aria-controls="{{ o.pid }}-info"
+                          data-flow-key="{{ o.key }}:info"><span aria-hidden="true">ⓘ</span> {{ o.info_short }}</button>
+                  {{ popover(o.pid ~ "-info", o.name, o.info.text, o.info_fixes, "mute", root) }}
+                </span>
+              {%- endif %}
+              <span class="flow-row-meter">{{ meter(o.key, o.name) }}{{ clip_chip(o.key, o.name) }}</span>
+            </div>
+            <div class="flow-blocks" role="toolbar" aria-label="Settings on {{ o.name }}">
+              {%- for b in o.blocks %}
+                {%- if not loop.first %}<span class="flow-sep" aria-hidden="true">&middot;</span>{% endif %}
+                <a class="flow-block is-{{ b.state }}{% if b.sync %} has-sync{% endif %}" href="{{ b.href }}"
+                   tabindex="{{ 0 if loop.first else -1 }}" aria-label="{{ b.aria_label }}"
+                   data-flow-block data-output="{{ o.index }}" data-block="{{ b.key }}" data-flow-key="{{ o.key }}:{{ b.key }}"
+                   {%- if b.key == "level" %} :class="{ 'is-clipped': clip.{{ o.key }} }"{% endif %}>
+                  {{- b.label -}}
+                  {%- if b.glyph %} <span class="flow-block-glyph" aria-hidden="true">{{ b.glyph }}</span>{% endif -%}
+                  {%- if b.sync %}<span class="flow-sync flow-sync-{{ b.sync }}" aria-hidden="true">{{ b.sync_glyph }}</span>{% endif -%}
+                </a>
+              {%- endfor %}
+            </div>
+            {%- if o.stub %}
+              <span class="flow-stub flow-pop-wrap">
+                <button type="button" class="flow-stub-btn" data-tt-btn aria-expanded="false" aria-controls="{{ o.pid }}-stub"
+                        data-flow-key="{{ o.key }}:stub"><span aria-hidden="true">✕</span> no input<span class="visually-hidden">: what to do about {{ o.name }}</span></button>
+                {{ popover(o.pid ~ "-stub", o.name ~ " has no input", o.stub.text, o.stub_fixes, "b-silent", root) }}
+              </span>
+            {%- endif %}
+          </section>
+        {%- endfor %}
+        {%- if f.fold %}
+          <div class="flow-fold">
+            <span class="flow-fold-names">{{ f.fold.label }}</span>
+            <span class="health-badge health-not_in_use"><span aria-hidden="true">◌</span> Not in use</span>
+            {%- if f.fold.muted %} <span class="flow-fold-muted">(muted)</span>{% endif %}
+            <button type="button" class="btn-small flow-fold-btn" @click="showUnused = !showUnused"
+                    aria-expanded="false" :aria-expanded="showUnused.toString()" data-flow-key="fold">
+              <span x-text="showUnused ? 'Hide' : 'Show'">Show</span><span class="visually-hidden"> {{ f.fold.label }}</span>
+              <span aria-hidden="true" x-text="showUnused ? '▴' : '▸'">&#9656;</span>
+            </button>
+          </div>
+        {%- endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{%- endif %}
