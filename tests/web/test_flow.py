@@ -288,6 +288,13 @@ async def test_the_dashboard_and_the_fragment_render_without_a_loaded_session(ht
     assert "appears once the app has loaded" in fragment.text
 
 
+async def test_the_diagram_refreshes_after_a_device_check(http):
+    # The ≠ glyphs come from the last check (app/sync/status.py), which only publishes a "verify" event.
+    page = (await http.get("/")).text
+    assert "sse:verify delay:300ms" in page.split("data-flow-box", 1)[1].split(">", 1)[0]
+    assert "topics=levels%2Cmaster%2Cdevice%2Csync%2Cdesired%2Cverify" in page
+
+
 async def test_the_fragment_only_takes_a_plain_level_anchor(http):
     response = await http.get("/ui/flow", params={"level_anchor": 'x"><script>'})
     assert response.status_code == 200

@@ -6,9 +6,10 @@ disagree with the cards, and from `DeviceProfile` counts (no channel counts are 
 inline SVG drawn on a fixed row geometry (`flow_layout`), so the browser never measures the layout. The SVG is
 decorative (``aria-hidden``): every route is repeated as text in its output row ("Fed by In 1 at +4 dB").
 
-The template is ``partials/flow.html`` (re-fetched from ``/ui/flow`` on ``desired`` / ``sync`` events) inside
-``partials/flow_card.html``; the live meters bind to the enclosing ``levelMeters`` component (static/js/meters.js) and
-static/js/flow.js does the rest (roving focus between blocks, the inline fixes, the clip announcement).
+The template is ``partials/flow.html`` (re-fetched from ``/ui/flow`` on ``desired`` / ``sync`` / ``verify``
+events) inside ``partials/flow_card.html``; the live meters bind to the enclosing ``levelMeters`` component
+(static/js/meters.js) and static/js/flow.js does the rest (roving focus between blocks, the inline fixes, the clip
+announcement).
 """
 
 import itertools
@@ -577,7 +578,8 @@ async def flow_context(request: Request, session: Any, *, level_anchor: str | No
 
 @router.get("/ui/flow", response_class=HTMLResponse)
 async def flow_fragment(request: Request, serial: int | None = None, level_anchor: str | None = None) -> HTMLResponse:
-    """The diagram, re-fetched by the page on SSE ``desired`` / ``sync`` events and when the playing preset changes."""
+    """The diagram, re-fetched by the page on SSE ``desired`` / ``sync`` / ``verify`` events and when the playing
+    preset changes."""
     session = devices.pick_session(request, serial)
     ctx = await flow_context(request, session, level_anchor=level_anchor)
     response = templates.TemplateResponse(request, "partials/flow.html", ctx)

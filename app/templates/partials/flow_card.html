@@ -1,7 +1,7 @@
 {#- The signal-flow diagram card (phase 9 design §5). Include it inside a levelMeters component (static/js/meters.js):
     its meters and CLIP chips bind to that component's level / peak / clip / stale, so a CLIP reset here resets the
     page's other meters too. Needs the context of app/web/flow.py flow_context(); the page loads static/css/flow.css
-    and static/js/flow.js. The box re-fetches partials/flow.html on SSE "desired" / "sync" events, and flow.js also
+    and static/js/flow.js. The box re-fetches partials/flow.html on SSE "desired" / "sync" / "verify" events, and flow.js also
     re-fetches it when the playing preset or Mute all changes. -#}
 <section class="card flow-card" aria-labelledby="flow-title"
          x-data='flowDiagram({{ {"floor": flow_floor|default(-90.0)}|tojson }})' hx-trigger="sse:master">
@@ -15,7 +15,7 @@
     </button>
   </div>
   <div class="flow-box" data-flow-box hx-get="{{ flow_url }}"
-       hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh" hx-swap="innerHTML">
+       hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh" hx-swap="innerHTML">
     {% include "partials/flow.html" %}
   </div>
   {#- A clip latch is announced once ("Shakers clipped"); the meters themselves are never live regions. -#}
