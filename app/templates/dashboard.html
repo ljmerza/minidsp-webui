@@ -34,7 +34,7 @@
           <button type="button" class="clip-led" :class="{ 'is-on': clip.{{ key }} }"
                   @click="resetClip('{{ key }}')"
                   :aria-label="clipLabel('{{ key }}')">
-            <span x-text="clip.{{ key }} ? 'CLIP' : '–'">&ndash;</span>
+            <span aria-hidden="true">CLIP</span>
           </button>
           <div class="meter-track">
             <div class="meter-bar" :style="barStyle('{{ key }}')"></div>
@@ -45,7 +45,8 @@
         </div>
       {% endfor %}
     </div>
-    <p class="hint">dBFS, peak hold 1.5 s. The clip light latches at &minus;1 dBFS or above; press it to reset.</p>
+    <p class="hint">dBFS, peak hold 1.5 s. A grey CLIP box turns red when its channel reaches &minus;1 dBFS and stays
+      red until you press it (or Reset clip).</p>
   </section>
 
   {#- The cards are re-fetched on sync / desired events; dashboard.js also refreshes them when the active preset

@@ -232,7 +232,7 @@ def parse_backup(raw: bytes | str | Mapping[str, Any]) -> BackupDoc:
     if not isinstance(data, dict):
         raise BackupError("not a minidsp-webui backup: expected a JSON object")
     if data.get("format") != FORMAT:
-        raise BackupError(f"not a minidsp-webui backup (format is {data.get('format')!r}, expected {FORMAT!r})")
+        raise BackupError(f"not a minidsp-webui backup (expected format {FORMAT!r})")
     try:
         backup = BackupDoc.model_validate(data)
     except ValidationError as exc:

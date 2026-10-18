@@ -230,7 +230,7 @@ async def push_path(request: Request, serial: int, preset: int, show: str = "uns
     values = session.writer.state(preset).values(session.profile)
     if not isinstance(path, str) or path not in values:
         ctx = {"t": sync_table_context(request, session, preset, show)}
-        return render(request, "partials/sync_table.html", ctx, status_code=422, error=f"Unknown path {path!r}")
+        return render(request, "partials/sync_table.html", ctx, status_code=422, error="Unknown path")
     if push_confirmation(session, preset, path) and form.get("confirm") not in ("1", "true", "on"):
         ctx = {"t": sync_table_context(request, session, preset, show)}
         error = f"Pushing {path} needs confirmation"
@@ -358,7 +358,7 @@ def _parse_preset(session: DeviceSession, raw: Any) -> int:
     try:
         preset = int(str(raw))
     except (TypeError, ValueError):
-        raise DesiredValidationError(f"preset: expected a number, got {raw!r}") from None
+        raise DesiredValidationError("preset: expected a number") from None
     if not 0 <= preset < session.profile.n_presets:
         raise DesiredValidationError(f"preset {preset + 1} doesn't exist")
     return preset
@@ -380,7 +380,7 @@ async def adopt(request: Request, serial: int) -> Response:
         preset = _parse_preset(session, form.get("preset"))
         mode = form.get("mode")
         if mode not in {m.value for m in AdoptMode}:
-            raise DesiredValidationError(f"choose how to adopt (trust, push or unknown), got {mode!r}")
+            raise DesiredValidationError("choose how to adopt (trust, push or unknown)")
         result = await session.adopt(
             str(mode),
             preset=preset,

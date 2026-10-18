@@ -204,13 +204,28 @@ def merge_patch(target: Any, patch: Any, path: str = "") -> Any:
     return dict(patch)  # e.g. setting a design where there was none
 
 
+def validation_problems(exc: ValidationError) -> list[str]:
+    """``loc: message`` per pydantic error, without the submitted values (``str(exc)`` repeats each ``input_value``,
+    and 422 replies must not echo what was sent)."""
+    return [f"{'.'.join(str(p) for p in err['loc']) or '(root)'}: {err['msg']}" for err in exc.errors()]
+
+
+def describe_apply_error(exc: Exception) -> str:
+    """A `PathError` (names the document path) or a pydantic `ValidationError` as text without submitted values."""
+    return "; ".join(validation_problems(exc)) if isinstance(exc, ValidationError) else str(exc)
+
+
+def script_error_problems(errors: Sequence[Any]) -> list[str]:
+    """``line N: message`` per script error; the line's text is left out so a 422 doesn't echo the script."""
+    return [f"line {e.line}: {e.message}" for e in errors]
+
+
 def parse_doc(data: Any) -> ConfigDoc:
     """Validate a JSON document strictly (no "1" -> true coercion); errors become `DesiredValidationError`."""
     try:
         return ConfigDoc.model_validate(data, strict=True)
     except ValidationError as exc:
-        problems = [f"{'.'.join(str(p) for p in err['loc']) or '(root)'}: {err['msg']}" for err in exc.errors()]
-        raise DesiredValidationError("invalid preset document", problems) from None
+        raise DesiredValidationError("invalid preset document", validation_problems(exc)) from None
 
 
 def factory_defaults_summary(profile: DeviceProfile) -> list[str]:
@@ -764,7 +779,7 @@ class DeviceSession:
         if update.source is not None:
             canonical = p.canonical_source(update.source)
             if canonical is None:
-                raise MasterValidationError(f"unknown source {update.source!r}; expected one of {', '.join(p.sources)}")
+                raise MasterValidationError(f"unknown source; expected one of {', '.join(p.sources)}")
             changes["source"] = canonical
         if update.preset is not None and not 0 <= update.preset < p.n_presets:
             raise MasterValidationError(f"preset {update.preset} outside 0..{p.n_presets - 1}")
@@ -1413,7 +1428,7 @@ class DeviceSession:
         """Channel-scoped `edit`: ``patch`` applies to ``inputs[index]`` or ``outputs[index]``."""
         count = {"input": self.profile.n_inputs, "output": self.profile.n_outputs}.get(kind)
         if count is None:
-            raise DesiredValidationError(f"unknown channel kind {kind!r}")
+            raise DesiredValidationError("unknown channel kind; expected input or output")
         if not 0 <= index < count:
             raise DesiredValidationError(f"{kind} {index} outside 0..{count - 1}")
         if not isinstance(patch, Mapping):
@@ -1425,7 +1440,7 @@ class DeviceSession:
         patch: Any = value
         for part in reversed(path.split(".")):
             if not part:
-                raise DesiredValidationError(f"bad path {path!r}")
+                raise DesiredValidationError("bad path: empty path segment")
             patch = {part: patch}
         return await self.edit(preset, patch, **kwargs)
 
@@ -1737,7 +1752,7 @@ class DeviceSession:
         try:
             mode = AdoptMode(mode)
         except ValueError:
-            raise DesiredValidationError(f"unknown adopt mode {mode!r}; expected trust, push or unknown") from None
+            raise DesiredValidationError("unknown adopt mode; expected trust, push or unknown") from None
         if script is not None and doc is not None:
             raise DesiredValidationError("give either a script or a document, not both")
         await self.ensure_loaded()
@@ -1748,13 +1763,11 @@ class DeviceSession:
         if script is not None:
             parsed = self.parse_cli_script(script)
             if parsed.errors:
-                raise DesiredValidationError(
-                    "the script has errors", [f"line {e.line}: {e.message} ({e.text})" for e in parsed.errors]
-                )
+                raise DesiredValidationError("the script has errors", script_error_problems(parsed.errors))
             try:
                 new = parsed.apply(default_config_doc(self.profile))
             except (PathError, ValidationError) as exc:
-                raise DesiredValidationError(f"the script can't be applied: {exc}") from None
+                raise DesiredValidationError(f"the script can't be applied: {describe_apply_error(exc)}") from None
         elif doc is not None:
             new = parse_doc(doc.model_dump(mode="json"))
         elif mode == AdoptMode.PUSH:
@@ -1904,7 +1917,9 @@ class DeviceSession:
                 for path, value in differs.items():
                     new = set_path(new, path, value)
             except (PathError, ValidationError) as exc:
-                raise DesiredValidationError(f"the device values can't be applied: {exc}") from None
+                raise DesiredValidationError(
+                    f"the device values can't be applied: {describe_apply_error(exc)}"
+                ) from None
             if differs:
                 new = await asyncio.to_thread(annotate_designs, new)
             if problems := validate_doc(new, self.profile):
@@ -1957,13 +1972,11 @@ class DeviceSession:
         """Apply a ``minidsp -f`` script to a preset's desired state (on top of the current doc or the defaults) as
         a mute-wrapped bulk apply. Scripts with errors are refused."""
         if base not in ("current", "default"):
-            raise DesiredValidationError(f"unknown base {base!r}; expected current or default")
+            raise DesiredValidationError("unknown base; expected current or default")
         await self._ready(preset)
         parsed = self.parse_cli_script(text)
         if parsed.errors:
-            raise DesiredValidationError(
-                "the script has errors", [f"line {e.line}: {e.message} ({e.text})" for e in parsed.errors]
-            )
+            raise DesiredValidationError("the script has errors", script_error_problems(parsed.errors))
         if not parsed.ops:
             raise DesiredValidationError("the script contains no preset settings")
         async with self._edit_lock:
@@ -1972,7 +1985,7 @@ class DeviceSession:
             try:
                 new = parsed.apply(start)
             except (PathError, ValidationError) as exc:
-                raise DesiredValidationError(f"the script can't be applied: {exc}") from None
+                raise DesiredValidationError(f"the script can't be applied: {describe_apply_error(exc)}") from None
             new = await asyncio.to_thread(annotate_designs, new)
             await self._prime_fir(self.writer.state(preset).desired, new)
             summary = f"import CLI script ({len(parsed.ops)} setting(s))"

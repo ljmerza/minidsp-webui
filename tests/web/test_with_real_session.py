@@ -53,7 +53,7 @@ async def ctx(tmp_path):
                 session = manager.get(SERIAL)
                 await session.refresh_status()
                 transport = httpx.ASGITransport(app=app)
-                async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+                async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
                     yield http, daemon, session
         finally:
             await client.aclose()

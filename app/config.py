@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     db_path: str = "/data/minidsp-webui.sqlite3"
     log_level: str = "warning"  # SD-card budget (docs/01): info adds startup/event lines, debug every request
     public_url: str = ""  # used for links back to the UI (e.g. HA configuration_url)
-    # Comma-separated host names the UI is reached by (IP addresses and localhost always work). Set, other names are
-    # refused, which stops DNS-rebinding pages; empty serves any Host header.
+    # Comma-separated host names the UI is reached by. IP addresses and localhost always work; any other name is
+    # refused (400), which stops DNS-rebinding pages. Empty = IPs and localhost only; "*" turns the check off.
     allowed_hosts: str = ""
 
     # Sync behaviour

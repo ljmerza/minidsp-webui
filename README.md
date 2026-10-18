@@ -208,9 +208,10 @@ it behind a reverse proxy that adds authentication. When proxying, turn bufferin
 
 Requests that a browser sends on behalf of another site are refused, but a malicious page can get around that with
 DNS rebinding: it points its own host name at the app, and the browser then treats the app as that page's origin.
-Such a page could read the database backup and change the device. To refuse every other name, set `ALLOWED_HOSTS`
-to the names you use for the UI. If you only use its IP address, set `ALLOWED_HOSTS=localhost`. A reverse proxy that
-only forwards its own host name has the same effect.
+Such a page could read the database backup and change the device. So by default the app only answers requests
+addressed to an IP address or `localhost`; any other host name gets a 400. If you reach the UI by a name
+(`minidsp.example.lan`, or the name your reverse proxy forwards), list it in `ALLOWED_HOSTS`. `ALLOWED_HOSTS=*` turns
+the check off, for example behind a reverse proxy that already only forwards its own host name.
 
 ### Health
 
@@ -280,7 +281,7 @@ there take precedence over the environment.
 | `DB_PATH` | `/data/minidsp-webui.sqlite3` | SQLite database; nightly backups go to `backups/` next to it |
 | `LOG_LEVEL` | `warning` | Log level. Per-request lines (the access log and every minidspd call) only appear at `debug` |
 | `PUBLIC_URL` | _(empty)_ | The UI's external URL, used for Home Assistant's "visit device" link |
-| `ALLOWED_HOSTS` | _(empty)_ | Comma-separated host names the UI is reached by, e.g. `minidsp.example.lan`. When set, requests for any other name get a 400 (IP addresses and `localhost` always work). Blocks DNS-rebinding pages; see [Security](#security) |
+| `ALLOWED_HOSTS` | _(empty: IPs and localhost only)_ | Comma-separated host names the UI is reached by, e.g. `minidsp.example.lan`. IP addresses and `localhost` always work; requests for any other name get a 400. `*` disables the check. Blocks DNS-rebinding pages; see [Security](#security) |
 | `DAEMON_TIMEOUT_S` | `5` | Timeout for minidspd HTTP calls (seconds) |
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices (it retries faster while something is missing) |
 | `MONITOR_BACKOFF_MIN_S` / `MONITOR_BACKOFF_MAX_S` | `0.5` / `10` | Reconnect backoff for a device's live status stream |

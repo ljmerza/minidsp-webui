@@ -2,8 +2,9 @@
 
 The API has no login and its CSRF guard (`require_same_origin`) compares ``Origin`` with ``Host``. DNS rebinding beats
 that: a page on ``attacker.example`` re-points its name at this app, and the browser then sends same-origin requests
-with ``Host: attacker.example``. With ``ALLOWED_HOSTS`` set, only IP literals, ``localhost`` and the listed names are
-served, which a rebinding page can't produce.
+with ``Host: attacker.example``. So the check is always on: only IP literals, ``localhost`` and the names listed in
+``ALLOWED_HOSTS`` are served, which a rebinding page can't produce. ``ALLOWED_HOSTS=*`` turns it off (explicit
+opt-out, e.g. behind a reverse proxy that already filters host names).
 """
 
 import ipaddress
@@ -13,10 +14,14 @@ from starlette.datastructures import Headers
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+ANY_HOST = "*"
 
-def parse_allowed_hosts(value: str) -> frozenset[str]:
-    """``ALLOWED_HOSTS`` (comma-separated names) → normalised names. Empty means "don't check"."""
-    return frozenset(_normalise(name) for name in value.split(",") if name.strip())
+
+def parse_allowed_hosts(value: str) -> frozenset[str] | None:
+    """``ALLOWED_HOSTS`` (comma-separated names) → normalised names, or None for ``*`` (don't check at all).
+    Empty means only IP literals and localhost."""
+    names = frozenset(_normalise(name) for name in value.split(",") if name.strip())
+    return None if ANY_HOST in names else names
 
 
 def _normalise(name: str) -> str:

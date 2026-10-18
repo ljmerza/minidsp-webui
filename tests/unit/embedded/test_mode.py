@@ -89,7 +89,7 @@ def _free_port() -> int:
 async def running(app):
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
             yield http
 
 

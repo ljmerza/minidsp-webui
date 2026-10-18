@@ -321,7 +321,7 @@ def _form_float(form: FormData, name: str) -> float:
     try:
         value = float(str(raw))
     except (TypeError, ValueError):
-        raise MasterValidationError(f"{name}: expected a number, got {raw!r}") from None
+        raise MasterValidationError(f"{name}: expected a number") from None
     if not math.isfinite(value):
         raise MasterValidationError(f"{name}: expected a finite number")
     return value
@@ -332,7 +332,7 @@ def _form_int(form: FormData, name: str) -> int:
     try:
         return int(str(raw))
     except (TypeError, ValueError):
-        raise MasterValidationError(f"{name}: expected an integer, got {raw!r}") from None
+        raise MasterValidationError(f"{name}: expected an integer") from None
 
 
 def _form_bool(form: FormData, name: str) -> bool | None:
@@ -344,7 +344,7 @@ def _form_bool(form: FormData, name: str) -> bool | None:
         return True
     if lowered in ("false", "0", "off", "no"):
         return False
-    raise MasterValidationError(f"{name}: expected true or false, got {raw!r}")
+    raise MasterValidationError(f"{name}: expected true or false")
 
 
 @router.post("/ui/devices/{serial}/master/volume", response_class=HTMLResponse)

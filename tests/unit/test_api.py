@@ -23,7 +23,7 @@ async def app_ctx(settings, client, daemon):
                 break
             await asyncio.sleep(0.01)
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
             yield app, http
 
 
@@ -113,7 +113,7 @@ async def test_app_serves_when_daemon_down(settings, client, daemon):
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0.05)
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
             assert (await http.get("/healthz")).status_code == 200
             data = (await http.get("/api/v1/health")).json()
             assert data["daemon"] == "down" and data["device"] == "absent"
@@ -188,7 +188,7 @@ async def test_cross_site_writes_are_refused(app_ctx, daemon, headers):
         {},  # Home Assistant, curl, scripts
         {"Sec-Fetch-Site": "same-origin", "Origin": "http://proxy.example"},  # /docs behind a proxy
         {"Sec-Fetch-Site": "none"},
-        {"Origin": "http://test"},
+        {"Origin": "http://localhost"},
         {"Origin": "http://public.example", "X-Forwarded-Host": "public.example"},
     ],
 )

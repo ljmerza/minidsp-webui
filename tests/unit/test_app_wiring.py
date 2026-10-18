@@ -25,7 +25,7 @@ async def running(settings, client, daemon):
                 break
             await asyncio.sleep(0.01)
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
             yield app, http
 
 

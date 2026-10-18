@@ -101,7 +101,7 @@ def _index(text: str, name: str) -> Index:
         return "all"
     if text.isascii() and text.isdigit():
         return int(text)
-    raise DesiredValidationError(f"{name} must be a 0-based index or 'all', got {text!r}")
+    raise DesiredValidationError(f"{name} must be a 0-based index or 'all'")
 
 
 def _bank(text: str, session: DeviceSession) -> Bank:

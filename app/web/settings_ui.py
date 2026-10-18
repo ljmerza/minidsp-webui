@@ -207,7 +207,7 @@ def _parse_ceiling(raw: str, session: DeviceSession, label: str) -> float | None
     try:
         value = float(raw)
     except ValueError:
-        raise DesiredValidationError(f"{label}: gain ceiling must be a number, got {raw!r}") from None
+        raise DesiredValidationError(f"{label}: gain ceiling must be a number") from None
     p = session.profile
     if not (math.isfinite(value) and p.gain_min_db <= value <= p.gain_max_db):
         raise DesiredValidationError(f"{label}: gain ceiling must be within {p.gain_min_db:g}..{p.gain_max_db:g} dB")
