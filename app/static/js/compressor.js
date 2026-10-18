@@ -13,6 +13,11 @@
   const CURVE_LO = -90;
   const CURVE_HI = 0;
   const RELOAD_DELAY_MS = 350;
+  const THRESHOLD_STEP_DB = 1; // the − / + steppers beside the threshold
+  const STEP_COMMIT_MS = 400; // quick stepper presses are sent once
+
+  // The signed-text parser shared with the PEQ editor (peq_editor.js, loaded first on this tab).
+  const filters = () => (window.mdsp && window.mdsp.filters) || {};
 
   const toast = (message, level) => window.mdsp && window.mdsp.toast && window.mdsp.toast(message, level);
 
@@ -122,13 +127,16 @@
   }
 
   function compressorEditor(cfg) {
-    const ctl = { plot: null, reloadTimer: null };
+    const ctl = { plot: null, reloadTimer: null, stepTimer: null, stepTarget: null };
 
     return {
       cfg,
       loaded: false,
       server: null,
       form: { threshold_db: 0, ratio: 1, attack_ms: 10, release_ms: 100 },
+      // The threshold is signed, so its field is text (phase 9 P01): a number field plus x-model.number wiped a typed
+      // "-", and "-10" arrived as 10. Parsed on every keystroke, committed on change only when it's a whole number.
+      thresholdText: '0',
       bypass: true,
       sync: {},
       presets: {},
@@ -164,6 +172,8 @@
       apply(view) {
         this.server = view.compressor;
         this.form = Object.fromEntries(FIELDS.map((k) => [k, view.compressor[k]]));
+        if (ctl.stepTarget !== null) this.form.threshold_db = ctl.stepTarget; // stepper presses not sent yet win
+        this.syncThresholdText();
         this.bypass = view.compressor.bypass;
         this.sync = { ...view.sync_status };
         this.presets = view.presets || this.presets;
@@ -256,6 +266,7 @@
           this.form = Object.fromEntries(FIELDS.map((k) => [k, this.server[k]]));
           this.bypass = this.server.bypass;
         }
+        this.syncThresholdText();
         this.render();
       },
 
@@ -278,6 +289,95 @@
 
       applyPreset(key) {
         this.put({ preset: key, bypass: false });
+      },
+
+      // --- threshold (signed text field + steppers) ----------------------------------------------------------------
+
+      syncThresholdText() {
+        this.thresholdText = filters().fieldText ? filters().fieldText(this.form.threshold_db) : String(this.form.threshold_db);
+      },
+
+      parseThreshold() {
+        const parse = filters().parseSigned;
+        if (parse) return parse(this.thresholdText);
+        const v = Number(this.thresholdText);
+        return Number.isFinite(v) && String(this.thresholdText).trim() !== '' ? { kind: 'number', value: v } : { kind: 'invalid' };
+      },
+
+      // Flags text that can't become a threshold: not a number, or out of range. A half-typed "-" isn't flagged.
+      thresholdInvalid() {
+        const parsed = this.parseThreshold();
+        if (parsed.kind === 'partial') return false;
+        if (parsed.kind !== 'number') return true;
+        const [lo, hi] = this.range('threshold_db');
+        return (lo !== null && parsed.value < lo) || (hi !== null && parsed.value > hi);
+      },
+
+      // While typing: a whole number moves the curve; a half-typed "-" or "." changes nothing.
+      onThresholdInput() {
+        const parsed = this.parseThreshold();
+        if (parsed.kind !== 'number') return;
+        this.form.threshold_db = parsed.value;
+        this.render();
+      },
+
+      // Change/blur: refused (and the stored value put back) unless the text is a whole number in range.
+      commitThreshold() {
+        const parsed = this.parseThreshold();
+        if (parsed.kind !== 'number') {
+          const [lo, hi] = this.range('threshold_db');
+          toast(`${LABELS.threshold_db} must be a number between ${lo} and ${hi}`);
+          this.revert();
+          return;
+        }
+        this.form.threshold_db = parsed.value;
+        this.commit('threshold_db');
+        if (!this.invalid('threshold_db')) this.syncThresholdText();
+      },
+
+      // The slider moved: the text field follows.
+      onThresholdSlide() {
+        this.syncThresholdText();
+        this.render();
+      },
+
+      canStep(direction) {
+        const [lo, hi] = this.range('threshold_db');
+        const v = Number(this.form.threshold_db);
+        if (!this.loaded || !Number.isFinite(v)) return false;
+        return direction > 0 ? hi === null || v < hi : lo === null || v > lo;
+      },
+
+      // − / +: 1 dB steps inside the range; quick presses are sent once (no minus key needed on a phone).
+      stepThreshold(direction) {
+        if (!this.canStep(direction)) return;
+        const [lo, hi] = this.range('threshold_db');
+        let v = Math.round((Number(this.form.threshold_db) + direction * THRESHOLD_STEP_DB) * 2) / 2;
+        if (lo !== null) v = Math.max(lo, v);
+        if (hi !== null) v = Math.min(hi, v);
+        ctl.stepTarget = v;
+        this.form.threshold_db = v;
+        this.syncThresholdText();
+        this.render();
+        this.scheduleStep();
+      },
+
+      scheduleStep() {
+        clearTimeout(ctl.stepTimer);
+        ctl.stepTimer = setTimeout(() => this.flushStep(), cfg.stepDelayMs ?? STEP_COMMIT_MS);
+      },
+
+      // Sends the stepped threshold; waits while an earlier request is on its way, so replies can't arrive out of order.
+      flushStep() {
+        if (ctl.stepTarget === null) return;
+        if (this.inflight) {
+          this.scheduleStep();
+          return;
+        }
+        this.form.threshold_db = ctl.stepTarget;
+        ctl.stepTarget = null;
+        this.syncThresholdText();
+        this.commit('threshold_db');
       },
     };
   }

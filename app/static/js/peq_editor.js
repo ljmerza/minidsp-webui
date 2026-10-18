@@ -41,6 +41,27 @@
   const roundGain = (g) => round(g, 1);
   const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
 
+  // A signed number typed into a text field (phase 9 P01). A number <input> reports a lone "-" as "" and Alpine's
+  // x-model.number then wipes it, so "-4" typed key by key arrived as +4. Signed fields are therefore text fields
+  // parsed here: a half-typed sign or point ("-", "-.", "+", ".") is "partial" and changes nothing, so it can't flip
+  // the stored value, and a commit is refused until the text is a whole number. Accepts the UI's own minus sign
+  // (U+2212, from app.js fmtNum) and a decimal comma. Returns { kind: 'empty' | 'partial' | 'number' | 'invalid',
+  // value }.
+  const SIGNED = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+  const SIGNED_PARTIAL = /^[+-]?\.?$/;
+  function parseSigned(text) {
+    if (typeof text === 'number') return Number.isFinite(text) ? { kind: 'number', value: text } : { kind: 'invalid', value: null };
+    const s = String(text ?? '').trim().replace(/[\u2212\u2012\u2013\ufe63\uff0d]/g, '-').replace(',', '.');
+    if (s === '') return { kind: 'empty', value: null };
+    if (SIGNED_PARTIAL.test(s)) return { kind: 'partial', value: null };
+    if (!SIGNED.test(s)) return { kind: 'invalid', value: null };
+    const value = Number(s);
+    return { kind: 'number', value: Object.is(value, -0) ? 0 : value };
+  }
+
+  // A number for a text field: plain ASCII, no trailing zeros ("-4", "4.5"), "" for none.
+  const fieldText = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '' : String(Number(v) + 0));
+
   // JSON request to the /ui routes; never throws. { ok, status, data }.
   async function request(url, { method = 'GET', body } = {}) {
     const headers = { Accept: 'application/json' };
@@ -167,21 +188,41 @@
 
   const helpers = {
     ICON, RANK, BAND_COLORS, request, send, errorText, parseEvent, worst, applySync, remember, biquadFromForm,
-    stability, fullPrecision, createPlot, pageView, pointerData, roundFreq, roundQ, roundGain, clamp,
+    stability, fullPrecision, createPlot, pageView, pointerData, roundFreq, roundQ, roundGain, clamp, parseSigned,
+    fieldText,
   };
   window.mdsp = Object.assign(window.mdsp || {}, { filters: helpers });
 
   // --- PEQ editor ------------------------------------------------------------------------------------------------
 
+  // The gain is shown as Cut / Boost plus a magnitude (phase 9 P01/P07): no minus key needed. `gain_db` stays the
+  // signed value the preview, the graph and the server use; `cut` and `mag` (text) follow it. 0 dB counts as Cut, so
+  // a magnitude typed into a fresh band lowers rather than raises.
+  function setGainFields(form) {
+    const g = num(form.gain_db);
+    if (g === null || !Number.isFinite(g)) {
+      form.mag = '';
+      return;
+    }
+    form.cut = g < 0 || (g === 0 && form.cut !== false);
+    form.mag = fieldText(Math.abs(g));
+  }
+
+  const signedGain = (cut, magnitude) => (magnitude === 0 ? 0 : cut ? -magnitude : magnitude);
+
   function formFromDesign(design) {
     const lt = design.lt || null;
-    return {
+    const form = {
       type: design.type,
       freq: design.freq ?? null,
       q: design.q ?? null,
       gain_db: design.gain_db ?? null,
+      cut: true,
+      mag: '',
       lt: lt ? { ...lt } : { f0: 30, q0: 0.7, fp: 15, qp: 0.5 },
     };
+    setGainFields(form);
+    return form;
   }
 
   function designFromForm(form) {
@@ -317,6 +358,14 @@
       },
       isActive(band) {
         return !band.bypass && band.form.type !== 'passthrough';
+      },
+      // Unused (flat) or switched-off bands say "off" instead of a sync glyph (phase 9 P07): a ✓ on a band that is
+      // off made edits look applied.
+      isOff(band) {
+        return band.bypass || band.design.type === 'passthrough';
+      },
+      statusText(band) {
+        return this.isOff(band) ? 'off' : this.status(band);
       },
       isDragging(band) {
         return ctl.drag !== null && ctl.drag.index === band.index;
@@ -464,6 +513,7 @@
         if (GAIN_TYPES.has(band.form.type)) {
           drag.gain = clamp(drag.gain + (cur.value - drag.last.value) * fine, GAIN_MIN, GAIN_MAX);
           band.form.gain_db = roundGain(drag.gain);
+          setGainFields(band.form);
         }
         drag.last = cur;
         drag.moved = true;
@@ -552,6 +602,45 @@
         this.scheduleRender();
       },
 
+      // The magnitude field while typing: a whole number updates the preview (a typed "-" also picks Cut, a "+"
+      // Boost, a bare number keeps the current choice); a half-typed "-" or "." changes nothing.
+      onGainInput(band) {
+        const parsed = parseSigned(band.form.mag);
+        band.dirty = true;
+        this.selected = band.index;
+        if (parsed.kind !== 'number') return;
+        const text = String(band.form.mag).trim();
+        if (parsed.value < 0) band.form.cut = true;
+        else if (/^\+/.test(text)) band.form.cut = false;
+        band.form.gain_db = signedGain(band.form.cut, Math.abs(parsed.value));
+        this.onFieldInput(band);
+      },
+
+      // Change/blur on the magnitude field: refused (and put back) unless the text is a whole number.
+      commitGain(band) {
+        if (!band || band.external) return;
+        const parsed = parseSigned(band.form.mag);
+        if (parsed.kind !== 'number') {
+          toast(`Band ${band.index + 1}: type how many dB to cut or boost, for example 4`);
+          band.dirty = false;
+          this.revert(band);
+          return;
+        }
+        this.onGainInput(band);
+        this.commitForm(band);
+      },
+
+      // The Cut / Boost choice: flips the sign of the current magnitude and sends it when that changes the gain.
+      setCut(band, cut) {
+        if (!band || band.external) return;
+        band.form.cut = cut;
+        const g = num(band.form.gain_db);
+        if (g === null || g === 0) return;
+        band.form.gain_db = signedGain(cut, Math.abs(g));
+        this.selected = band.index;
+        this.commitForm(band);
+      },
+
       onTypeChange(band) {
         const t = band.form.type;
         const fallback = this.view === 'sub' ? 60 : 1000;
@@ -561,6 +650,7 @@
         if (!FREQ_TYPES.has(t)) band.form.freq = null;
         if (!Q_TYPES.has(t)) band.form.q = null;
         if (!GAIN_TYPES.has(t)) band.form.gain_db = null;
+        setGainFields(band.form);
         this.selected = band.index;
         if (t === 'raw' || t === 'lt') {
           this.openDrawer(band); // applied from the drawer
@@ -589,6 +679,17 @@
         if (FREQ_TYPES.has(form.type)) fit('freq', FREQ_MIN, fMax, roundFreq);
         if (Q_TYPES.has(form.type)) fit('q', Q_MIN, Q_MAX, roundQ);
         if (GAIN_TYPES.has(form.type)) fit('gain_db', GAIN_MIN, GAIN_MAX, roundGain);
+        if (GAIN_TYPES.has(form.type)) setGainFields(form);
+      },
+
+      // Choosing a filter for an unused band turns it on in the same request (phase 9 P07): before, a band picked
+      // from "— unused" stayed bypassed, so its edits seemed to do nothing. An all-zero raw slot is unused too: a
+      // factory device and a readback store zeros there, and the table shows it as "Raw".
+      turnOn(band, type) {
+        const d = band.server && band.server.design;
+        const zeros = d && d.type === 'raw' && d.raw && ['b0', 'b1', 'b2'].every((k) => Number(d.raw[k]) === 0);
+        const unused = d && (d.type === 'passthrough' || zeros);
+        return unused && band.bypass && type !== 'passthrough' ? { bypass: false } : {};
       },
 
       commitForm(band) {
@@ -600,7 +701,7 @@
           this.revert(band);
           return;
         }
-        this.queue(band, { design: designFromForm(band.form) });
+        this.queue(band, { design: designFromForm(band.form), ...this.turnOn(band, band.form.type) });
       },
 
       // --- raw drawer --------------------------------------------------------------------------------------------
@@ -632,7 +733,7 @@
         }
         band.preview = bq;
         this.render();
-        this.queue(band, { raw: bq });
+        this.queue(band, { raw: bq, ...this.turnOn(band, 'raw') });
       },
       applyLt(band) {
         band.form.type = 'lt';

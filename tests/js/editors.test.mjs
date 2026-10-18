@@ -176,6 +176,159 @@ describe('peqEditor', () => {
   });
 });
 
+// --- signed numbers (phase 9 P01) ---------------------------------------------------------------------------------
+
+describe('parseSigned', () => {
+  const { parseSigned } = window.mdsp.filters;
+
+  test('a half-typed sign or point is kept as partial, never as a number', () => {
+    for (const text of ['-', '-.', '+', '+.', '.', '−', ' - ']) {
+      assert.deepEqual(parseSigned(text), { kind: 'partial', value: null }, JSON.stringify(text));
+    }
+  });
+
+  test('signed numbers keep their sign', () => {
+    assert.deepEqual(parseSigned('-4'), { kind: 'number', value: -4 });
+    assert.deepEqual(parseSigned('4'), { kind: 'number', value: 4 });
+    assert.deepEqual(parseSigned('+4'), { kind: 'number', value: 4 });
+    assert.deepEqual(parseSigned('−4.5'), { kind: 'number', value: -4.5 }); // the UI's own minus sign, pasted
+    assert.deepEqual(parseSigned('-.5'), { kind: 'number', value: -0.5 });
+    assert.deepEqual(parseSigned(' 4. '), { kind: 'number', value: 4 });
+    assert.deepEqual(parseSigned('-4,5'), { kind: 'number', value: -4.5 });
+    assert.deepEqual(parseSigned(-3), { kind: 'number', value: -3 });
+  });
+
+  test('empty and invalid text', () => {
+    assert.deepEqual(parseSigned(''), { kind: 'empty', value: null });
+    assert.deepEqual(parseSigned(null), { kind: 'empty', value: null });
+    for (const text of ['abc', '4-', '--4', '1e3', '4.5.1', '- 4']) assert.equal(parseSigned(text).kind, 'invalid', text);
+  });
+});
+
+describe('peqEditor signed gain (Cut / Boost + magnitude)', () => {
+  const UNUSED = { type: 'passthrough' };
+  const BOOST = { ...PEQ, gain_db: 2 };
+
+  test('the form shows Cut / Boost and a magnitude', async () => {
+    const ed = await peqEditor([bandView(0), bandView(1, { design: BOOST }), bandView(2, { design: { ...PEQ, gain_db: 0 } })]);
+    assert.deepEqual([ed.bands[0].form.cut, ed.bands[0].form.mag], [true, '3']);
+    assert.deepEqual([ed.bands[1].form.cut, ed.bands[1].form.mag], [false, '2']);
+    assert.deepEqual([ed.bands[2].form.cut, ed.bands[2].form.mag], [true, '0']); // 0 dB defaults to Cut
+  });
+
+  test('typing "-4" key by key never previews or commits a +4 boost', async () => {
+    const ed = await peqEditor([bandView(0, { design: BOOST })]);
+    const band = ed.bands[0];
+    for (const text of ['-', '-4']) {
+      band.form.mag = text;
+      ed.onGainInput(band);
+      assert.ok(!(band.form.gain_db > 0 && text === '-4'), 'a typed minus must never become a boost');
+    }
+    assert.equal(posts().length, 0); // typing alone sends nothing
+    assert.equal(band.form.gain_db, -4);
+    assert.equal(band.form.cut, true);
+    ed.commitGain(band);
+    await settle();
+    assert.equal(posts().length, 1);
+    assert.equal(posts()[0].body.design.gain_db, -4);
+    assert.equal(band.form.mag, '4'); // the sign moved into the Cut / Boost choice
+  });
+
+  test('a lone "-" leaves the stored gain alone and is not committed', async () => {
+    const ed = await peqEditor([bandView(0, { design: BOOST })]);
+    const band = ed.bands[0];
+    band.form.mag = '-';
+    ed.onGainInput(band);
+    assert.equal(band.form.gain_db, 2);
+    ed.commitGain(band);
+    await settle();
+    assert.equal(posts().length, 0);
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0], /Band 1/);
+    assert.deepEqual([ed.bands[0].form.gain_db, ed.bands[0].form.mag], [2, '2']); // put back
+  });
+
+  test('Cut + 4 stores -4, and an unsigned magnitude keeps the chosen sign', async () => {
+    const ed = await peqEditor([bandView(0, { design: { ...PEQ, gain_db: 0 } }), bandView(1)]);
+    const band = ed.bands[0];
+    ed.setCut(band, true);
+    band.form.mag = '4';
+    ed.onGainInput(band);
+    ed.commitGain(band);
+    await settle();
+    assert.equal(posts()[0].body.design.gain_db, -4);
+
+    ed.bands[1].form.mag = '6'; // band 2 is a 3 dB cut
+    ed.onGainInput(ed.bands[1]);
+    ed.commitGain(ed.bands[1]);
+    await settle();
+    assert.equal(posts()[1].body.design.gain_db, -6);
+  });
+
+  test('switching Cut to Boost flips the stored gain at once', async () => {
+    const ed = await peqEditor([bandView(0)]);
+    ed.setCut(ed.bands[0], false);
+    await settle();
+    assert.equal(posts()[0].body.design.gain_db, 3);
+    assert.equal(ed.bands[0].form.cut, false);
+  });
+
+  test('a clamped gain updates the magnitude and the sign', async () => {
+    const ed = await peqEditor([bandView(0)]);
+    ed.bands[0].form.gain_db = 200;
+    ed.commitForm(ed.bands[0]);
+    assert.deepEqual([ed.bands[0].form.cut, ed.bands[0].form.mag], [false, '20']);
+  });
+
+  test('picking a type on an unused band turns it on in the same request', async () => {
+    const ed = await peqEditor([bandView(0, { design: UNUSED }), bandView(1, { design: UNUSED })]);
+    const band = ed.bands[1];
+    band.form.type = 'peaking';
+    ed.onTypeChange(band);
+    await settle();
+    assert.equal(posts().length, 1);
+    assert.equal(posts()[0].body.bypass, false);
+    assert.equal(posts()[0].body.design.type, 'peaking');
+  });
+
+  test('an empty (all-zero) raw slot counts as unused, so picking a type turns it on', async () => {
+    // A factory device and a readback store zeros in unused slots; the table shows them as "Raw".
+    const ZEROS = { b0: 0, b1: 0, b2: 0, a1: 0, a2: 0 };
+    const ed = await peqEditor([bandView(0, { design: { type: 'raw', raw: ZEROS } })]);
+    ed.bands[0].form.type = 'peaking';
+    ed.onTypeChange(ed.bands[0]);
+    await settle();
+    assert.equal(posts()[0].body.bypass, false);
+  });
+
+  test('a bypassed raw filter that is not empty keeps its on/off switch', async () => {
+    const ed = await peqEditor([bandView(0, { design: { type: 'raw', raw: { ...FLAT, b0: 0.5 } } })]);
+    ed.bands[0].form.type = 'peaking';
+    ed.onTypeChange(ed.bands[0]);
+    await settle();
+    assert.equal('bypass' in posts()[0].body, false);
+  });
+
+  test('a type change on a band already in use leaves its on/off switch alone', async () => {
+    const ed = await peqEditor([bandView(0, { bypass: true })]);
+    ed.bands[0].form.type = 'lowshelf';
+    ed.onTypeChange(ed.bands[0]);
+    await settle();
+    assert.equal('bypass' in posts()[0].body, false);
+  });
+
+  test('unused and switched-off bands say "off"', async () => {
+    const ed = await peqEditor([
+      bandView(0, { design: UNUSED }),
+      bandView(1, { bypass: true }),
+      bandView(2, { bypass: false }),
+    ]);
+    assert.equal(ed.statusText(ed.bands[0]), 'off');
+    assert.equal(ed.statusText(ed.bands[1]), 'off');
+    assert.notEqual(ed.statusText(ed.bands[2]), 'off');
+  });
+});
+
 // --- crossover designer -------------------------------------------------------------------------------------------
 
 const LR4 = { kind: 'lp', family: 'lr', order: 4, freq: 80, freq_hi: null, bessel_norm: 'phase' };
