@@ -1,4 +1,5 @@
-{#- Channel names, colours and per-output level limits ("gain ceiling" in the code and API). Rendered with ``c``. -#}
+{#- Channel names, colours and per-output level limits ("gain ceiling" in the code and API). Rendered with ``c``.
+    On phones the table becomes one card per channel (static/css/shell.css), labelled from ``data-label``. -#}
 <form id="settings-channels" class="settings-form" hx-post="{{ c.channels_url }}" hx-target="this" hx-swap="outerHTML">
   {% if c.errors %}
     <div class="form-errors" role="alert"><ul>{% for e in c.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
@@ -15,10 +16,10 @@
         {% for r in c.rows %}
           <tr>
             <th scope="row">{{ r.default_name }}</th>
-            <td><input type="text" name="{{ r.key }}-name" value="{{ r.name }}" maxlength="32" autocomplete="off"
+            <td data-label="Name"><input type="text" name="{{ r.key }}-name" value="{{ r.name }}" maxlength="32" autocomplete="off"
                        placeholder="{{ r.default_name }}" aria-label="{{ r.default_name }} name"></td>
-            <td><input type="color" name="{{ r.key }}-color" value="{{ r.color }}" aria-label="{{ r.default_name }} colour"></td>
-            <td>
+            <td data-label="Colour"><input type="color" name="{{ r.key }}-color" value="{{ r.color }}" aria-label="{{ r.default_name }} colour"></td>
+            <td data-label="Level limit"{% if r.kind != "output" %} class="no-limit"{% endif %}>
               {% if r.kind == "output" %}
                 <span class="num-field">
                   <input type="number" name="{{ r.key }}-max_gain_db" inputmode="decimal" step="0.5"

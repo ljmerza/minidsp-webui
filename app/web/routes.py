@@ -25,8 +25,8 @@ from app.sync.session import (
     SessionState,
 )
 from app.sync.summary import session_summary
-from app.web import devices, flow, glossary
-from app.web.nav import build_nav
+from app.web import devices, flow, glossary, shell
+from app.web.nav import build_nav, nav_groups
 from app.web.templating import graph_defaults, templates
 
 router = APIRouter(include_in_schema=False)
@@ -98,6 +98,11 @@ def header_context(request: Request, session: DeviceSession | None) -> dict[str,
         "sources": list(profile.sources) if profile else [],
         "volume_confirm_db": settings.gain_step_confirm_db,
         "unsupported": [d.product_name or "unknown" for d in manager.unsupported],
+        # The global shell (phase 9 design §3): the problems pill of the playing preset and the Help me… menu.
+        "problems": shell.problems_view(request, session) if session is not None else None,
+        "help_menu": shell.help_menu(request),
+        "meters_href": shell.meters_href(request),
+        "short_status": shell.short_status,
         **devices.header_extras(request, session),  # device switcher and storage banner
     }
 
@@ -110,11 +115,21 @@ def _url(request: Request, path: str, **params: Any) -> str:
 
 def page_context(request: Request, session: DeviceSession | None, topics: tuple[str, ...]) -> dict[str, Any]:
     serial = session.serial if session else None
+    nav = build_nav(
+        request, session.profile if session else None, getattr(session, "channel_meta", None) if session else None
+    )
+    # Every page listens to the meters too: the header's CLIP light latches on any page (design §3.1).
+    if "levels" not in topics:
+        topics = (*topics, "levels")
     return {
         **header_context(request, session),
-        "nav": build_nav(
-            request, session.profile if session else None, getattr(session, "channel_meta", None) if session else None
-        ),
+        "nav": nav,
+        "nav_groups": nav_groups(nav),
+        # Channel names for the header's CLIP light ("Shakers clipped").
+        "clip_names": {
+            "i": [c.label for c in _nav_children(nav, "/inputs")],
+            "o": [c.label for c in _nav_children(nav, "/outputs")],
+        },
         "sse_url": _url(request, "/api/v1/events", topics=",".join(topics), serial=serial),
         "header_url": _url(request, "/ui/header", serial=serial),
     }

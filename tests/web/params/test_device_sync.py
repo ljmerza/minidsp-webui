@@ -23,7 +23,8 @@ async def test_device_page_loads_the_new_sections(ctx):
     assert f'hx-get="/ui/devices/{SERIAL}/sync-panel?preset=2"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/events"' in html
-    assert f'sse-connect="/api/v1/events?topics=master%2Cdevice%2Csync%2Clog%2Cverify&amp;serial={SERIAL}"' in html
+    topics = "master%2Cdevice%2Csync%2Clog%2Cverify%2Clevels"  # levels: the header's CLIP light (phase 9 §3.1)
+    assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
     assert 'id="sync"' in html and 'id="adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/verify"' in html and 'id="verify"' in html
 

@@ -141,10 +141,8 @@ input[type="range"] { accent-color: var(--accent); min-height: 2.5rem; margin: 0
 
 .layout { display: block; }
 
-.nav-toggle { display: block; margin: 0.5rem 0.75rem 0; }
-
-.sidenav { display: none; padding: 0.5rem 0.75rem; }
-.sidenav.is-open { display: block; }
+/* The ≡ button, the navigation sheet and the sidebar's position: static/css/shell.css. */
+.sidenav { padding: 0.5rem 0.75rem; }
 .sidenav ul { list-style: none; margin: 0; padding: 0; }
 .sidenav ul ul { padding-left: 0.9rem; }
 .sidenav a, .nav-disabled { display: block; padding: 0.4rem 0.6rem; border-radius: var(--radius); text-decoration: none; }
@@ -157,11 +155,6 @@ input[type="range"] { accent-color: var(--accent); min-height: 2.5rem; margin: 0
 
 @media (min-width: 900px) {
   .layout { display: grid; grid-template-columns: var(--sidebar-w) 1fr; align-items: start; }
-  .nav-toggle { display: none; }
-  .sidenav, .sidenav.is-open {
-    display: block; position: sticky; top: 7rem;
-    border-right: 1px solid var(--border); min-height: calc(100vh - 7rem);
-  }
   .content { padding: 1rem 1.25rem; }
 }
 
@@ -599,11 +592,7 @@ input.coef { width: 11.5rem; min-height: 2.2rem; font-family: var(--mono); font-
 /* --- phones ------------------------------------------------------------------------------------------------------ */
 
 @media (max-width: 599px) {
-  .hdr-device { width: 100%; }
-  .app-header { position: static; } /* a three-row sticky header would eat a third of the screen */
-  .hdr-volume { flex-basis: 100%; flex-wrap: wrap; }
-  .hdr-volume input[type="range"] { order: 10; flex-basis: 100%; } /* full-width slider under the buttons */
-  .vol-value { margin-left: auto; }
+  /* The phone header (48 px) and bottom bar (64 px): static/css/shell.css. */
   .meter-track, .meter-scale { height: 11rem; }
   .meter { flex-basis: 2.4rem; min-width: 2.4rem; }
   .meter-value { white-space: normal; } /* "−104.0 dBFS" wraps under the bar instead of widening it */

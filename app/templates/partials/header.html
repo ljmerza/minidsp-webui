@@ -10,9 +10,18 @@
 {#- ``devices`` (switcher entries, only with more than one device) and ``storage_problem`` come from
     app.web.devices.header_extras. -#}
 {%- set device_choices = devices if devices is defined and devices else [] -%}
+{#- A fix button of the problems list: an inline edit (static/js/shell.js sends it, then offers Undo) or a link. -#}
+{%- macro shell_fix(fx, edit_url, preset) -%}
+  {%- if fx.values -%}
+    <button type="button" class="btn-small" data-shell-fix data-url="{{ edit_url }}" data-preset="{{ preset }}"
+            data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
+  {%- elif fx.href -%}
+    <a class="btn-link btn-small" href="{{ fx.href }}">{{ fx.label }}</a>
+  {%- endif -%}
+{%- endmacro -%}
 <div class="hdr" data-serial="{{ serial if serial is not none else '' }}"
      hx-target="#app-header" hx-swap="innerHTML">
-  <div class="hdr-row">
+  <div class="hdr-row hdr-top">
     <div class="hdr-device">
       {% if device_choices %}
       <form class="hdr-devices" method="get" action="{{ root }}/ui/devices/select" x-data>
@@ -42,31 +51,39 @@
 
     {% if session is not none %}
     {%- set ns = namespace(waiting=[]) %}
-    <div class="hdr-presets" role="group" aria-labelledby="hdr-preset-label">
-      <span class="hdr-label" id="hdr-preset-label">Device preset</span>{{ help("device-preset") }}
-      {% for p in presets %}
-        {%- set active = master is not none and master.preset == p %}
-        {%- set staged = session.sync_summary(p).counts.pending if tracked and not active else 0 %}
-        {%- if staged %}{% set ns.waiting = ns.waiting + [(p, staged)] %}{% endif %}
-        <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}{% if staged %} has-staged{% endif %}"
-                aria-pressed="{{ 'true' if active else 'false' }}"
-                aria-label="Preset {{ p + 1 }}{% if active %} (playing){% endif %}{% if staged %}, {{ staged }} change{{ 's' if staged != 1 }} waiting{% endif %}"
-                aria-keyshortcuts="{{ p + 1 }}"
-                data-preset-key="{{ p + 1 }}"
-                {%- if not controls_enabled or active %} disabled{% endif %}
-                hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
-                hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
-          {{- p + 1 -}}
-          {%- if active %}<span class="preset-mark" aria-hidden="true">&#9654;</span>{% endif -%}
-          {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
-        </button>
-      {% endfor %}
+    {#- Desktop: the four preset buttons inline. Phone: "P1 ▾" opens them as a sheet that says what each holds. -#}
+    <div class="hdr-sheet hdr-preset-box" x-data="hdrSheet" :class="{ 'is-open': open }"
+         @keydown.escape="close(true)" @click.outside="close(false)">
+      <button type="button" class="hdr-sheet-toggle hdr-preset-toggle" @click="toggle()"
+              aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-presets">
+        <span aria-hidden="true">P{{ active_preset + 1 if active_preset is not none else "?" }} &#9662;</span>
+        <span class="visually-hidden">Device preset{% if active_preset is not none %} {{ active_preset + 1 }} is playing{% endif %}. Choose a preset</span>
+      </button>
+      <div class="hdr-presets hdr-sheet-panel" id="hdr-presets" role="group" aria-labelledby="hdr-preset-label">
+        <span class="hdr-presets-head"><span class="hdr-label" id="hdr-preset-label">Device preset</span>{{ help("device-preset") }}</span>
+        {% for p in presets %}
+          {%- set active = master is not none and master.preset == p %}
+          {%- set staged = session.sync_summary(p).counts.pending if tracked and not active else 0 %}
+          {%- if staged %}{% set ns.waiting = ns.waiting + [(p, staged)] %}{% endif %}
+          <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}{% if staged %} has-staged{% endif %}"
+                  aria-pressed="{{ 'true' if active else 'false' }}"
+                  aria-label="Preset {{ p + 1 }}{% if active %} (playing){% endif %}{% if staged %}, {{ staged }} change{{ 's' if staged != 1 }} waiting{% endif %}"
+                  aria-keyshortcuts="{{ p + 1 }}"
+                  data-preset-key="{{ p + 1 }}"
+                  {%- if not controls_enabled or active %} disabled{% endif %}
+                  hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
+                  hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
+            {{- p + 1 -}}
+            {%- if active %}<span class="preset-mark" aria-hidden="true">&#9654;</span>{% endif -%}
+            {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
+            <span class="preset-desc" aria-hidden="true">
+              {%- if active %}Playing{% elif staged %}{{ staged }} waiting{% else %}Not playing{% endif -%}
+            </span>
+          </button>
+        {% endfor %}
+        <p class="hdr-sheet-note">Switching asks first. Audio may drop out for a few seconds while the device reloads.</p>
+      </div>
     </div>
-    {% if ns.waiting %}
-    <p class="hdr-waiting">
-      {%- for p, n in ns.waiting %}<span><span aria-hidden="true">&#9208;</span> Preset {{ p + 1 }}: {{ n }} waiting</span>{% endfor -%}
-      {{ help("waiting") }}</p>
-    {% endif %}
 
     <div class="hdr-source">
       <label class="hdr-label" for="master-source">Source</label>{{ help("source") }}
@@ -79,23 +96,101 @@
       </select>
     </div>
 
-    <button type="button" id="master-mute" class="mute{% if muted %} is-muted{% endif %}"
-            aria-pressed="{{ 'true' if muted else 'false' }}" aria-keyshortcuts="m"
-            {%- if not controls_enabled %} disabled{% endif %}
-            hx-post="{{ base }}/mute"
-            {%- if master is not none and master.mute is not none %} hx-vals='{"mute": "{{ "false" if muted else "true" }}"}'{% endif %}>
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>
-        {%- if muted %}<path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/>
-        {%- else %}<path d="M16 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none"/>{% endif %}
-      </svg>
-      <span>{{ "Muted" if muted else "Mute" }}</span>
-    </button>
+
+    {% if problems is not none %}
+    {#- The problems pill (design §3.3): problems and cautions of the playing preset; info notes aren't counted. -#}
+    <div class="hdr-sheet hdr-problems{% if not problems.count %} is-clear{% endif %}" x-data="hdrSheet"
+         :class="{ 'is-open': open }" @keydown.escape="close(true)" @click.outside="close(false)"
+         data-problems-announce="{{ problems.announce }}" data-problems-preset="{{ problems.preset }}">
+      <button type="button" class="hdr-sheet-toggle hdr-pill {{ 'pill-warn' if problems.count else 'pill-ok' }}"
+              @click="toggle()" aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-problems-list">
+        <span aria-hidden="true">{{ "⚠" if problems.count else "✓" }}</span>
+        {%- if problems.count %} <span class="pill-count">{{ problems.count }}</span><span class="pill-word"> problem{{ "s" if problems.count != 1 }}</span>
+        {%- else %} <span class="pill-word">No problems</span>{% endif %}
+      </button>
+      <div class="hdr-sheet-panel hdr-pop hdr-problems-list" id="hdr-problems-list" role="region" aria-labelledby="hdr-problems-title">
+        {%- set fix_url = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ problems.preset ~ "/edit" %}
+        <h2 class="hdr-pop-title" id="hdr-problems-title">Problems ({{ problems.count }})</h2>
+        {% if problems.items %}
+        <ul class="pill-items">
+          {% for item in problems.items %}
+            <li class="pill-item pill-{{ item.level }}"><span class="pill-text"><span aria-hidden="true">{{ item.glyph }}</span> {{ item.text }}</span>
+              {%- if item.fixes %}<span class="pill-fixes">{% for fx in item.fixes %}{{ shell_fix(fx, fix_url, problems.preset) }}{% endfor %}</span>{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="pill-none"><span aria-hidden="true">✓</span> Everything the app can check looks fine.</p>
+        {% endif %}
+        {% if problems.notes %}
+        <h3 class="hdr-pop-sub">Notes (not problems)</h3>
+        <ul class="pill-items">
+          {% for item in problems.notes %}
+            <li class="pill-item pill-info"><span class="pill-text"><span aria-hidden="true">{{ item.glyph }}</span> {{ item.text }}</span>
+              {%- if item.fixes %}<span class="pill-fixes">{% for fx in item.fixes %}{{ shell_fix(fx, fix_url, problems.preset) }}{% endfor %}</span>{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {%- set diagnose = help_menu|first %}
+        <p class="pill-more"><a class="btn-link" href="{{ root }}{{ diagnose.href }}">Something wrong? (full check)</a></p>
+      </div>
+    </div>
+    {% endif %}
+    {%- set sv = sync_view(session, active_preset) if tracked and active_preset is not none else none %}
+    {% if sv is not none %}
+      {#- One headline from the status model (app/sync/status.py): Failed > Changed on device > Sending n of N >
+           Waiting > Unknown > All sent. It never claims the device matches. -#}
+      <div class="hdr-sync">
+        <a class="hdr-status" href="{{ root }}/device?preset={{ active_preset + 1 }}#sync" data-sync-state="{{ sv.state }}">
+          <span class="visually-hidden">Status of preset {{ active_preset + 1 }}: </span>
+          <span class="sync-badge sync-{{ sv.css }}">
+            <span aria-hidden="true">{{ sv.glyph }}</span>
+            <span class="st-long">{{ sv.text }}</span><span class="st-short" aria-hidden="true">{{ short_status(sv) }}</span>
+          </span>
+        </a>{{ help("status") }}
+      </div>
+      {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action).
+           Throttled while a bulk write runs, so "Sending n of N" counts, and once more after the writes stop. -#}
+      <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
+            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms"
+            hx-target="#app-header" hx-swap="innerHTML"></span>
+    {% else %}
+    <div class="hdr-sync">
+      <span class="hdr-label">Status</span>
+      <span class="sync-badge sync-unknown"><span aria-hidden="true">&ndash;</span> not tracked yet</span>
+    </div>
+    {% endif %}
+
+    {#- Help me… (design §3.1): the guided tasks and the Glossary. On phones it lives in the ≡ sheet. -#}
+    <div class="hdr-sheet hdr-helpme" x-data="hdrSheet" :class="{ 'is-open': open }"
+         @keydown.escape="close(true)" @click.outside="close(false)">
+      <button type="button" class="hdr-sheet-toggle" @click="toggle()"
+              aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-helpme-list">Help me&hellip; <span aria-hidden="true">&#9662;</span></button>
+      <ul class="hdr-sheet-panel hdr-pop hdr-helpme-list" id="hdr-helpme-list" aria-label="Help me">
+        {% for entry in help_menu %}<li><a href="{{ root }}{{ entry.href }}">{{ entry.label }}</a></li>{% endfor %}
+      </ul>
+    </div>
     {% endif %}
   </div>
 
   {% if session is not none %}
-  <div class="hdr-row">
+  {#- Desktop: the second header row. Phone: the 64 px bar at the bottom of the screen (Mute all, −, Volume, +, CLIP);
+      a tap on the Volume value opens the slider as a sheet. It hides while a text or number field has focus. -#}
+  <div class="hdr-row hdr-bottom">
+      <button type="button" id="master-mute" class="mute hdr-mute{% if muted %} is-muted{% endif %}"
+              aria-pressed="{{ 'true' if muted else 'false' }}" aria-keyshortcuts="m"
+              {%- if not controls_enabled %} disabled{% endif %}
+              hx-post="{{ base }}/mute"
+              {%- if master is not none and master.mute is not none %} hx-vals='{"mute": "{{ "false" if muted else "true" }}"}'{% endif %}>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>
+          {%- if muted %}<path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/>
+          {%- else %}<path d="M16 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none"/>{% endif %}
+        </svg>
+        <span class="mute-word">Mute all</span>
+      </button>
+
+    <div class="hdr-sheet hdr-volume-box" x-data="hdrSheet" :class="{ 'is-open': open }"
+         @keydown.escape="close(true)" @click.outside="close(false)">
     {% if vol is not none %}
     <div class="hdr-volume" x-data="masterVolume({{ vol }})">
     {% else %}
@@ -105,6 +200,12 @@
       <button type="button" id="volume-down" class="step" aria-label="Volume down {{ profile.master_volume_step_db|num }} dB"
               {%- if not controls_enabled or vol is none %} disabled{% endif %}
               hx-post="{{ base }}/volume/down">&minus;</button>
+      <button type="button" class="hdr-sheet-toggle vol-open" @click="toggle()"
+              aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-volume-sheet">
+        <span class="vol-open-label">Volume</span>
+        <span class="vol-open-value"{% if vol is not none %} x-text="fmt(v)"{% endif %}>{{ vol|db }}</span>
+      </button>
+      <span class="hdr-sheet-panel vol-sheet" id="hdr-volume-sheet" role="group" aria-label="Volume">
       <input type="range" id="master-volume" name="volume"
              min="{{ profile.master_volume_min_db }}" max="{{ profile.master_volume_max_db }}"
              step="{{ profile.master_volume_step_db }}"
@@ -128,34 +229,39 @@
                hx-post="{{ base }}/volume" hx-trigger="change">
         <span class="unit">dB</span>
       </span>
+      </span>
       <button type="button" id="volume-up" class="step" aria-label="Volume up {{ profile.master_volume_step_db|num }} dB"
               {%- if not controls_enabled or vol is none %} disabled{% endif %}
               hx-post="{{ base }}/volume/up">+</button>
     </div>
-
-    {%- set sv = sync_view(session, active_preset) if tracked and active_preset is not none else none %}
-    {% if sv is not none %}
-      {#- One headline from the status model (app/sync/status.py): Failed > Changed on device > Sending n of N >
-           Waiting > Unknown > All sent. It never claims the device matches. -#}
-      <div class="hdr-sync">
-        <a class="hdr-status" href="{{ root }}/device?preset={{ active_preset + 1 }}#sync" data-sync-state="{{ sv.state }}">
-          <span class="visually-hidden">Status of preset {{ active_preset + 1 }}: </span>
-          <span class="sync-badge sync-{{ sv.css }}">
-            <span aria-hidden="true">{{ sv.glyph }}</span>
-            {{ sv.text }}
-          </span>
-        </a>{{ help("status") }}
-      </div>
-      {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action).
-           Throttled while a bulk write runs, so "Sending n of N" counts, and once more after the writes stop. -#}
-      <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
-            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms"
-            hx-target="#app-header" hx-swap="innerHTML"></span>
-    {% else %}
-    <div class="hdr-sync">
-      <span class="hdr-label">Status</span>
-      <span class="sync-badge sync-unknown"><span aria-hidden="true">&ndash;</span> not tracked yet</span>
     </div>
+
+    {#- CLIP: latches when any channel reaches −1 dBFS, on any page (static/js/shell.js keeps it across pages until
+        Reset). The page's level feed drives it; the header itself never subscribes. -#}
+    <div class="hdr-sheet hdr-clip" x-data="hdrSheet" :class="{ 'is-open': open }"
+         @keydown.escape="close(true)" @click.outside="close(false)">
+      <button type="button" class="hdr-sheet-toggle hdr-clip-led" @click="toggle()"
+              :class="{ 'is-on': $store.clip && $store.clip.on }"
+              aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-clip-pop">
+        <span aria-hidden="true">CLIP <span x-text="$store.clip && $store.clip.on ? '&#9679;' : '&#9675;'">&#9675;</span></span>
+        <span class="visually-hidden" x-text="$store.clip && $store.clip.on ? 'Clipped: ' + $store.clip.names().join(', ') : 'Nothing has clipped'">Nothing has clipped</span>
+      </button>{{ help("clip") }}
+      <div class="hdr-sheet-panel hdr-pop hdr-clip-pop" id="hdr-clip-pop" role="region" aria-label="Clipping">
+        <p x-show="!($store.clip && $store.clip.on)">Nothing has clipped since the last reset.</p>
+        <p x-show="$store.clip && $store.clip.on" x-cloak>
+          <span aria-hidden="true">&#9888;</span> <span x-text="$store.clip ? $store.clip.names().join(', ') : ''"></span>
+          reached &minus;1 dBFS. The light stays on until you reset it.</p>
+        <p class="hdr-pop-actions">
+          <a href="{{ root }}{{ meters_href }}">Show the meters</a>
+          <button type="button" class="btn-small" @click="$store.clip && $store.clip.reset(); close(true)">Reset</button>
+        </p>
+      </div>
+    </div>
+
+    {% if ns.waiting %}
+    <p class="hdr-waiting">
+      {%- for p, n in ns.waiting %}<span><span aria-hidden="true">&#9208;</span> Preset {{ p + 1 }}: {{ n }} waiting</span>{% endfor -%}
+      {{ help("waiting") }}</p>
     {% endif %}
   </div>
   {% endif %}

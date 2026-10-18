@@ -9,65 +9,106 @@
   <link rel="stylesheet" href="{{ root }}/static/css/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/help.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/sync.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ root }}/static/css/shell.css?v={{ asset_version }}">
   {% block head %}{% endblock %}
 </head>
 <body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}"
       data-graph-view="{{ graph_defaults.view or '' }}" data-graph-db="{{ '%g'|format(graph_defaults.db_range) }}">
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header id="app-header" class="app-header"
-          hx-get="{{ header_url }}" hx-trigger="sse:master, sse:device, refresh"
-          hx-swap="innerHTML" hx-disinherit="*">
-    {% include "partials/header.html" %}
+  {#- The global shell (phase 9 design §3). The ≡ button and the navigation sit outside #app-header, which htmx
+      re-renders on every master/device event; static/js/shell.js drives the phone sheets, the CLIP light and the
+      bottom bar. -#}
+  <div class="shell" x-data="navSheet">
+  <header class="app-header">
+    <button type="button" class="nav-toggle" x-ref="navToggle" @click="toggle()"
+            aria-expanded="false" :aria-expanded="open.toString()" aria-controls="sidenav">
+      <span aria-hidden="true">&#9776;</span><span class="visually-hidden">Menu</span>
+    </button>
+    <div id="app-header" class="app-header-body"
+         hx-get="{{ header_url }}" hx-trigger="sse:master, sse:device, refresh"
+         hx-swap="innerHTML" hx-disinherit="*">
+      {% include "partials/header.html" %}
+    </div>
   </header>
   <div class="sse-offline" role="status" aria-live="polite" hidden data-sse-offline>
     Live updates disconnected; reconnecting&hellip;
   </div>
 
-  <div class="layout" x-data="{ navOpen: false }">
-    <button type="button" class="nav-toggle" @click="navOpen = !navOpen"
-            :aria-expanded="navOpen.toString()" aria-controls="sidenav">
-      <span aria-hidden="true">&#9776;</span> Menu
-    </button>
-    <nav id="sidenav" class="sidenav" :class="{ 'is-open': navOpen }" aria-label="Main">
-      <ul>
-        {% for item in nav %}
-          <li>
-            {% if item.enabled %}
-              <a href="{{ root }}{{ item.path }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>
-            {% else %}
-              <span class="nav-disabled">{{ item.label }}{% if not item.children %} <span class="muted">(not available)</span>{% endif %}</span>
-            {% endif %}
-            {% if item.children %}
-              <ul>
-                {% for child in item.children %}
-                  <li>
-                    {% if child.enabled %}
-                      <a href="{{ root }}{{ child.path }}"{% if child.active %} aria-current="page"{% endif %}>{{ child.label }}</a>
-                    {% else %}
-                      <span class="nav-disabled">{{ child.label }} <span class="muted">(not available)</span></span>
-                    {% endif %}
-                  </li>
-                {% endfor %}
-              </ul>
-            {% endif %}
-          </li>
-        {% endfor %}
+  {%- macro nav_link(item) -%}
+    {%- if item.enabled -%}
+      <a href="{{ root }}{{ item.path }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>
+    {%- else -%}
+      <span class="nav-disabled">{{ item.label }}{% if not item.children %} <span class="muted">(not available)</span>{% endif %}</span>
+    {%- endif -%}
+  {%- endmacro %}
+  <div class="layout">
+    <nav id="sidenav" class="sidenav" :class="{ 'is-open': open }" aria-label="Main" x-ref="nav"
+         @keydown.escape="close(true)">
+      <div class="nav-sheet-head">
+        <span class="nav-sheet-device">
+          <strong>{{ profile.product_name if profile else "miniDSP" }}</strong>{% if serial is not none %} <span class="muted">#{{ serial }}</span>{% endif %}
+          <span class="conn conn-{{ conn_level }}"><span aria-hidden="true">{% if conn_level == "ok" %}&#9679;{% else %}&#9680;{% endif %}</span> {{ conn_label }}</span>
+        </span>
+        <button type="button" class="nav-close" @click="close(true)">
+          <span aria-hidden="true">&#10005;</span><span class="visually-hidden">Close the menu</span>
+        </button>
+      </div>
+      {% if devices is defined and devices %}
+      <form class="nav-devices" method="get" action="{{ root }}/ui/devices/select" x-data>
+        <input type="hidden" name="next" value="{{ root }}/">
+        <label>Device
+          <select name="serial"
+                  @change="$el.form.elements.next.value = location.pathname + location.search; $el.form.submit()">
+            {% for d in devices %}<option value="{{ d.serial }}"{% if d.current %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+          </select>
+        </label>
+      </form>
+      {% endif %}
+      {% for group in nav_groups %}
+        <h2 class="nav-group" id="{{ group.id }}">{{ group.label }}</h2>
+        <ul aria-labelledby="{{ group.id }}">
+          {% for item in group.items %}
+            <li>
+              {{ nav_link(item) }}
+              {% if item.children %}
+                <ul>
+                  {% for child in item.children %}<li>{{ nav_link(child) }}</li>{% endfor %}
+                </ul>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+      {% if help_menu %}
+      <h2 class="nav-group nav-sheet-only" id="nav-help-me">Help me&hellip;</h2>
+      <ul class="nav-sheet-only" aria-labelledby="nav-help-me">
+        {% for entry in help_menu if entry.href != "/help" %}<li><a href="{{ root }}{{ entry.href }}">{{ entry.label }}</a></li>{% endfor %}
       </ul>
+      {% endif %}
     </nav>
+    <div class="nav-backdrop" @click="close(true)" aria-hidden="true"></div>
 
     <main id="main" class="content" tabindex="-1">
       {% block content %}{% endblock %}
     </main>
   </div>
+  </div>
 
-  <div id="toasts" class="toasts" aria-live="assertive" aria-atomic="false"></div>
+  {#- Polite announcements of the shell: problem-list changes and clip latches, once each (design §16.5). The
+      meters' level feed reaches the header's CLIP light through the hidden listener. -#}
+  <div id="shell-live" class="visually-hidden" role="status" aria-live="polite"></div>
+  <div hidden data-clip-feed hx-trigger="sse:levels"
+       data-clip-names='{{ {"i": clip_names.i, "o": clip_names.o}|tojson if clip_names is defined else "{}" }}'></div>
+
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
   <script src="{{ root }}/static/vendor/htmx/htmx.min.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/vendor/htmx/sse.min.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/app.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/master.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/help.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/shell.js?v={{ asset_version }}"></script>
   {% block scripts %}{% endblock %}
   <script defer src="{{ root }}/static/vendor/alpine/alpine.min.js?v={{ asset_version }}"></script>
 </body>

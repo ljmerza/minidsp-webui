@@ -1,0 +1,262 @@
+/* The global shell (phase 9 design §3, §16): header, navigation groups and sheet, the phone's 48 px header and 64 px
+   bottom bar, the amber "editing a preset that isn't playing" band, toasts, and the 44 px touch-target sweep.
+   Loaded on every page after app.css. Phones: below 600 px. Touch sizes: below 600 px or on a coarse pointer. */
+
+:root { --hdr-phone-h: 48px; --bar-h: 64px; --safe-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* --- header ------------------------------------------------------------------------------------------------------ */
+
+.app-header { display: flex; align-items: flex-start; gap: 0.5rem; }
+.app-header-body { flex: 1 1 auto; min-width: 0; }
+.hdr-top { gap: 0.5rem 0.9rem; }
+.hdr-top .hdr-device { margin-right: auto; }
+.hdr-bottom { gap: 0.5rem 0.9rem; }
+
+.hdr-sheet { position: relative; display: flex; align-items: center; }
+.hdr-sheet-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; }
+.hdr-preset-toggle, .vol-open { display: none; }
+.preset-desc, .hdr-sheet-note { display: none; }
+.st-short { display: none; }
+
+/* Mute all keeps one width whether muted or not (P20). */
+.hdr-mute { justify-content: center; min-width: 7.5rem; }
+
+/* Desktop: the presets and the volume slider sit in the rows; Help me…, the problems list and CLIP pop up. */
+.hdr-presets { display: flex; align-items: center; gap: 0.3rem; }
+.hdr-presets-head { display: inline-flex; align-items: center; margin-right: 0.2rem; }
+.hdr-volume-box { flex: 1 1 22rem; min-width: 0; }
+.hdr-volume-box .hdr-volume { flex: 1 1 auto; }
+.vol-sheet { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 auto; min-width: 0; }
+.vol-sheet input[type="range"] { flex: 1 1 auto; min-width: 6rem; }
+
+.hdr-pop {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+  min-width: 16rem; width: max-content; max-width: min(30rem, calc(100vw - 1.5rem));
+  max-height: calc(100vh - 8rem); overflow: auto;
+  margin: 0; padding: 0.7rem 0.85rem; list-style: none;
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.5); font-size: 0.9rem; text-transform: none; letter-spacing: normal;
+}
+.hdr-sheet.is-open > .hdr-pop, .hdr-sheet.is-open .hdr-pop { display: block; }
+.hdr-pop-title { font-size: 1rem; margin: 0 0 0.5rem; }
+.hdr-pop-sub { font-size: 0.85rem; color: var(--text-muted); margin: 0.75rem 0 0.35rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+.hdr-pop p { margin: 0.25rem 0; }
+.hdr-pop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-top: 0.5rem !important; }
+
+/* Help me… */
+.hdr-helpme-list li a { display: flex; align-items: center; min-height: 2.5rem; padding: 0 0.4rem; color: var(--text); text-decoration: none; border-radius: var(--radius); }
+.hdr-helpme-list li a:hover, .hdr-helpme-list li a:focus-visible { background: var(--bg-input); color: var(--accent); }
+
+/* The problems pill and its list (design §3.3). Glyph + word + colour, never colour alone. */
+.hdr-pill { border-radius: 999px; font-size: 0.9rem; white-space: nowrap; }
+.hdr-pill.pill-warn { color: var(--warn); border-color: rgba(240, 180, 41, 0.7); }
+.hdr-pill.pill-ok { color: var(--ok); border-color: rgba(60, 207, 122, 0.45); }
+.hdr-problems-list { width: min(34rem, calc(100vw - 1.5rem)); }
+.pill-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; }
+.pill-item { display: grid; gap: 0.3rem; }
+.pill-item.pill-problem .pill-text { color: var(--bad); }
+.pill-item.pill-caution .pill-text { color: var(--warn); }
+.pill-fixes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pill-none { color: var(--ok); }
+.pill-more { margin-top: 0.75rem !important; }
+.pill-more a { padding: 0.35rem 0.7rem; min-height: 2.5rem; }
+
+/* CLIP: a neutral lamp that latches red (shell.js), on every page. */
+.hdr-clip-led {
+  font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--text-muted); white-space: nowrap;
+}
+.hdr-clip-led.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #fff; }
+.hdr-clip-pop { left: auto; right: 0; }
+
+/* --- the amber band: editing a preset that isn't playing (design §3.5) ------------------------------------------- */
+
+.syncbar .editing-band { order: -1; flex-basis: 100%; }
+.editing-band {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem;
+  padding: 0.55rem 0.75rem; border: 1px solid var(--warn); border-left-width: 6px; border-radius: var(--radius);
+  background: rgba(240, 180, 41, 0.12); color: var(--text);
+}
+.editing-band-text { margin: 0; flex: 1 1 24rem; }
+.editing-band-text > span[aria-hidden] { color: var(--warn); }
+.editing-band-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; }
+.editing-band .btn-small { border-color: var(--warn); }
+
+/* --- navigation: groups; a sheet below 900 px ------------------------------------------------------------------- */
+
+.nav-group {
+  margin: 0.9rem 0 0.25rem; padding: 0 0.6rem;
+  font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.nav-group:first-of-type { margin-top: 0.25rem; }
+.nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; min-height: 44px; padding: 0; font-size: 1.25rem;
+}
+.nav-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0 0 0.5rem; border-bottom: 1px solid var(--border); }
+.nav-sheet-device { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.5rem; }
+.nav-close { width: 44px; height: 44px; padding: 0; flex: none; }
+.nav-devices { margin: 0.6rem 0 0; }
+.nav-devices label { display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-muted); font-size: 0.85rem; }
+.nav-backdrop { display: none; }
+
+@media (max-width: 899px) {
+  .sidenav { display: none; }
+  .sidenav.is-open {
+    display: block; position: fixed; top: 0; bottom: 0; left: 0; z-index: 41;
+    width: min(20rem, 88vw); overflow-y: auto; overscroll-behavior: contain;
+    padding: 0.5rem 0.75rem calc(1rem + var(--safe-bottom));
+    background: var(--bg-raised); border-right: 1px solid var(--border); box-shadow: 8px 0 28px rgb(0 0 0 / 0.5);
+  }
+  .sidenav a, .sidenav .nav-disabled { min-height: 44px; display: flex; align-items: center; }
+  body.nav-open .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 0.55); }
+  body.nav-open { overflow: hidden; }
+}
+@media (min-width: 900px) {
+  .nav-toggle, .nav-sheet-head, .nav-sheet-only, .nav-devices { display: none; }
+  .sidenav {
+    display: block; position: sticky; top: var(--hdr-h, 7rem);
+    border-right: 1px solid var(--border); min-height: calc(100vh - var(--hdr-h, 7rem));
+  }
+}
+
+/* --- toasts ------------------------------------------------------------------------------------------------------- */
+
+.toasts.is-anchored { align-items: flex-start; }
+
+/* --- phone: 48 px header, 64 px bottom bar ------------------------------------------------------------------------ */
+
+@media (max-width: 599px) {
+  .app-header {
+    position: sticky; top: 0; height: var(--hdr-phone-h); min-height: var(--hdr-phone-h);
+    padding: 2px 4px; align-items: center; gap: 4px;
+  }
+  .app-header:has(.banner) { height: auto; } /* a connection or storage warning is allowed to add a line */
+  .app-header-body { align-self: stretch; display: flex; flex-direction: column; justify-content: center; }
+  .hdr { gap: 2px; }
+  .hdr-top { flex-wrap: nowrap; gap: 4px; min-width: 0; }
+  .hdr-top .hdr-device, .hdr-helpme, .hdr-top .tt, .hdr-bottom .tt, .hdr-waiting { display: none; }
+  .hdr-top .hdr-label, .hdr-bottom .hdr-label {
+    position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* Device preset: "P1 ▾" opens the four presets as a sheet under the header. */
+  .hdr-preset-toggle { display: inline-flex; font-weight: 600; padding: 0 0.6rem; }
+  .hdr-presets { display: none; }
+  .hdr-preset-box.is-open .hdr-presets {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+    position: fixed; top: var(--hdr-phone-h); left: 0; right: 0; z-index: 30;
+    padding: 0.75rem; background: var(--bg-raised); border-bottom: 1px solid var(--border);
+    box-shadow: 0 8px 28px rgb(0 0 0 / 0.5);
+  }
+  .hdr-presets-head { grid-column: 1 / -1; }
+  .hdr-preset-box.is-open .hdr-presets .hdr-label {
+    position: static !important; width: auto; height: auto; margin: 0; clip: auto;
+  }
+  .hdr-preset-box.is-open .hdr-presets .tt { display: inline; }
+  .hdr-presets .preset {
+    display: flex; flex-wrap: wrap; align-items: baseline; min-height: 3.5rem; padding: 0.4rem 0.7rem; text-align: left;
+  }
+  .hdr-presets .preset-desc { display: block; flex-basis: 100%; font-size: 0.8rem; font-weight: normal; }
+  .hdr-presets .hdr-sheet-note { display: block; grid-column: 1 / -1; margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+
+  .hdr-source { min-width: 0; margin-right: auto; }
+  .hdr-source select { max-width: 7.5rem; padding: 0 0.4rem; }
+
+  .hdr-problems.is-clear { display: none; }
+  .hdr-pill { padding: 0 0.6rem; }
+  .hdr-pill .pill-word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .hdr-pop {
+    position: fixed; top: var(--hdr-phone-h); left: 0; right: 0; width: auto; max-width: none;
+    max-height: calc(100dvh - var(--hdr-phone-h) - var(--bar-h) - var(--safe-bottom)); border-radius: 0;
+  }
+  .hdr-bottom .hdr-pop { top: auto; bottom: calc(var(--bar-h) + var(--safe-bottom)); }
+
+  .hdr-sync .sync-badge { min-height: 44px; padding: 0 0.5rem; }
+  .st-long {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .st-short { display: inline; }
+  a.hdr-status { display: inline-flex; min-height: 44px; align-items: center; }
+
+  /* The bottom bar: Mute all, −, Volume, +, CLIP; out of the way of the keyboard while a field has focus. */
+  .hdr-bottom {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+    height: calc(var(--bar-h) + var(--safe-bottom)); padding: 10px 8px calc(10px + var(--safe-bottom));
+    flex-wrap: nowrap; gap: 8px; background: var(--bg-raised); border-top: 1px solid var(--border);
+  }
+  body.is-typing .hdr-bottom { display: none; }
+  .hdr-mute { min-width: 52px; width: 52px; padding: 0; }
+  .hdr-mute .mute-word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .hdr-volume-box { flex: 1 1 auto; position: static; }
+  .hdr-volume-box .hdr-volume { gap: 6px; flex-wrap: nowrap; }
+  .hdr-volume .step { width: 52px; min-width: 52px; flex: none; }
+  .vol-open { display: inline-flex; flex: 1 1 auto; flex-direction: column; gap: 0; min-width: 0; padding: 0 0.3rem; line-height: 1.15; }
+  .vol-open-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .vol-open-value { font-weight: 600; white-space: nowrap; }
+  .vol-sheet { display: none; }
+  .hdr-volume-box.is-open .vol-sheet {
+    display: flex; position: fixed; left: 0; right: 0; bottom: calc(var(--bar-h) + var(--safe-bottom)); z-index: 30;
+    padding: 0.75rem; gap: 0.6rem; background: var(--bg-raised); border-top: 1px solid var(--border);
+    box-shadow: 0 -8px 28px rgb(0 0 0 / 0.45);
+  }
+  .hdr-volume-box.is-open .vol-sheet input[type="range"] { flex: 1 1 auto; }
+  .hdr-clip-led { padding: 0 0.5rem; }
+
+  /* No page-level sideways scroll (design §16, phone rule 3). */
+  .card-head { flex-wrap: wrap; }
+  .calc-note { padding-right: 12px; } /* room for its "?" hit area, which overhangs the glyph */
+  .field-help { max-width: 100%; min-width: 0; }
+  .field-help label { min-width: 0; flex: 0 1 auto; }
+  .field-help select { width: 100%; max-width: calc(100vw - 6.5rem); }
+
+  /* Settings: names, colours and level limits as one card per channel. */
+  .settings-table thead {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .settings-table, .settings-table tbody, .settings-table tr { display: block; }
+  .settings-table tr { padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+  .settings-table th[scope="row"] { display: block; padding: 0 0 0.35rem; border: 0; }
+  .settings-table td {
+    display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); align-items: center; gap: 0.6rem;
+    padding: 0.2rem 0; border: 0;
+  }
+  .settings-table td::before { content: attr(data-label); color: var(--text-muted); font-size: 0.85rem; }
+  .settings-table td.no-limit { display: none; }
+  .settings-table input[type="text"] { min-width: 0; }
+
+  /* Content clears the bottom bar; toasts sit just above it (design §3.6). */
+  .content { padding-bottom: calc(var(--bar-h) + var(--safe-bottom) + 0.75rem); }
+  .toasts { bottom: calc(var(--bar-h) + var(--safe-bottom) + 0.5rem); }
+  body.is-typing .toasts { bottom: 0.75rem; }
+}
+
+/* --- touch targets: at least 44 × 44 px (design §16, phone rule 2) --------------------------------------------------- */
+
+@media (max-width: 599px), (pointer: coarse) {
+  button, select, textarea, .btn-small, a.btn-link, .tab, .preset-tab,
+  input[type="number"], input[type="text"], input[type="search"], input[type="email"], input[type="password"],
+  input[type="url"], input[type="color"], input[type="file"], input[type="range"] { min-height: 44px; }
+  button, select, .btn-small, a.btn-link, .tab, .preset-tab, input[type="color"] { min-width: 44px; }
+  a.btn-link, .tab, .preset-tab { display: inline-flex; align-items: center; justify-content: center; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
+    min-height: 44px; min-width: 44px; display: inline-flex; align-items: center;
+  }
+  .clip-led { min-height: 44px; }
+  .band-on-hit { justify-content: center; cursor: pointer; }
+  /* Editors that size their own fields smaller on desktop. */
+  .peq-table select, .peq-table input.num, .response-options select, .xover-fields select, .xover-fields input,
+  input.coef, .raw-table input.coef { min-height: 44px; }
+  summary { min-height: 44px; display: list-item; padding: 0.6rem 0; }
+  .help-index a { min-height: 44px; min-width: 44px; }
+  /* Stand-alone links (not inside a sentence) get a 44 px box too. */
+  .flow-list a, .output-foot a, .syncbar-link, .flow-fix-link, .hdr-pop-actions a {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px;
+  }
+  .skip-link { min-height: 44px; display: inline-flex; align-items: center; }
+}

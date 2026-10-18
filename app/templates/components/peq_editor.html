@@ -105,9 +105,12 @@
               <span x-show="band.external" class="lock" role="img" aria-label="Managed by another tool (read-only)">&#128274;</span>
             </th>
             <td>
-              <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
-                     :disabled="band.external || band.design.type === 'passthrough'"
-                     :aria-label="`Band ${band.index + 1} on`">
+              {#- The label is the 44 px touch target around the checkbox (phase 9 design §16). -#}
+              <label class="band-on-hit">
+                <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
+                       :disabled="band.external || band.design.type === 'passthrough'"
+                       :aria-label="`Band ${band.index + 1} on`">
+              </label>
             </td>
             <td>
               <select x-model="band.form.type" @change="onTypeChange(band)" :disabled="band.external"

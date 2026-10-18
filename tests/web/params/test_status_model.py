@@ -71,7 +71,7 @@ async def test_header_says_all_sent_and_never_claims_a_match(ctx):
 async def test_header_headline_is_changed_on_device_after_a_check(ctx, checked):
     html = (await ctx.http.get("/ui/header")).text
     assert 'data-sync-state="changed"' in html
-    assert re.search(r"≠</span>\s*\d+ changed on device", html)
+    assert re.search(r"≠</span>\s*<span class=\"st-long\">\d+ changed on device", html)
     assert "match" not in visible(html).lower()
 
 

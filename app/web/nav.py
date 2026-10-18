@@ -1,7 +1,11 @@
-"""Sidebar navigation (docs/05 global layout).
+"""Sidebar navigation (docs/05 global layout; phase 9 design §3.4).
 
 Entries are enabled only when the app actually serves their path, so pages added in later phases light up just by
-registering their routes. Channel pages use 1-based numbers in the URL (``/outputs/1`` is "Out 1").
+registering their routes. Entries marked ``optional`` (pages that later phase 9 PRs add, such as Guided tasks) are left
+out altogether until then. Channel pages use 1-based numbers in the URL (``/outputs/1`` is "Out 1").
+
+`nav_groups` splits the entries into the sidebar's three groups: Everyday, All settings and Help. Both setting groups
+are always visible; nothing is hidden behind a mode switch (design §15).
 """
 
 from collections.abc import Mapping
@@ -12,6 +16,12 @@ from fastapi import Request
 from starlette.routing import Match
 
 from app.model.device_profile import DeviceProfile
+
+# The sidebar groups (design §3.4), by entry path. Anything not listed goes under "All settings".
+EVERYDAY = "Everyday"
+ALL_SETTINGS = "All settings"
+HELP = "Help"
+GROUP_OF = {"/": EVERYDAY, "/tasks": EVERYDAY, "/profiles": EVERYDAY, "/help": HELP}
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +35,16 @@ class NavItem:
     @property
     def expanded(self) -> bool:
         return self.active or any(c.active for c in self.children)
+
+
+@dataclass(frozen=True, slots=True)
+class NavGroup:
+    label: str
+    items: tuple[NavItem, ...]
+
+    @property
+    def id(self) -> str:
+        return "nav-" + self.label.lower().replace(" ", "-")
 
 
 def _served(request: Request, path: str) -> bool:
@@ -61,19 +81,37 @@ def build_nav(
             children=children,
         )
 
+    def optional(label: str, path: str) -> list[NavItem]:
+        """An entry for a page a later phase 9 PR adds: listed only once the app serves it."""
+        return [item(label, path)] if _served(request, path) else []
+
     meta = channel_meta or {}
     input_names = _named(channel_names("In", n_inputs), "input", meta)
     output_names = _named(channel_names("Out", n_outputs), "output", meta)
     inputs = tuple(item(name, f"/inputs/{n}") for n, name in enumerate(input_names, start=1))
     outputs = tuple(item(name, f"/outputs/{n}") for n, name in enumerate(output_names, start=1))
     return [
-        item("Dashboard", "/"),
+        # Everyday
+        item("Home", "/"),
+        *optional("Guided tasks", "/tasks"),
+        item("Profiles", "/profiles"),
+        # All settings
+        *optional("Meters & graph", "/meters"),
         item("Routing", "/routing"),
         item("Inputs", "/inputs", inputs),
         item("Outputs", "/outputs", outputs),
         item("Combined response", "/system"),
-        item("Profiles", "/profiles"),
         item("Device & sync", "/device"),
         item("Settings", "/settings"),
+        # Help
         item("Glossary", "/help"),
     ]
+
+
+def nav_groups(items: list[NavItem]) -> list[NavGroup]:
+    """The sidebar's groups in order (Everyday, All settings, Help), each with its entries in `build_nav` order."""
+    order = (EVERYDAY, ALL_SETTINGS, HELP)
+    grouped: dict[str, list[NavItem]] = {label: [] for label in order}
+    for entry in items:
+        grouped[GROUP_OF.get(entry.path, ALL_SETTINGS)].append(entry)
+    return [NavGroup(label, tuple(grouped[label])) for label in order if grouped[label]]

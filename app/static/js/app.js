@@ -16,13 +16,59 @@
     return text === DASH ? text : `${text} ${unit}`;
   }
 
+  // Toasts appear next to the control that caused them (phase 9 design §3.6): `options.near`, else the control the
+  // user last pressed (within a few seconds). On phones, and when there is no such control, they sit at the bottom,
+  // above the phone's bottom bar. They are always kept inside the screen.
+  const ANCHOR_MS = 4000;
+  const EDGE = 12;
+  let lastControl = null;
+  let lastControlAt = 0;
+  function rememberControl(e) {
+    const el = e.target instanceof Element ? e.target.closest('button, a, input, select, label, [role="button"]') : null;
+    if (!el || el.closest('#toasts')) return;
+    lastControl = el;
+    lastControlAt = Date.now();
+  }
+  document.addEventListener('pointerdown', rememberControl, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') rememberControl(e); }, true);
+  document.addEventListener('change', rememberControl, true);
+
+  function placeToasts(region, near) {
+    const phone = window.matchMedia && window.matchMedia('(max-width: 599px)').matches;
+    let anchor = near;
+    if (!anchor && lastControl && Date.now() - lastControlAt < ANCHOR_MS) anchor = lastControl;
+    const rect = anchor && anchor.isConnected ? anchor.getBoundingClientRect() : null;
+    if (phone || !rect || (rect.width === 0 && rect.height === 0)) {
+      region.removeAttribute('style');
+      region.classList.remove('is-anchored');
+      return;
+    }
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const width = Math.min(512, vw - 2 * EDGE);
+    const left = Math.max(EDGE, Math.min(rect.left, vw - width - EDGE));
+    region.classList.add('is-anchored');
+    region.style.left = `${Math.round(left)}px`;
+    region.style.right = 'auto';
+    region.style.width = `${Math.round(width)}px`;
+    if (rect.bottom + 8 + 120 <= vh) {
+      region.style.top = `${Math.round(Math.max(EDGE, rect.bottom + 8))}px`;
+      region.style.bottom = 'auto';
+    } else {
+      region.style.top = 'auto';
+      region.style.bottom = `${Math.round(Math.max(EDGE, vh - rect.top + 8))}px`;
+    }
+  }
+
   // `options.timeout` (ms, default 8 s) and `options.action` ({label, url, values, target, swap}): a button that POSTs
   // `values` to `url` with htmx and swaps the reply into `target` (e.g. Undo). Instead of a url, `action.onClick` may
   // be a function (its promise is awaited). The toast goes away when it is used, and its timer pauses while the
-  // pointer is over it or focus is inside it (phase9 design §3.6).
+  // pointer is over it or focus is inside it (phase9 design §3.6). A toast takes one tab stop: its action, else its
+  // close button; Esc closes it. `options.near`: the element to show it next to.
   function toast(message, level = 'error', options = {}) {
     const region = document.getElementById('toasts');
     if (!region) return null;
+    placeToasts(region, options.near || null);
     const item = document.createElement('div');
     item.className = `toast toast-${level}`;
     item.setAttribute('role', level === 'error' ? 'alert' : 'status');
@@ -68,7 +114,15 @@
     close.setAttribute('aria-label', 'Dismiss');
     close.textContent = '×';
     close.addEventListener('click', () => item.remove());
+    if (runs) close.tabIndex = -1; // one tab stop: the action
     item.append(close);
+    item.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      const returnTo = action && action.returnFocus;
+      item.remove();
+      if (returnTo && returnTo.isConnected) returnTo.focus();
+    });
     region.append(item);
     while (region.children.length > 4) region.firstElementChild.remove();
     let left = options.timeout || 8000;
