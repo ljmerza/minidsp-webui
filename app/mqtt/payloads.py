@@ -57,7 +57,8 @@ ORIGIN = {
 
 
 def _is_int(text: str) -> bool:
-    return text.isascii() and text.isdigit()
+    """A short run of ASCII digits (``int()`` raises on more than 4300 digits, and nothing valid is that long)."""
+    return 0 < len(text) <= 18 and text.isascii() and text.isdigit()
 
 
 _OUTPUT_ENTITY = re.compile(r"output_([1-9][0-9]{0,2})_(gain|mute|delay)")
@@ -188,8 +189,9 @@ def gain_range(profile: DeviceProfile, ceiling_db: float) -> tuple[float, float]
 
 
 def delay_max_ms(profile: DeviceProfile) -> float:
-    """Largest delay HA may send, rounded down to the 0.01 ms step so it never exceeds the device maximum."""
-    return math.floor(profile.delay_max_ms * 100) / 100
+    """Largest delay HA may send: the device maximum rounded to 3 decimals, exactly what `output_state` publishes for
+    a delay at the maximum (HA drops a state above ``max``). `parse_delay` accepts it even when it rounds up."""
+    return round(profile.delay_max_ms, 3)
 
 
 # --- discovery ----------------------------------------------------------------------------------------------------
@@ -228,6 +230,16 @@ def _nullable(field: str, *, true: str | None = None, false: str | None = None) 
     if true is None:
         return f"{{{{ {value} if {value} is not none else 'None' }}}}"
     return f"{{% if {value} is none %}}None{{% elif {value} %}}{true}{{% else %}}{false}{{% endif %}}"
+
+
+def _clamped(field: str, low: float, high: float) -> str:
+    """Like `_nullable` for a number entity, clamped to its ``low..high`` range: HA drops an out-of-range state and
+    keeps showing the previous value (e.g. a master volume below the configured floor)."""
+    value = f"value_json.{field}"
+    return (
+        f"{{% if {value} is none %}}None{{% elif {value} < {low!r} %}}{low!r}"
+        f"{{% elif {value} > {high!r} %}}{high!r}{{% else %}}{{{{ {value} }}}}{{% endif %}}"
+    )
 
 
 def _item(
@@ -271,7 +283,7 @@ def discovery_configs(info: DeviceInfo, topics: Topics, *, volume_floor_db: floa
             "Master volume",
             needs_device=True,
             command_topic=topics.command(serial, VOLUME),
-            value_template=_nullable(VOLUME),
+            value_template=_clamped(VOLUME, low, high),
             min=low,
             max=high,
             step=info.profile.master_volume_step_db,
@@ -517,14 +529,21 @@ def dumps(doc: Mapping[str, Any]) -> str:
 # --- commands -----------------------------------------------------------------------------------------------------
 
 
+QUOTE_MAX = 32  # characters of a rejected payload quoted in an error (it ends up in the persistent event log)
+
+
+def _quote(text: str) -> str:
+    return repr(text if len(text) <= QUOTE_MAX else f"{text[:QUOTE_MAX]}...")
+
+
 def parse_number(payload: str, what: str, low: float, high: float, unit: str) -> float:
     """A finite number inside ``low..high``; anything else is rejected (never clamped)."""
     try:
         value = float(payload.strip())
     except ValueError:
-        raise CommandError(f"{what} {payload!r} is not a number") from None
+        raise CommandError(f"{what} {_quote(payload)} is not a number") from None
     if not math.isfinite(value):
-        raise CommandError(f"{what} {payload!r} is not a finite number")
+        raise CommandError(f"{what} {_quote(payload)} is not a finite number")
     if not low <= value <= high:
         raise CommandError(f"{what} {value:g} {unit} outside {low:g}..{high:g}")
     return value
@@ -539,12 +558,12 @@ def parse_gain(payload: str, profile: DeviceProfile, ceiling_db: float) -> float
 
 
 def parse_delay(payload: str, profile: DeviceProfile) -> float:
-    return parse_number(payload, "delay", 0.0, profile.delay_max_ms, "ms")
+    return parse_number(payload, "delay", 0.0, max(profile.delay_max_ms, delay_max_ms(profile)), "ms")
 
 
 def parse_press(payload: str) -> None:
     if payload.strip().upper() != PRESS:
-        raise CommandError(f"expected {PRESS}, got {payload[:32]!r}")
+        raise CommandError(f"expected {PRESS}, got {_quote(payload)}")
 
 
 def parse_profile(payload: str, names: Sequence[str]) -> str:
@@ -555,7 +574,7 @@ def parse_profile(payload: str, names: Sequence[str]) -> str:
     matches = [n for n in names if n.casefold() == text.casefold()]
     if len(matches) == 1:
         return matches[0]
-    raise CommandError(f"unknown profile {text!r}")
+    raise CommandError(f"unknown profile {_quote(text)}")
 
 
 _TRUE = {"on", "true", "1"}
@@ -568,13 +587,13 @@ def parse_switch(payload: str) -> bool:
         return True
     if lowered in _FALSE:
         return False
-    raise CommandError(f"expected ON or OFF, got {payload!r}")
+    raise CommandError(f"expected ON or OFF, got {_quote(payload)}")
 
 
 def parse_source(payload: str, profile: DeviceProfile) -> str:
     canonical = profile.canonical_source(payload)
     if canonical is None:
-        raise CommandError(f"unknown source {payload.strip()!r}; expected one of {', '.join(profile.sources)}")
+        raise CommandError(f"unknown source {_quote(payload.strip())}; expected one of {', '.join(profile.sources)}")
     return canonical
 
 
@@ -585,8 +604,8 @@ def parse_preset(payload: str, profile: DeviceProfile) -> int:
     if lowered.startswith("preset"):
         lowered = lowered[len("preset") :].strip()
     if not _is_int(lowered):
-        raise CommandError(f"expected one of {', '.join(preset_options(profile))}, got {text!r}")
+        raise CommandError(f"expected one of {', '.join(preset_options(profile))}, got {_quote(text)}")
     number = int(lowered)
     if not 1 <= number <= profile.n_presets:
-        raise CommandError(f"preset {text!r} outside Preset 1..Preset {profile.n_presets}")
+        raise CommandError(f"preset {_quote(text)} outside Preset 1..Preset {profile.n_presets}")
     return number - 1

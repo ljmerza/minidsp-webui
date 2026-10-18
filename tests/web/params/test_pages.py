@@ -124,7 +124,7 @@ async def test_header_sync_summary_and_staged_dots(ctx):
     html = (await ctx.http.get("/routing")).text
     assert "not tracked yet" not in html
     assert re.search(r'class="hdr-sync" href="/device\?preset=1#sync"', html)
-    assert 'hx-trigger="sse:sync delay:500ms"' in html
+    assert 'hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"' in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     assert "all synced" in (await ctx.http.get("/ui/header")).text
     # an edit to inactive preset 2 is staged: its header button and its editing tab get a dot

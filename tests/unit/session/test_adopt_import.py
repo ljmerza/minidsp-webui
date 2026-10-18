@@ -17,7 +17,7 @@ PI_NOTES = (Path(__file__).parents[2] / "fixtures" / "pi_notes_commands.txt").re
 
 
 async def test_trust_from_the_pi_notes_writes_nothing(session, fake, repo):
-    result = await session.adopt(AdoptMode.TRUST, script=PI_NOTES)
+    result = await session.adopt(AdoptMode.TRUST, script=PI_NOTES, read_back=False)  # as for an inactive preset
     parsed = parse_script(PI_NOTES)
     assert result.writes == 0 and result.flush is None
     assert result.known == len(parsed.device_paths) and result.unknown > 0

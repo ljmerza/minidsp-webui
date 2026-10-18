@@ -32,7 +32,7 @@
   <label class="check"><input type="checkbox" name="reapply_on_reconnect"{% if v.reapply_on_reconnect %} checked{% endif %}>
     Re-apply the active preset after the device reconnects
     <span class="hint">Leave off unless the device is known to lose its settings on a power cycle; otherwise a
-      reconnect only marks the preset unknown.</span></label>
+      reconnect reads the preset back, re-confirms what still matches and writes nothing.</span></label>
   <label class="check"><input type="checkbox" checked disabled>
     Apply staged edits when their preset becomes active <span class="hint">(always on)</span></label>
   <h3>Graphs</h3>

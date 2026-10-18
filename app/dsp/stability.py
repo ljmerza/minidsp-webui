@@ -71,6 +71,13 @@ def biquad_problem(biquad: BiquadLike) -> str | None:
         return "biquad coefficient overflows float32"
     _, _, _, a1, a2 = coeffs
     if not poles_stable(a1, a2):
+        if _triangle(a1, a2):
+            # Stable as designed; only the device's float32 rounding pushes the poles onto/over the unit circle.
+            radius = pole_radius(*_float32([a1, a2]))
+            return (
+                f"unstable after float32 rounding (device precision): pole radius {radius:.6g}; "
+                "raise the frequency or lower the gain or Q"
+            )
         return f"unstable biquad: pole radius {pole_radius(a1, a2):.6g} (needs |a2| < 1 and |a1| < 1 - a2)"
     return None
 

@@ -55,10 +55,11 @@ Home Assistant entities over MQTT discovery, so you don't need the Windows plugi
   coefficients are recognised and shown as "LR4 LP 80 Hz" rather than raw numbers. Trusting the plain defaults (no
   script) needs an explicit "my device really is at factory defaults" confirmation (`confirm_defaults` in the API).
 - **Verify device:** reads the active preset's readable settings back from DSP memory and flags anything that changed
-  behind the app's back. It never writes; drifted settings can be marked unknown and pushed from the sync table. It can
-  also run nightly (`VERIFY_NIGHTLY`). The result is `ok` only when settings were confirmed and none differ; `mismatch`
-  means never-confirmed settings (for example after a power cycle) differ from the desired config, and `unverified`
-  that nothing could be confirmed.
+  behind the app's back. It never writes; drifted settings can be marked unknown and pushed from the sync table, or
+  their device values accepted as the desired ones. It can also run nightly (`VERIFY_NIGHTLY`). The result is `ok`
+  only when settings were confirmed and none differ; `mismatch` means never-confirmed settings (for example after a
+  power cycle) differ from the desired config, and `unverified` that nothing could be confirmed. The same readback
+  re-confirms the active preset after a reconnect, and seeds the readable settings of an adopt with "trust".
 - **Event log** of user actions, apply results, reconnects and every master change, with who made it
   (`ui`, `ha`, `api`, `external`).
 
@@ -144,6 +145,20 @@ as root. Container root is that unprivileged host user, so this grants nothing b
 2. In the compose file: add `user: "0:0"`. Drop `group_add`. `device_cgroup_rules` has no effect under rootless Docker,
    so it can stay or go.
 3. The data directory just needs to belong to your user (container root writes as your user), so no `chown` is needed.
+4. `mem_limit: 256m` only takes effect if systemd delegates the cgroup v2 `memory` controller to your user. Many
+   distributions (Raspberry Pi OS included) delegate only `cpu pids` by default, and then Docker silently ignores the
+   limit: a runaway container grows until the host's OOM killer picks a victim, which may be another service or sshd.
+   Check with `docker info`: it must not print `WARNING: No memory limit support`, and
+   `cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers` must list `memory`.
+   To enable it, create `/etc/systemd/system/user@.service.d/delegate.conf`:
+
+   ```ini
+   [Service]
+   Delegate=cpu cpuset io memory pids
+   ```
+
+   then run `sudo systemctl daemon-reload` and reboot (or log out fully and back in), and recreate the container.
+   `docker inspect minidsp-webui --format '{{.HostConfig.Memory}}'` should then print `268435456`.
 
 #### Reaching the bundled daemon from the host
 
@@ -191,6 +206,12 @@ The app has no login. Anyone who can reach the port can change the device, so ke
 it behind a reverse proxy that adds authentication. When proxying, turn buffering off for `/api/v1/events` (nginx:
 `proxy_buffering off;`), or live updates stall.
 
+Requests that a browser sends on behalf of another site are refused, but a malicious page can get around that with
+DNS rebinding: it points its own host name at the app, and the browser then treats the app as that page's origin.
+Such a page could read the database backup and change the device. To refuse every other name, set `ALLOWED_HOSTS`
+to the names you use for the UI. If you only use its IP address, set `ALLOWED_HOSTS=localhost`. A reverse proxy that
+only forwards its own host name has the same effect.
+
 ### Health
 
 - `GET /healthz` is the liveness probe the image's `HEALTHCHECK` uses. It answers 200 as long as the app is running;
@@ -205,6 +226,8 @@ it behind a reverse proxy that adds authentication. When proxying, turn bufferin
   or `unknown`) and a readable `usb_detail`. The Device page shows the same.
 - If `minidspd` exits, the app restarts it after 1 s, backing off to 30 s while it keeps failing. Five restarts within
   five minutes log an error and turn `daemon_process` to `failed` until a run lasts.
+- `daemon_process_error` is the current problem: why the daemon isn't running, or, while it runs, a failed HTTP
+  listener. How an earlier run ended stays in `daemon_last_exit`.
 
 ### Troubleshooting
 
@@ -216,10 +239,13 @@ it behind a reverse proxy that adds authentication. When proxying, turn bufferin
   `--device` mount of a single node. Mount the whole `/dev/bus/usb` tree.
 - **`usb_access: absent`:** no miniDSP (USB vendor `2752`) is plugged into the host. Check `lsusb` on the host.
 - **The device is visible but never shows up in the UI:** another `minidspd` (on the host, or in a second container)
-  still owns it. Stop it, then restart the container.
-- **After unplugging and re-plugging the device:** the daemon polls USB every few seconds, but whether it picks the
-  device up again inside a container hasn't been verified on every setup. If it doesn't come back within about 10 s,
-  restart the container. `usb_device_visible` tells you whether the container can see it at all.
+  may still own it. Stop it, then restart the container. If the app logged "restarting embedded minidspd: a miniDSP
+  appeared on USB …" and the device still doesn't appear, that is the likely cause.
+- **After unplugging, re-plugging or power cycling the device:** it comes back under a new USB device number, and the
+  bundled daemon can't see that by itself (USB hotplug events don't reach a container). The app watches for it and
+  restarts the daemon, so the device reappears within about 20 s without a container restart. The reconnect then
+  treats it as a possible power cycle: settings that can't be read back are marked unknown. `usb_device_visible` tells
+  you whether the container can see the device at all.
 - **`daemon_process: failed` with "cannot write the minidspd config":** `MINIDSPD_EXTRA_CONFIG` isn't valid TOML, sets
   the HTTP address (use `MINIDSPD_HTTP_BIND`) or has an `http_server` that isn't a table. This one isn't retried; fix
   the setting and restart.
@@ -227,10 +253,13 @@ it behind a reverse proxy that adds authentication. When proxying, turn bufferin
   the daemon couldn't open its HTTP port (usually another process already uses `MINIDSPD_HTTP_BIND`'s port). USB
   discovery keeps running, so the process stays up. `MINIDSPD_HTTP_BIND` must be an IP address and port; hostnames
   such as `localhost` are refused at startup.
+- **A new tab never loads, or buttons stop responding, with many tabs open:** every open page keeps one live-update
+  connection, and over plain HTTP browsers allow only about 6 connections per host. Close a few tabs of the app, or serve
+  it through a reverse proxy that speaks HTTP/2.
 - **Logs:** the daemon's warnings and errors appear in `docker logs` under the `minidspd` logger. A warning the daemon
   repeats (it retries a device it can't open every second) is logged once, then at most every 5 minutes with a repeat
   count. Its info output is dropped, so idle disk writes stay at zero. Set `RUST_LOG=info` (or `debug`) on the
-  container to see more.
+  container to see more; its lines then appear at `DEBUG` under the `minidspd` logger, whatever `LOG_LEVEL` is.
 
 ### Upgrading
 
@@ -249,8 +278,9 @@ there take precedence over the environment.
 | `WEBUI_BIND` | `0.0.0.0` | Listen address |
 | `WEBUI_PORT` | `8480` | Listen port |
 | `DB_PATH` | `/data/minidsp-webui.sqlite3` | SQLite database; nightly backups go to `backups/` next to it |
-| `LOG_LEVEL` | `info` | Log level |
+| `LOG_LEVEL` | `warning` | Log level. Per-request lines (the access log and every minidspd call) only appear at `debug` |
 | `PUBLIC_URL` | _(empty)_ | The UI's external URL, used for Home Assistant's "visit device" link |
+| `ALLOWED_HOSTS` | _(empty)_ | Comma-separated host names the UI is reached by, e.g. `minidsp.example.lan`. When set, requests for any other name get a 400 (IP addresses and `localhost` always work). Blocks DNS-rebinding pages; see [Security](#security) |
 | `DAEMON_TIMEOUT_S` | `5` | Timeout for minidspd HTTP calls (seconds) |
 | `DISCOVERY_INTERVAL_S` | `30` | How often to rescan minidspd for devices (it retries faster while something is missing) |
 | `MONITOR_BACKOFF_MIN_S` / `MONITOR_BACKOFF_MAX_S` | `0.5` / `10` | Reconnect backoff for a device's live status stream |

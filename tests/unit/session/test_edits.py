@@ -1,6 +1,8 @@
 """Desired-state edits: merge patch, validation, guards, persistence and revisions."""
 
 import asyncio
+import logging
+import sqlite3
 
 import pytest
 
@@ -306,6 +308,31 @@ async def test_failed_revision_write_keeps_edits_uncommitted(session, repo):
     with pytest.raises(StateUnavailable):
         await session.commit(0)
     assert session.sync_summary(0)["uncommitted"] is True
+
+
+async def test_failing_revision_save_backs_off(make_session, repo, monkeypatch, caplog):
+    s = await make_session(commit_idle_s=0.01)
+    attempts = 0
+    real_commit = repo.commit_revision
+
+    async def disk_full(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr(repo, "commit_revision", disk_full)
+    caplog.set_level(logging.DEBUG, logger="app.sync.session")
+    await s.edit(0, {"outputs": {"0": {"gain_db": -1.0}}})
+    await asyncio.sleep(0.7)  # a fixed 10 ms retry would try ~60 times; doubling gets to ~0.64 s in 6 tries
+    await drain(s)
+    assert 3 <= attempts <= 8
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR and "saving a revision" in r.getMessage()]
+    assert len(errors) == 1  # the repeats log at debug
+    assert s.sync_summary(0)["uncommitted"] is True
+
+    monkeypatch.setattr(repo, "commit_revision", real_commit)
+    assert await s.commit(0) == 1
+    assert s._commit_failures == {}  # a successful save resets the backoff
 
 
 # --- persistence ---------------------------------------------------------------------------------------------------

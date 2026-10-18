@@ -263,3 +263,11 @@ def test_forwarder_tracks_a_bounded_number_of_lines(caplog):
         for line in ("a", "b", "c", "a"):  # "a" was evicted, so it is logged again
             forward(line)
     assert [r.getMessage() for r in caplog.records] == ["a", "b", "c", "a"]
+
+
+@pytest.mark.parametrize("extra", ['note = "\\U0001F600"', 'note = "😀 ünïcode"', '"key 😀" = "\\u007f\\ttab"'])
+def test_non_ascii_extra_config_round_trips(extra):
+    """json.dumps' default \\ud83d\\ude00 surrogate escapes aren't valid TOML: the daemon would never start."""
+    doc = tomllib.loads(render_config(extra=extra))
+    for key, value in tomllib.loads(extra).items():
+        assert doc[key] == value

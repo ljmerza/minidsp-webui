@@ -28,6 +28,8 @@ FLOAT32_WARN_DB = 0.1
 # Float32 deviations are only judged where the float64 response is above this level: far down a stop band the
 # dB difference of two tiny numbers says nothing audible.
 FLOAT32_RELEVANT_DB = -100.0
+# Lowest non-zero frequency of the full-band check grid (DC itself is always included).
+CHECK_F_MIN = 0.1
 
 type BiquadLike = Biquad | Sequence[float] | Mapping[str, float]
 
@@ -37,6 +39,12 @@ def freq_grid(f_min: float = F_MIN, f_max: float = F_MAX, n: int = N_POINTS) -> 
     if not (0 < f_min < f_max) or n < 2:
         raise ValueError(f"bad frequency grid {f_min}..{f_max} Hz with {n} points")
     return np.geomspace(f_min, f_max, n)
+
+
+def full_band_grid(fs: float = FS, n: int = N_POINTS) -> np.ndarray:
+    """DC plus ``n`` log-spaced frequencies from 0.1 Hz to Nyquist: everywhere the device can boost or deviate, not
+    just the 5 Hz-24 kHz display range (a Linkwitz Transform peaks at DC, a 40 kHz shelf above 24 kHz)."""
+    return np.concatenate([[0.0], np.geomspace(CHECK_F_MIN, fs / 2, n)])
 
 
 def view_grid(view: str, n: int = N_POINTS) -> np.ndarray:
@@ -112,9 +120,22 @@ def cascade_tf(biquads: Iterable[BiquadLike], freqs: np.ndarray, fs: float = FS,
     return out
 
 
+def _pole_freqs(biquads: Sequence[BiquadLike], fs: float) -> list[float]:
+    """Frequencies of each biquad's (float32) pole angles, where a sharp resonance peaks."""
+    out = []
+    for bq in biquads:
+        _, _, _, a1, a2 = to_float32(bq)
+        with np.errstate(over="ignore", invalid="ignore"):
+            roots = np.roots([1.0, -a1, -a2])
+        out += [abs(float(np.angle(p))) * fs / (2 * np.pi) for p in roots if np.isfinite(p)]
+    return out
+
+
 def peak_gain_db(biquads: Iterable[BiquadLike], fs: float = FS, n: int = 2048) -> float:
-    """Highest gain of a biquad cascade (float32 coefficients) on a dense 5 Hz-24 kHz grid, in dB."""
-    freqs = freq_grid(n=n)
+    """Highest gain of a biquad cascade (float32 coefficients), in dB: on a dense grid from DC to Nyquist plus every
+    pole angle, so boosts below 5 Hz or above 24 kHz count too."""
+    biquads = list(biquads)
+    freqs = np.concatenate([full_band_grid(fs, n), _pole_freqs(biquads, fs)])
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
         peak = float(np.max(np.abs(cascade_tf(biquads, freqs, fs).h)))
     if not math.isfinite(peak):
@@ -256,9 +277,15 @@ def float32_deviation_db(exact: Tf, rounded: Tf) -> float:
 
 def _finish(
     build: Any, freqs: np.ndarray, fs: float, float32: bool, label: str
-) -> Response:  # build(float32: bool) -> Tf
-    tf = build(float32)
-    deviation = float32_deviation_db(build(False), tf if float32 else build(True))
+) -> Response:  # build(float32: bool, freqs: np.ndarray) -> Tf
+    tf = build(float32, freqs)
+    # The deviation is judged on the plotted grid and on the full band, so float32 rounding that only shows below
+    # 5 Hz (a Linkwitz Transform's DC gain) or above 24 kHz still warns.
+    check = full_band_grid(fs)
+    deviation = max(
+        float32_deviation_db(build(False, freqs), tf if float32 else build(True, freqs)),
+        float32_deviation_db(build(False, check), build(True, check)),
+    )
     warnings = []
     if deviation > FLOAT32_WARN_DB:
         warnings.append(
@@ -279,7 +306,7 @@ def filter_response(
     """Response of a biquad cascade (one band, one crossover group, or any list)."""
     freqs = freq_grid() if freqs is None else np.asarray(freqs, dtype=float)
     biquads = list(biquads)
-    return _finish(lambda f32: cascade_tf(biquads, freqs, fs, float32=f32), freqs, fs, float32, label)
+    return _finish(lambda f32, grid: cascade_tf(biquads, grid, fs, float32=f32), freqs, fs, float32, label)
 
 
 # --- channel chains -----------------------------------------------------------------------------------------------
@@ -389,11 +416,11 @@ def system_response(
     freqs = freq_grid() if freqs is None else np.asarray(freqs, dtype=float)
     taps = fir_taps or {}
 
-    def build(f32: bool) -> Tf:
-        total = Tf.zero(len(freqs))
+    def build(f32: bool, grid: np.ndarray) -> Tf:
+        total = Tf.zero(len(grid))
         for n in outputs:
             stages = output_stages(
-                doc, n, freqs, fs, inputs=inputs, float32=f32, fir_taps=taps.get(n), master_db=master_db
+                doc, n, grid, fs, inputs=inputs, float32=f32, fir_taps=taps.get(n), master_db=master_db
             )
             total = total + stages["total"]
         return total
@@ -410,7 +437,7 @@ def input_response(
     """Input ``i``'s PEQ only (gain and mute excluded), as the Input page plots it."""
     freqs = freq_grid() if freqs is None else np.asarray(freqs, dtype=float)
     bands = doc.inputs[i].peq
-    return _finish(lambda f32: peq_tf(bands, freqs, fs, float32=f32), freqs, fs, float32, f"input {i + 1} PEQ")
+    return _finish(lambda f32, grid: peq_tf(bands, grid, fs, float32=f32), freqs, fs, float32, f"input {i + 1} PEQ")
 
 
 # --- compressor (docs 04 §6) -------------------------------------------------------------------------------------

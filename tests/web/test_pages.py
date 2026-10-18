@@ -154,8 +154,10 @@ async def test_device_page(http):
     assert "2 in, 4 out" in html and "96 kHz" in html and "79.8 ms" in html
     assert "−127.0 dB to 0.0 dB" in html
     assert 'hx-trigger="sse:device"' in html
-    # the device page doesn't ask for levels, so the daemon can drop them
-    assert f'sse-connect="/api/v1/events?topics=master%2Cdevice&amp;serial={SERIAL}"' in html
+    # the device page doesn't ask for levels, so the daemon can drop them; sync/log/verify share the one feed
+    topics = "master%2Cdevice%2Csync%2Clog%2Cverify"
+    assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
+    assert html.count("sse-connect=") == 1
 
 
 async def test_device_info_fragment(http):

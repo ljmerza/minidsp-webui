@@ -2,6 +2,7 @@
 the event log."""
 
 import json
+import re
 from pathlib import Path
 
 from app.sync.session import AdoptMode
@@ -22,9 +23,20 @@ async def test_device_page_loads_the_new_sections(ctx):
     assert f'hx-get="/ui/devices/{SERIAL}/sync-panel?preset=2"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/events"' in html
-    assert 'sse-connect="/api/v1/events?topics=sync%2Clog%2Cmaster%2Cverify&amp;serial=' in html
+    assert f'sse-connect="/api/v1/events?topics=master%2Cdevice%2Csync%2Clog%2Cverify&amp;serial={SERIAL}"' in html
     assert 'id="sync"' in html and 'id="adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/verify"' in html and 'id="verify"' in html
+
+
+async def test_device_page_uses_one_feed_that_keeps_the_header_sync_badge_current(ctx):
+    """Regression: a nested second feed held two browser connections per tab, and the header (outside it) never
+    saw "sync", so its badge stayed at "N unknown" through a Push all on this very page."""
+    html = (await ctx.http.get("/device")).text
+    assert html.count("sse-connect=") == 1
+    body_feed = re.search(r'<body[^>]*sse-connect="([^"]+)"', html).group(1)
+    assert "sync" in body_feed.split("topics=", 1)[1].split("&", 1)[0].split("%2C")
+    header = html.split('id="app-header"', 1)[1].split("</header>", 1)[0]
+    assert 'hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"' in header
 
 
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
@@ -37,6 +49,13 @@ async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
     assert "Every setting of preset 1 is synced" in html
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0, "show": "all"})).text
     assert "outputs.3.delay_ms" in html and "sync-synced" in html and 'aria-pressed="true"' in html
+
+
+async def test_sync_table_hint_points_at_verify_instead_of_claiming_no_readback(ctx):
+    """Regression: the hint said the device can't be read back, next to a Verify panel that had just read it."""
+    html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
+    assert "can't be read back" not in html
+    assert '<a href="#verify">Verify device</a>' in html
 
 
 async def test_sync_panel_preset_and_errors(ctx):
@@ -208,3 +227,11 @@ async def test_per_row_push_of_a_never_synced_unmute_needs_confirmation(ctx):
     assert response.status_code == 200
     await ctx.settle()
     assert ctx.fake.outputs_written() == [{"index": 1, "mute": False}]
+
+
+def test_adopt_fieldsets_can_shrink_to_a_phone_width():
+    """Regression: fieldsets default to min-width: min-content, so at 360 px the adopt wizard's "Starting point"
+    fieldset was 6 px wider than the screen and the whole Device page scrolled sideways."""
+    css = (Path(__file__).parents[3] / "app" / "static" / "css" / "app.css").read_text()
+    rule = re.search(r"\.adopt fieldset \{([^}]*)\}", css)
+    assert rule and re.search(r"(^|;|\s)min-width:\s*0\s*;", rule.group(1))

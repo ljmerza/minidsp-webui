@@ -22,6 +22,7 @@
   const DB_FLOOR = -200;
   const FLOAT32_WARN_DB = 0.1;
   const FLOAT32_RELEVANT_DB = -100;
+  const CHECK_F_MIN = 0.1; // lowest non-zero frequency of the full-band check grid (DC is always included)
   const KEYS = ['b0', 'b1', 'b2', 'a1', 'a2'];
   const PASSTHROUGH = Object.freeze({ b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 });
 
@@ -117,6 +118,14 @@
     if (!c.every((x) => Number.isFinite(Math.fround(x)))) return 'biquad coefficient overflows float32';
     const [, , , a1, a2] = c;
     if (!polesStable(a1, a2)) {
+      if (triangle(a1, a2)) {
+        // Stable as designed; only the device's float32 rounding pushes the poles onto/over the unit circle.
+        const radius32 = Number(poleRadius(Math.fround(a1), Math.fround(a2)).toPrecision(6));
+        return (
+          `unstable after float32 rounding (device precision): pole radius ${radius32}; ` +
+          'raise the frequency or lower the gain or Q'
+        );
+      }
       const radius = Number(poleRadius(a1, a2).toPrecision(6));
       return `unstable biquad: pole radius ${radius} (needs |a2| < 1 and |a1| < 1 - a2)`;
     }
@@ -438,6 +447,13 @@
     return out;
   }
 
+  // DC plus n log-spaced frequencies from 0.1 Hz to Nyquist: where float32 rounding can matter outside the plot.
+  function fullBandGrid(fs = FS, n = N_POINTS) {
+    const out = new Float64Array(n + 1);
+    out.set(freqGrid(CHECK_F_MIN, fs / 2, n), 1);
+    return out;
+  }
+
   const viewGrid = (view, n = N_POINTS) => freqGrid(...VIEWS[view], n);
 
   // Delay rounded to whole samples like the device, with Python's round-half-to-even so both sides agree on ties.
@@ -614,9 +630,15 @@
     return worst;
   }
 
+  // build(float32, grid) -> transfer function. The deviation is judged on the plotted grid and on the full band, so
+  // rounding that only shows below 5 Hz (a Linkwitz Transform's DC gain) or above 24 kHz still warns.
   function finish(build, freqs, fs, float32, label) {
-    const tf = build(float32);
-    const deviation = maxDbDifference(build(false), float32 ? tf : build(true));
+    const tf = build(float32, freqs);
+    const check = fullBandGrid(fs);
+    const deviation = Math.max(
+      maxDbDifference(build(false, freqs), float32 ? tf : build(true, freqs)),
+      maxDbDifference(build(false, check), build(true, check)),
+    );
     const out = toResponse(tf, freqs, fs);
     out.float32_deviation_db = deviation;
     out.warnings = [];
@@ -635,7 +657,7 @@
   function filterResponse(biquads, freqs, { fs = FS, float32 = true, label = 'filter' } = {}) {
     const grid = gridOf(freqs);
     const list = Array.from(biquads);
-    return finish((f32) => cascadeTf(list, grid, { fs, float32: f32 }), grid, fs, float32, label);
+    return finish((f32, g) => cascadeTf(list, g, { fs, float32: f32 }), grid, fs, float32, label);
   }
 
   // --- channel chains (ConfigDoc JSON, docs 04 §4) ------------------------------------------------------------------
@@ -690,10 +712,10 @@
   // Electrical sum of the selected outputs (complex, so delay and polarity matter). Ignores drivers and the room.
   function systemResponse(doc, outputs, freqs, { fs = FS, float32 = true, inputs = [0], masterDb = null } = {}) {
     const grid = gridOf(freqs);
-    const build = (f32) => {
-      let total = tfZero(grid.length);
+    const build = (f32, g) => {
+      let total = tfZero(g.length);
       for (const n of outputs) {
-        total = tfAdd(total, outputStages(doc, n, grid, { fs, float32: f32, inputs, masterDb }).total);
+        total = tfAdd(total, outputStages(doc, n, g, { fs, float32: f32, inputs, masterDb }).total);
       }
       return total;
     };
@@ -708,7 +730,7 @@
   // Input i's PEQ only (gain and mute excluded), as the Input page plots it.
   function inputResponse(doc, i, freqs, { fs = FS, float32 = true } = {}) {
     const grid = gridOf(freqs);
-    const build = (f32) => peqTf(doc.inputs[i].peq, grid, { fs, float32: f32 });
+    const build = (f32, g) => peqTf(doc.inputs[i].peq, g, { fs, float32: f32 });
     return finish(build, grid, fs, float32, `input ${i + 1} PEQ`);
   }
 
@@ -761,6 +783,7 @@
     designCrossover,
     // grid and transfer functions
     freqGrid,
+    fullBandGrid,
     viewGrid,
     delaySamples,
     gainFactor,

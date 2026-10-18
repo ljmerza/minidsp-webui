@@ -16,7 +16,8 @@ Rules:
 - **Exclusive calls.** The preset guard and the call it clears run under one lock; `paused` takes it, so a preset
   switch can wait for an in-flight call and keep new ones out until the device reports the new preset.
 - **Mute wrap.** A bulk apply can hold the affected outputs muted, apply everything, then restore their desired mute.
-  If the apply can't complete the outputs stay muted.
+  If a path of the apply fails the outputs stay muted; failures outside it (e.g. an earlier edit) don't block the
+  restore.
 
 Per-path sync status (synced / pending / failed / unknown) is published on the bus topic ``sync``.
 """
@@ -26,7 +27,7 @@ import contextlib
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -67,6 +68,9 @@ class PresetState:
     failed: dict[str, str] = field(default_factory=dict)  # given up: path -> reason
     attempts: dict[str, int] = field(default_factory=dict)
     wrap: set[int] = field(default_factory=set)  # outputs held muted by a bulk apply
+    # Paths the wrapped apply covers: only their failure keeps the outputs muted. None (e.g. a wrap restored after a
+    # restart): any failure does.
+    wrap_paths: set[str] | None = None
     retry_at: dict[str, float] = field(default_factory=dict)  # rejected path -> monotonic time of its next retry
     wrap_requested: bool = False
     staged: bool = False
@@ -202,14 +206,19 @@ class DeviceWriter:
         applied: dict[str, Any] | None = None,
         unknown: Iterable[str] = (),
         wrap: Iterable[int] = (),
+        force: Iterable[str] = (),
+        wrap_requested: bool = False,
     ) -> PresetState:
         """Register a preset's desired document and shadow (``applied`` minus ``unknown``). ``wrap`` restores the
-        outputs an unfinished bulk apply holds muted."""
+        outputs an unfinished bulk apply holds muted; ``force`` and ``wrap_requested`` a push-all (or mute-wrapped
+        apply) that hasn't run yet, e.g. staged for an inactive preset."""
         shadow = dict(applied or {})
         for path in unknown:
             shadow.pop(path, None)
         held = {n for n in wrap if isinstance(n, int) and 0 <= n < self.profile.n_outputs}
-        state = PresetState(desired=desired, applied=shadow, wrap=held)
+        state = PresetState(desired=desired, applied=shadow, wrap=held, wrap_requested=wrap_requested)
+        values = state.values(self.profile)
+        state.force = {p for p in force if p in values}
         self.presets[preset] = state
         self._publish(preset)
         return state
@@ -261,7 +270,23 @@ class DeviceWriter:
         state.attempts.clear()
         state.retry_at.clear()
         state.wrap.clear()
+        state.wrap_paths = None
         state.wrap_requested = False
+        self._changed(preset)
+        self._resolve(preset)
+
+    def confirm(self, preset: int, values: Mapping[str, Any], *, desired: ConfigDoc | None = None) -> None:
+        """The device holds ``values`` (read back from it): record them in the shadow, optionally together with a new
+        desired document that contains them. Nothing is written."""
+        state = self.state(preset)
+        if desired is not None:
+            state.desired = desired
+        for path, value in values.items():
+            state.applied[path] = value
+            state.dirty.discard(path)
+            state.failed.pop(path, None)
+            state.attempts.pop(path, None)
+            state.retry_at.pop(path, None)
         self._changed(preset)
         self._resolve(preset)
 
@@ -313,7 +338,10 @@ class DeviceWriter:
         if mute_wrap:
             state.wrap_requested = True
         state.staged = False
-        self._publish(preset)
+        if force_all or mute_wrap:
+            self._changed(preset)  # persisted, so a push staged for an inactive preset survives a restart
+        else:
+            self._publish(preset)
         return await self.wait_idle(preset, timeout=timeout)
 
     async def push_all(self, preset: int, *, mute_wrap: bool = True, timeout: float | None = None) -> FlushResult:
@@ -401,8 +429,14 @@ class DeviceWriter:
         """Pending paths besides a wrapped apply's held mutes, backing off or not."""
         return self._pending(state) - self._held_mutes(state)
 
+    def _wrap_failed(self, state: PresetState) -> bool:
+        """Whether a path of the wrapped apply gave up, so its outputs have to stay muted."""
+        if not state.failed:
+            return False
+        return state.wrap_paths is None or not state.wrap_paths.isdisjoint(state.failed)
+
     def _has_work(self, state: PresetState) -> bool:
-        return bool(self._apply_left(state)) or (bool(state.wrap) and not state.failed)
+        return bool(self._apply_left(state)) or (bool(state.wrap) and not self._wrap_failed(state))
 
     def _next_retry(self) -> float | None:
         """Seconds until the earliest backed-off path may be retried (expired entries are dropped)."""
@@ -449,12 +483,13 @@ class DeviceWriter:
         self._publish(preset)
 
     def _log(self, level: str, message: str, **data: Any) -> None:
-        getattr(log, "warning" if level == "warning" else "info")(message)
-        if self._on_log is not None:
+        if self._on_log is not None:  # the callback logs it (the session's log_event), so don't log it twice
             try:
                 self._on_log(level, message, **data)
+                return
             except Exception:
                 log.exception("writer on_log callback failed")
+        getattr(log, "warning" if level == "warning" else "info")(message)
 
     def _publish(self, preset: int) -> None:
         if self.bus is None or preset not in self.presets:
@@ -623,7 +658,7 @@ class DeviceWriter:
             # Couldn't mute (or un-mute) the outputs: never run the rest of the bulk apply unprotected.
             for path in self._apply_left(state):
                 state.failed[path] = "not applied: the outputs could not be muted first"
-        if state.wrap and state.failed and not self._apply_left(state):
+        if state.wrap and self._wrap_failed(state) and not self._apply_left(state):
             self._fail_held_mutes(state)
         self._publish(preset)
         if not self._has_work(state):
@@ -673,7 +708,11 @@ class DeviceWriter:
 
         if state.wrap_requested:
             state.wrap_requested = False
+            if not state.wrap:
+                state.wrap_paths = set()
             state.wrap |= self._wrap_targets(state)
+            if state.wrap_paths is not None:
+                state.wrap_paths |= self._pending(state) | self._held_mutes(state)
         if state.wrap and self._apply_left(state):
             # Once the apply itself is done only the final restore is retried: no need to mute again first.
             to_mute = {
@@ -726,6 +765,8 @@ class DeviceWriter:
                 break
             outcome = "ok"
             for payload in payloads:
+                if state.wrap and state.wrap_paths is not None:
+                    state.wrap_paths.update(payload.values)  # prerequisites pulled in by the plan belong to the apply
                 result = await self._send(preset, payload)
                 if result == "staged" or result == "fatal":
                     outcome = result
@@ -745,7 +786,7 @@ class DeviceWriter:
                 self._wake.set()
             return None
 
-        if state.wrap and not state.failed:
+        if state.wrap and not self._wrap_failed(state):
             values = state.values(self.profile)
             restore = {
                 n: values[path]
@@ -760,6 +801,7 @@ class DeviceWriter:
                 if outcome != "ok":
                     return self._after(preset, outcome)
             state.wrap.clear()
+            state.wrap_paths = None
             self._changed(preset)  # the held outputs are persisted with the shadow
         elif state.wrap:
             self._fail_held_mutes(state)

@@ -64,6 +64,24 @@ def test_round_trip_through_float32(design):
     assert rc.recognize_biquad(f32(d.design_filter(design))).type == design.type
 
 
+@pytest.mark.parametrize(
+    "design",
+    [
+        FilterDesign(type="lp2", freq=15.0, q=0.7071),
+        FilterDesign(type="notch", freq=20.0, q=5.0),
+        FilterDesign(type="peaking", freq=15.0, q=2.0, gain_db=-3.5),
+        FilterDesign(type="peaking", freq=31.5, q=1.0, gain_db=3.0),
+        FilterDesign(type="peaking", freq=12.0, q=2.0, gain_db=-12.0),
+        FilterDesign(type="hp2", freq=12.0, q=0.5),
+    ],
+    ids=lambda x: rc.describe_filter(x),
+)
+def test_low_frequency_float32_readback_recovers_the_typed_values(design):
+    # Float32 rounding puts the closed-form estimate a few % off down here (Notch 20 Hz Q 5 used to come back as
+    # 19.74 Hz Q 4.93, LP2 15 Hz as Raw); several designs then match, so the roundest exact one has to win.
+    assert rc.recognize_biquad(f32(d.design_filter(design))) == design
+
+
 def test_unsnapped_parameters_survive():
     design = FilterDesign(type="peaking", freq=1234.5678, q=3.21987, gain_db=-7.654321)
     got = rc.recognize_biquad(d.design_filter(design))
@@ -164,6 +182,59 @@ def test_crossover_round_trip_any_order(family, order, kind):
 def test_crossover_from_float32_values():
     design = CrossoverDesign(kind="lp", family="bw", order=5, freq=70.0)
     assert rc.recognize_crossover([f32(b) for b in d.design_crossover(design)]) == design
+
+
+FLOAT32_GROUPS = [
+    *(
+        CrossoverDesign(kind="lp", family=f, order=n, freq=fc)
+        for f, n in (("bw", 4), ("bw", 6), ("bw", 8), ("lr", 4), ("lr", 8))
+        for fc in (15.0, 20.0)
+    ),
+    *(
+        CrossoverDesign(kind=k, family="bessel", order=n, freq=fc)
+        for k in ("lp", "hp")
+        for n in range(2, 9)
+        for fc in (15.0, 80.0, 200.0)
+    ),
+    CrossoverDesign(kind="lp", family="lr", order=6, freq=31.5),
+    CrossoverDesign(kind="hp", family="bw", order=5, freq=31.5),
+]
+
+
+@pytest.mark.parametrize("design", FLOAT32_GROUPS, ids=lambda x: rc.describe_crossover(x))
+def test_crossover_from_float32_values_at_low_and_irrational_section_frequencies(design):
+    # Device readbacks are float32. Bessel sections sit at irrational frequencies and low-frequency estimates drift, so
+    # per-section recognition used to fail and the group came back as Custom.
+    biquads = d.design_crossover(design, 4, allow_unverified=True)
+    assert rc.recognize_crossover([f32(b) for b in biquads], include_bessel=True) == design
+
+
+MAG_GROUPS = [
+    CrossoverDesign(kind=k, family="bessel", order=n, freq=fc, bessel_norm="mag")
+    for k in ("lp", "hp")
+    for n in (2, 4, 6, 8)
+    for fc in (31.5, 80.0, 1000.0)
+] + [CrossoverDesign(kind="bp", family="bessel", order=4, freq=20.0, freq_hi=80.0, bessel_norm="mag")]
+
+
+@pytest.mark.parametrize("design", MAG_GROUPS, ids=lambda x: rc.describe_crossover(x))
+@pytest.mark.parametrize("rounded", [False, True], ids=["f64", "f32"])
+def test_bessel_minus_3db_is_recognized_as_mag_at_its_round_corner(design, rounded):
+    # Phase and −3 dB normalizations differ only by a frequency scale, so both match; Bessel4 −3 dB at 80 Hz used to
+    # come back as "Bessel4 LP 121.14 Hz (phase)".
+    biquads = d.design_crossover(design, 4, allow_unverified=True)
+    given = [f32(b) for b in biquads] if rounded else biquads
+    got = rc.recognize_crossover(given, include_bessel=True)
+    assert got == design
+    assert rc.describe_crossover(got).endswith("(−3 dB)")
+
+
+def test_annotate_designs_keeps_bessel_minus_3db():
+    doc = default_config_doc(M2X4HD)
+    mag = CrossoverDesign(kind="lp", family="bessel", order=4, freq=80.0, bessel_norm="mag")
+    doc.outputs[0].crossover[0].compiled = d.design_crossover(mag, M2X4HD.crossover_biquads, allow_unverified=True)
+    got = rc.annotate_designs(doc, include_bessel=True)
+    assert got.outputs[0].crossover[0].design == mag
 
 
 def test_bandpass_group():

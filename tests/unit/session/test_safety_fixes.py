@@ -109,3 +109,33 @@ async def test_preset_switch_waits_for_the_write_in_flight(session, fake):
     await switch
     assert order == ["config start", "config done"]
     assert fake.masters == [{"preset": 1}]
+
+
+async def test_an_unrelated_earlier_failure_does_not_keep_a_bulk_apply_muted(make_session, fake):
+    """A path that gave up before the bulk apply (and isn't part of it) must not block the mute restore."""
+    s = await make_session()
+    s.writer.max_attempts = 2
+    s.writer.backoff_min_s = s.writer.backoff_max_s = 0.01
+    await s.adopt("trust", confirm_defaults=True)
+    fake.fail_when = lambda body: 500 if "inputs" in body else None
+    await s.edit(0, {"inputs": {"1": {"gain_db": -3.0}}})
+    assert set((await settle(s)).failed) == {"inputs.1.gain_db"}
+
+    result = await s.import_cli_script(0, "output 0 gain -- -6", timeout=3)
+    assert fake.configs[0] == {"outputs": [{"index": 0, "mute": True}]}
+    assert fake.configs[-1] == {"outputs": [{"index": 0, "mute": False}]}  # restored
+    assert set(result.edit.flush.failed) == {"inputs.1.gain_db"}
+    assert s.writer.state(0).wrap == set()
+    assert s.sync_status(0)["outputs.0.mute"] == "synced"
+
+
+async def test_a_failure_inside_the_bulk_apply_still_keeps_it_muted(make_session, fake):
+    s = await make_session()
+    s.writer.max_attempts = 2
+    s.writer.backoff_min_s = s.writer.backoff_max_s = 0.01
+    await s.adopt("trust", confirm_defaults=True)
+    fake.fail_when = lambda body: 500 if "gain" in json.dumps(body) else None
+    result = await s.import_cli_script(0, "output 0 gain -- -6", timeout=3)
+    assert set(result.edit.flush.failed) == {"outputs.0.gain_db", "outputs.0.mute"}
+    assert unmutes(fake.configs) == []
+    assert s.writer.state(0).wrap == {0}

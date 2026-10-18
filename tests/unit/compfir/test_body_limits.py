@@ -4,7 +4,13 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app.api.limits import JSON_BODY_LIMIT, MULTIPART_SLACK, BodyLimitMiddleware
+from app.api.limits import (
+    DEFAULT_BODY_LIMIT,
+    JSON_BODY_LIMIT,
+    MULTIPART_MEMORY_LIMIT,
+    MULTIPART_SLACK,
+    BodyLimitMiddleware,
+)
 from app.api.v1 import compressor_fir, presets, rew
 from app.formats.wav import write_wav
 from app.sync.fir import MAX_UPLOAD_BYTES
@@ -74,5 +80,5 @@ def test_profile_import_limits_pick_the_right_route():
         return middleware.limit_for({"type": "http", "method": "POST", "path": path})
 
     assert limit("/api/v1/profiles/import") == JSON_BODY_LIMIT
-    assert limit("/ui/profiles/import") == (1 << 20) + MULTIPART_SLACK  # the multipart form needs the slack
-    assert limit("/api/v1/profiles") is None
+    assert limit("/ui/profiles/import") == MULTIPART_MEMORY_LIMIT  # the multipart form, kept within the memory spool
+    assert limit("/api/v1/profiles") == DEFAULT_BODY_LIMIT

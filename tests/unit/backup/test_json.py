@@ -548,7 +548,13 @@ def test_fully_synced():
     assert svc.fully_synced(entry, doc, M2X4HD)
     nearly = {**values, "outputs.0.delay_ms": 1.004}  # the same whole number of samples
     assert svc.fully_synced(svc.PresetEntry(preset=0, desired={}, applied=nearly), doc, M2X4HD)
-    for applied, unknown in (({**values, "#pending": ["x"]}, []), (values, ["outputs.0.mute"]), (None, [])):
+    staged_push = ({**values, "#force": ["outputs.0.mute"]}, []), ({**values, "#wrap_requested": True}, [])
+    for applied, unknown in (
+        ({**values, "#pending": ["x"]}, []),
+        (values, ["outputs.0.mute"]),
+        (None, []),
+        *staged_push,
+    ):
         entry = svc.PresetEntry(preset=0, desired={}, applied=applied, unknown_paths=unknown)
         assert not svc.fully_synced(entry, doc, M2X4HD)
 

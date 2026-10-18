@@ -45,7 +45,7 @@
       <template x-if="h.daemon_last_exit">
         <div><dt>Last exit</dt><dd x-text="h.daemon_last_exit"></dd></div>
       </template>
-      <template x-if="h.daemon_process_error && h.daemon_process !== 'running'">
+      <template x-if="h.daemon_process_error">
         <div><dt>Process error</dt><dd x-text="h.daemon_process_error"></dd></div>
       </template>
       <template x-if="h.daemon_mode === 'embedded'">
@@ -61,9 +61,9 @@
 {% if session is not none and serial is not none %}
 {%- set ui = root ~ "/ui/devices/" ~ serial -%}
 {%- set q = request.query_params.get("preset") -%}
-{#- This page's main feed carries master/device only; sync status, verify results and the event log come
-     over a second one. -#}
-<div class="device-live" sse-connect="{{ root }}/api/v1/events?topics=sync%2Clog%2Cmaster%2Cverify&amp;serial={{ serial }}">
+{#- Sync status, verify results and the event log come over the page's single feed (DEVICE_TOPICS): a second
+     EventSource per tab would use up the browser's per-host connections, and the header would miss sync events. -#}
+<div class="device-live">
   {#- Until the device is adopted the wizard comes first; afterwards it sits below the sync table. -#}
   {%- set adopt_first = session.needs_adoption is defined and session.needs_adoption %}
   {% if adopt_first %}

@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.api.v1 import presets, rew
-from app.dsp.design import highpass2, lowpass2, peaking
+from app.dsp.design import high_shelf, highpass2, linkwitz_transform, lowpass2, peaking
 from app.formats.rew import export_rew, parse_rew
 from app.model.filters import PASSTHROUGH
 from app.sync.session import SessionManager
@@ -184,6 +184,22 @@ async def test_big_boost_needs_confirmation(api, session):
     assert confirmed.status_code == 200
     too_big = await import_rew(api, text=export_rew([peaking(1000, 1, 30)]), bank="outputs.0.peq", confirm=True)
     assert too_big.status_code == 422 and too_big.json()["detail"].startswith("filter boost too large")
+
+
+@pytest.mark.parametrize(
+    "biquad",
+    [
+        linkwitz_transform(25, 0.7, 5, 0.5),  # +32.9 dB at DC in float32, only +21.6 dB at 5 Hz
+        linkwitz_transform(20, 0.6, 3, 0.5),
+        peaking(40000, 2, 60),  # peaks above the 24 kHz display range
+        high_shelf(40000, 0.7071, 40),
+    ],
+    ids=["lt-25-5", "lt-20-3", "peak-40k", "shelf-40k"],
+)
+async def test_boost_outside_the_display_range_is_too_large(api, session, biquad):
+    response = await import_rew(api, text=export_rew([biquad]), bank="outputs.0.peq", index=0, confirm=True)
+    assert response.status_code == 422 and response.json()["detail"].startswith("filter boost too large")
+    assert (await session.get_desired(0)).outputs[0].peq[0].compiled == PASSTHROUGH
 
 
 async def test_if_match(api, session):

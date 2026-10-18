@@ -200,6 +200,7 @@ SOURCE_LABELS = {
     "adopt": "adopt",
     "revert": "revert",
     "mqtt": "Home Assistant",
+    "verify": "verify (accepted device values)",
 }
 
 

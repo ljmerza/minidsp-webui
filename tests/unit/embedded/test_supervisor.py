@@ -208,9 +208,24 @@ async def test_listener_errors_are_reported_while_the_process_runs(make_supervis
     sup = make_supervisor(stderr="HTTP/TCP listener error: Address already in use (os error 98)")
     await sup.start()
     try:
-        await wait_for(lambda: sup.last_error is not None)
+        error = "minidspd: HTTP/TCP listener error: Address already in use (os error 98)"
+        await wait_for(lambda: sup.snapshot()["daemon_process_error"] is not None)
         assert sup.state == RUNNING
-        assert sup.last_error == "minidspd: HTTP/TCP listener error: Address already in use (os error 98)"
+        assert sup.snapshot()["daemon_process_error"] == error
+    finally:
+        await sup.stop()
+
+
+async def test_a_healthy_respawn_reports_no_process_error(make_supervisor, record):
+    sup = make_supervisor(backoff_min_s=0.05)
+    await sup.start()
+    try:
+        await wait_for(lambda: len(starts(record)) == 1)
+        os.kill(sup.pid, signal.SIGKILL)
+        await wait_for(lambda: len(starts(record)) == 2 and sup.state == RUNNING)
+        snap = sup.snapshot()
+        assert snap["daemon_last_exit"] == "signal SIGKILL"  # the history stays visible
+        assert snap["daemon_process_error"] is None  # but the running daemon has no error
     finally:
         await sup.stop()
 
