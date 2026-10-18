@@ -220,6 +220,8 @@ def health_context(request: Request, session: DeviceSession | None, summary: Pre
         "health": view,
         "health_url": _part_url(request, "health", serial),
         "health_fix_url": fix_url,
+        # Before set-up every setting is unknown, so "everything looks fine" would claim a check that can't be made.
+        "health_first_run": bool(getattr(session, "needs_adoption", False)) if session is not None else False,
         # Until the "Something wrong?" wizard exists its fallback is Home itself, so the link is left out here.
         "diagnose_href": _wizard_href(request, "diagnose"),
     }

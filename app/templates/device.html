@@ -23,8 +23,12 @@
     </div>
     <div id="verify" class="verify-section" role="region" aria-labelledby="verify-title">
       <h3 id="verify-title" class="verify-title">Last check{{ help("check-device") }}</h3>
-      {#- The Check device button above replaces #verify-panel; a nightly or API run re-renders it. -#}
-      <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML">
+      {#- The Check device button above replaces #verify-panel; a nightly or API run re-renders it. That background
+          refresh is skipped while the "Use the device's values" confirm is open or still loading, which it would
+          otherwise close (the refresh that follows a Check device lands a few hundred ms after the button's own). -#}
+      <div id="verify-box" class="verify-box" hx-get="{{ ui }}/verify" hx-trigger="load, sse:verify delay:300ms" hx-swap="innerHTML"
+           hx-on::before-request="if (event.detail.elt === this && document.querySelector('#verify-dialog-slot dialog, #verify-panel .htmx-request')) event.preventDefault()"
+           hx-on::before-swap="if (event.detail.target === this && document.querySelector('#verify-dialog-slot dialog, #verify-panel .htmx-request')) event.detail.shouldSwap = false">
         <p class="muted">Loading&hellip;</p>
       </div>
     </div>

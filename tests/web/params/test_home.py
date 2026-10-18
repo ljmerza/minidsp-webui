@@ -201,6 +201,10 @@ async def test_first_run_replaces_the_cards_until_the_device_is_set_up(ctx):
     assert "data-first-run" in html and "The app doesn't know what your miniDSP holds yet." in html
     assert 'href="/device#adopt">Set up this device&hellip;</a>' in html
     assert 'class="output-card home-card"' not in html
+    # the health line doesn't claim that everything looks fine before anything could be checked
+    assert "data-health-first-run" in html and "data-health-ok" not in html
+    health = (await ctx.http.get(f"/ui/home/health?serial={SERIAL}")).text
+    assert "Nothing to check yet" in health and "looks fine" not in health
 
 
 async def test_meter_strip_lists_every_channel_and_links_meters_and_graph(ctx):

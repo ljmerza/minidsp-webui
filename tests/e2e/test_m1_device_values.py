@@ -40,8 +40,8 @@ def test_use_the_devices_values_confirms_names_and_undo_writes_nothing(screen: P
     before = api.wait_synced()
     visit(screen, "/device")
     # A finished check is announced over the page's event stream, and the panel reloads itself 300 ms later
-    # (device.html, hx-trigger "sse:verify delay:300ms"). Wait for that reload: it would close a dialog opened
-    # before it (see the PR notes; a fast tap can lose the dialog the same way).
+    # (device.html, hx-trigger "sse:verify delay:300ms"). Wait for that reload so the screenshot is of a settled
+    # panel; the fast-tap case (the reload skipped while the dialog is open) is the next test.
     with screen.expect_response(
         lambda r: r.request.method == "GET" and r.url.endswith(f"/ui/devices/{api.serial}/verify")
     ):
@@ -76,3 +76,20 @@ def test_use_the_devices_values_confirms_names_and_undo_writes_nothing(screen: P
     after = wait_until(lambda: (p := api.preset(0))["desired"] == before["desired"] and p, what="the undo")
     assert after["writes_sent"] == before["writes_sent"]  # nothing was sent to the device, either way
     assert after["counts"]["pending"] == 0
+
+
+def test_a_fast_tap_after_a_check_keeps_the_confirm_open(screen: Page, api: Api):
+    """The panel's own reload after a check used to land a few hundred ms later and close a confirm opened before it;
+    it is now skipped while the confirm is open or loading."""
+    api.wait_synced()
+    visit(screen, "/device")
+    screen.get_by_role("button", name="Check device", exact=True).click()
+    expect(screen.locator("#verify-result")).to_contain_text("changed on device")
+    screen.get_by_role("button", name="Use the device's values…", exact=True).click()  # no wait for the reload
+    dialog = screen.get_by_role("dialog")
+    expect(dialog).to_be_visible()
+    screen.wait_for_timeout(1500)  # well past the 300 ms reload
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_role("heading", level=2)).to_contain_text("Use the device's values")
+    dialog.get_by_role("button", name="Cancel").click()
+    expect(screen.get_by_role("dialog")).to_have_count(0)

@@ -24,6 +24,9 @@
         </li>
       {% endfor %}
     </ul>
+  {% elif health_first_run %}
+    <p class="home-health-none" data-health-first-run><span aria-hidden="true">?</span> Nothing to check yet: the app
+      doesn't know what your miniDSP holds until you set up this device.</p>
   {% else %}
     <p class="home-health-ok" data-health-ok><span aria-hidden="true">&#10003;</span> Everything the app can check looks fine.</p>
   {% endif %}
