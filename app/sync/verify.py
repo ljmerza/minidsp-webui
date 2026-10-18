@@ -35,6 +35,7 @@ from time import monotonic
 from typing import Any
 
 import numpy as np
+from pydantic import ValidationError
 
 from app.daemon.rawframes import (
     BIQUAD_LEN,
@@ -43,6 +44,7 @@ from app.daemon.rawframes import (
     FloatData,
     MemoryMap,
     RawFrameReader,
+    RawFrameTimeout,
     as_floats,
     as_word,
     lookup,
@@ -51,9 +53,18 @@ from app.daemon.rawframes import (
     plan_scalar_reads,
     raw_ws_url,
 )
+from app.dsp.recognize import annotate_designs
+from app.model.config_doc import ConfigDoc, PathError, set_path, validate_doc
 from app.model.device_profile import DeviceProfile
 from app.sync.backup import seconds_until
-from app.sync.session import DeviceSession, PresetSwitchInProgress, SessionManager, SessionState
+from app.sync.session import (
+    DeviceSession,
+    PresetSwitchInProgress,
+    SessionManager,
+    SessionState,
+    UndoResult,
+    undo_unit,
+)
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +101,20 @@ class VerifyError(RuntimeError):
 
 class VerifyUnsupported(VerifyError):
     """No memory map for this device model."""
+
+
+class ReadbackUnavailable(VerifyError):
+    """The device (or the mock) didn't answer its memory reads, or answered too slowly: nothing can be read back.
+
+    Raised after the first read goes unanswered (its own retry included) or when the whole read phase overruns
+    `READ_BUDGET_S`, instead of waiting out a timeout on every read. Remembered for `UNREADABLE_HOLD_S`, so the
+    next check, nightly run or adopt read-back fails at once; a reconnect clears it."""
+
+
+# A real 2x4HD answers the ~51 reads of a full check in about 1 s, the embedded mock in about 3-4 s; a read phase
+# this long means something is wrong (see `ReadbackUnavailable`).
+READ_BUDGET_S = 15.0
+UNREADABLE_HOLD_S = 60.0
 
 
 # --- comparison ---------------------------------------------------------------------------------------------------
@@ -262,6 +287,19 @@ def device_value(item: "VerifyItem") -> Any:
     return item.actual
 
 
+def zero_filter(item: "VerifyItem") -> bool:
+    """Whether a read biquad is all zeros (``b0 = b1 = b2 = 0``). Such a filter passes no sound at all; on a band the
+    app has on it would silence the channel, and it is what a failed or empty read looks like, so it is never accepted
+    as the device's value."""
+    actual = item.actual
+    if item.status not in (ItemStatus.DRIFT, ItemStatus.UNKNOWN) or not isinstance(actual, dict):
+        return False
+    try:
+        return all(float(actual[k]) == 0.0 for k in ("b0", "b1", "b2"))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def accepted_values(items: Iterable["VerifyItem"], desired: Mapping[str, Any]) -> dict[str, Any]:
     """Document value per readable item: the desired value where the device holds it (within the readback tolerance,
     so a recognized design and full-precision coefficients survive), else the decoded device value. Items without a
@@ -353,10 +391,18 @@ class VerifyReport:
 
     @property
     def acceptable(self) -> list[VerifyItem]:
-        """Drifted and never-confirmed items with a usable reading: their device values can be accepted."""
+        """Drifted and never-confirmed items with a usable reading: their device values can be accepted. All-zero
+        filters (`zero_filter`) are not usable."""
         return [
-            i for i in self.items if i.status in (ItemStatus.DRIFT, ItemStatus.UNKNOWN) and device_value(i) is not None
+            i
+            for i in self.items
+            if i.status in (ItemStatus.DRIFT, ItemStatus.UNKNOWN) and device_value(i) is not None and not zero_filter(i)
         ]
+
+    @property
+    def refused(self) -> list[VerifyItem]:
+        """Drifted and never-confirmed filters that read all zeros: never accepted (`zero_filter`)."""
+        return [i for i in self.items if zero_filter(i)]
 
     @property
     def status(self) -> str:
@@ -412,6 +458,7 @@ class VerifyReport:
             "marked_unknown": self.marked_unknown,
             "accepted": self.accepted,
             "acceptable": [i.path for i in self.acceptable],
+            "refused": [i.path for i in self.refused],
             "items": [i.as_json() for i in self.items],
         }
 
@@ -428,6 +475,51 @@ def last_report(serial: int) -> VerifyReport | None:
 
 def forget_reports() -> None:
     _last_reports.clear()
+
+
+_unreadable: weakref.WeakKeyDictionary[DeviceSession, tuple[float, str]] = weakref.WeakKeyDictionary()
+
+
+def _device_word(session: DeviceSession) -> str:
+    device = getattr(session, "device", None)
+    url = getattr(device, "url", None) or ""
+    return "The mock device" if url.startswith("mock:") else "The device"
+
+
+def _mark_unreadable(session: DeviceSession, why: str) -> ReadbackUnavailable:
+    message = f"{_device_word(session)} can't be read back: {why}. Nothing was compared or changed"
+    _unreadable[session] = (monotonic() + UNREADABLE_HOLD_S, message)
+    log.warning("[%s] readback unavailable: %s", session.serial, why)
+    return ReadbackUnavailable(message)
+
+
+def forget_unreadable(session: DeviceSession) -> None:
+    """Try the reads again next time (a reconnect, a new daemon)."""
+    _unreadable.pop(session, None)
+
+
+async def _read_blocks(
+    session: DeviceSession, reader: RawFrameReader, reads: list[tuple[int, int]]
+) -> dict[int, FloatData]:
+    """Every read, failing fast: an unanswered first read or an overrun of `READ_BUDGET_S` aborts the whole run
+    with `ReadbackUnavailable`. A read that times out after earlier ones were answered raises `RawFrameTimeout` as
+    before (a glitch, not an unreadable device). Same reads, in the same order, as `RawFrameReader.read_many`."""
+    blocks: dict[int, FloatData] = {}
+    try:
+        async with asyncio.timeout(READ_BUDGET_S):
+            for n, (base, count) in enumerate(reads):
+                try:
+                    blocks[base] = await reader.read(base, count)
+                except RawFrameTimeout as exc:
+                    if n == 0:
+                        raise _mark_unreadable(session, "it didn't answer a memory read") from exc
+                    raise
+    except TimeoutError as exc:
+        raise _mark_unreadable(
+            session, f"reading it took longer than {READ_BUDGET_S:g} s ({len(blocks)} of {len(reads)} reads done)"
+        ) from exc
+    _unreadable.pop(session, None)
+    return blocks
 
 
 def _lock(session: DeviceSession) -> asyncio.Lock:
@@ -525,6 +617,11 @@ async def _read(
     mmap = memory_map_for(session.profile.product_name)
     if mmap is None:
         raise VerifyUnsupported(f"readback is not supported on the {session.profile.product_name}")
+    held = _unreadable.get(session)
+    if held is not None:
+        if monotonic() < held[0]:
+            raise ReadbackUnavailable(held[1])
+        _unreadable.pop(session, None)
     await session.ensure_loaded()
     if session.preset_switching is not None:
         raise PresetSwitchInProgress(f"preset switch to {session.preset_switching} in progress")
@@ -543,7 +640,7 @@ async def _read(
             applied = dict(state.applied)
             current = dict(state.values(session.profile))
             probes, unreadable, reads = plan(current if values is None else values, mmap)
-            blocks = await reader.read_many(reads)
+            blocks = await _read_blocks(session, reader, reads)
             if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
                 raise VerifyError("the active preset changed while reading; try again")
             # The cached preset only follows other clients' switches (CLI, front panel) on the monitor's poll,
@@ -589,6 +686,7 @@ async def reconfirm(
     unless ``power_cycle`` is plausible, then they become unknown. Nothing is written. Raises like `verify_device`.
     """
     async with _lock(session):
+        forget_unreadable(session)  # a reconnect is a new chance for the reads
         read = await _read(session, reader_factory)
         items = read.items(session.profile)
         report = read.report(session, items, source="reconnect")
@@ -626,20 +724,67 @@ async def read_back(
     return read.preset, read.items(session.profile, values=values, applied={})
 
 
+@dataclass(frozen=True)
+class AcceptPreview:
+    preset: int
+    before: ConfigDoc
+    after: ConfigDoc
+    values: dict[str, Any]  # device path -> the value it would take
+    refused: list[VerifyItem]
+    problems: list[str]
+
+
+def accept_items(report: VerifyReport, paths: Iterable[str] | None = None) -> list[VerifyItem]:
+    """The acceptable items of ``report`` (all, or those in ``paths``). Refused ones (all-zero filters) never are."""
+    chosen = None if paths is None else set(paths)
+    return [i for i in report.acceptable if chosen is None or i.path in chosen]
+
+
+def accept_preview(session: DeviceSession, report: VerifyReport, paths: Iterable[str] | None = None) -> AcceptPreview:
+    """What `accept_device_values` would do with the same arguments, without doing it: the desired document before and
+    after (designs recognized, as the accept does) and the values it would take. Nothing is changed."""
+    items = accept_items(report, paths)
+    state = session.writer.state(report.preset)
+    before = state.desired
+    values = accepted_values(items, state.values(session.profile))
+    after = before
+    problems: list[str] = []
+    try:
+        for path, value in values.items():
+            after = set_path(after, path, value)
+    except (PathError, ValidationError) as exc:
+        problems.append(str(exc))
+        after = before
+    if after is not before:
+        after = annotate_designs(after)
+        # The checks `DeviceSession.accept_device_values` refuses with (a gain above a channel's ceiling, say).
+        problems += validate_doc(after, session.profile) + session._ceiling_problems(after)
+    chosen = None if paths is None else set(paths)
+    refused = [i for i in report.refused if chosen is None or i.path in chosen]
+    return AcceptPreview(report.preset, before, after, values, refused, problems)
+
+
+_undo_items: dict[int, tuple[str, VerifyReport, dict[str, VerifyItem], list[str]]] = {}
+
+
 async def accept_device_values(
     session: DeviceSession, report: VerifyReport, paths: Iterable[str] | None = None
 ) -> list[str]:
     """Accept the device values of ``report``'s acceptable items (all, or those in ``paths``): they become the desired
     values and are confirmed in the shadow. Nothing is written to the device. The report is updated (the items become
     ``ok``) and published again. Returns the accepted paths. Raises `DesiredValidationError` (e.g. a gain above a
-    channel's ceiling)."""
-    chosen = None if paths is None else set(paths)
-    items = [i for i in report.acceptable if chosen is None or i.path in chosen]
+    channel's ceiling). All-zero filters are never accepted (`VerifyReport.refused`). It can be undone for
+    `ACCEPT_UNDO_S` with `undo_accept` (the token is ``session.accept_undo.token``)."""
+    items = accept_items(report, paths)
     if not items:
         return []
     desired = session.writer.state(report.preset).values(session.profile)
     values = accepted_values(items, desired)
+    previous = {i.path: i for i in report.items if i.path in values}
+    previous_accepted = list(report.accepted)
     await session.accept_device_values(report.preset, values, summary=f"verify: accepted {len(values)} device value(s)")
+    if session.accept_undo is not None:
+        _undo_items[session.serial] = (session.accept_undo.token, report, previous, previous_accepted)
     confirmed = session.writer.state(report.preset).applied
     accepted = set(values)
     report.items = [
@@ -658,6 +803,23 @@ async def accept_device_values(
     report.accepted = sorted(set(report.accepted) | accepted)
     _record(session, report, persist=False)
     return sorted(accepted)
+
+
+async def undo_accept(session: DeviceSession, preset: int, token: str | None = None) -> UndoResult:
+    """Undo the last `accept_device_values` within `ACCEPT_UNDO_S`: the app's earlier values and shadow come back
+    (`DeviceSession.restore_accept_snapshot`; nothing is written or queued) and, while it is still the last report,
+    the report's items for them too. Raises `UndoUnavailable`."""
+    result = await session.restore_accept_snapshot(preset, token)
+    saved = _undo_items.pop(session.serial, None)
+    if saved is not None and (token is None or saved[0] == token):
+        _token, report, previous, previous_accepted = saved
+        if report is _last_reports.get(session.serial):
+            units = set(result.restored)
+            back = {p: item for p, item in previous.items() if undo_unit(p) in units}
+            report.items = [back.get(i.path, i) for i in report.items]
+            report.accepted = sorted(p for p in report.accepted if p not in back or p in previous_accepted)
+            _record(session, report, persist=False)
+    return result
 
 
 def _cached_preset(session: DeviceSession) -> int | None:

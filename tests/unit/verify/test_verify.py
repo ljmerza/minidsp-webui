@@ -9,11 +9,11 @@ import pytest
 
 from app.bus import LOG
 from app.daemon.client import DaemonUnavailable
-from app.daemon.rawframes import M2X4HD_MAP, parse_float_data
+from app.daemon.rawframes import M2X4HD_MAP, RawFrameTimeout, parse_float_data
 from app.dsp.design import peaking
 from app.model.config_doc import default_config_doc, set_path
 from app.model.device_profile import M2X4HD
-from app.model.master import MasterStatus
+from app.model.master import DaemonDevice, MasterStatus
 from app.sync import verify as svc
 from app.sync.session import PresetSwitchInProgress, SessionManager, SessionState
 
@@ -474,3 +474,81 @@ def test_drift_sensor_discovery_and_state():
         "source": "x",
         "error": None,
     }
+
+
+# --- fail fast when the device can't be read back -------------------------------------------------------------------
+
+
+async def test_an_unanswered_first_read_aborts_the_whole_run_at_once(shaker, reader_factory, bridge):
+    bridge.drop = 10_000  # a bridge (or mock) that never answers ReadFloats
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    with pytest.raises(svc.ReadbackUnavailable, match="The device can't be read back: it didn't answer a memory read"):
+        await run(shaker, reader_factory)
+    assert loop.time() - started < 1.5  # one read and its retry (0.2 s each), not ~50 timeouts
+    assert len(bridge.requests) == 2
+    assert svc.last_report(shaker.serial) is None
+
+    # Remembered: the next check, and an adopt's read-back, refuse at once without touching the bridge.
+    connects = len(bridge.urls)
+    started = loop.time()
+    with pytest.raises(svc.ReadbackUnavailable):
+        await run(shaker, reader_factory)
+    with pytest.raises(svc.ReadbackUnavailable):
+        await svc.read_back(shaker, {"outputs.0.gain_db": 12.0}, reader_factory=reader_factory)
+    assert loop.time() - started < 0.1
+    assert len(bridge.urls) == connects and len(bridge.requests) == 2
+
+    # A reconnect tries again; a run that reads clears the hold.
+    bridge.drop = 0
+    report = await svc.reconfirm(shaker, power_cycle=False, reader_factory=reader_factory)
+    assert report.status == "ok"
+    assert (await run(shaker, reader_factory)).status == "ok"
+
+
+async def test_the_hold_expires(shaker, reader_factory, bridge, monkeypatch):
+    monkeypatch.setattr(svc, "UNREADABLE_HOLD_S", 0.0)
+    bridge.drop = 2
+    with pytest.raises(svc.ReadbackUnavailable):
+        await run(shaker, reader_factory)
+    assert (await run(shaker, reader_factory)).status == "ok"
+
+
+async def test_the_mock_is_named(shaker, reader_factory, bridge):
+    shaker.device = DaemonDevice.model_validate({"url": "mock:?serial=911111", "product_name": "2x4HD"})
+    bridge.drop = 10_000
+    with pytest.raises(svc.ReadbackUnavailable, match="^The mock device can't be read back"):
+        await run(shaker, reader_factory)
+
+
+async def test_a_slow_device_is_stopped_by_the_read_budget(shaker, reader_factory, bridge, monkeypatch):
+    monkeypatch.setattr(svc, "READ_BUDGET_S", 0.5)
+
+    def answer_only_retries(addr, count):
+        bridge.drop = 1 if len(bridge.requests) % 2 else 0  # every read waits out one 0.2 s timeout
+
+    bridge.on_request = answer_only_retries
+    with pytest.raises(svc.ReadbackUnavailable, match=r"reading it took longer than 0.5 s \(\d+ of \d+ reads done\)"):
+        await run(shaker, reader_factory)
+    assert len(bridge.requests) < 10  # the plan has ~50 reads
+
+
+async def test_a_timeout_after_answered_reads_is_a_glitch_not_unreadable(shaker, reader_factory, bridge):
+    def drop_the_fourth(addr, count):
+        if len(bridge.requests) == 4:
+            bridge.drop = 2  # the read and its retry
+
+    bridge.on_request = drop_the_fourth
+    with pytest.raises(RawFrameTimeout):
+        await run(shaker, reader_factory)
+    bridge.on_request = None
+    assert (await run(shaker, reader_factory)).status == "ok"  # not held
+
+
+async def test_api_reports_unreadable(shaker, reader_factory, bridge):
+    from app.api.v1.verify import error_response
+
+    bridge.drop = 10_000
+    with pytest.raises(svc.ReadbackUnavailable) as caught:
+        await run(shaker, reader_factory)
+    assert error_response(caught.value)[:2] == (503, "unreadable")

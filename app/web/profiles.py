@@ -28,7 +28,9 @@ from app.model.filters import CrossoverDesign, FilterDesign
 from app.state import ProfileNameTaken, RevisionConflict
 from app.sync import profiles as svc
 from app.sync.session import (
+    BigRaise,
     ConfirmationRequired,
+    Confirmed,
     DesiredValidationError,
     DeviceSession,
     MasterValidationError,
@@ -39,7 +41,7 @@ from app.sync.session import (
     flush_json,
 )
 from app.sync.writer import FlushResult
-from app.web.sync_ui import describe_path, format_value
+from app.web.sync_ui import confirmation_text, describe_path, format_value, humanize_paths, raise_rows
 from app.web.ui_common import (
     device_preset,
     edit_page_context,
@@ -555,12 +557,36 @@ async def diff_partial(
 # --- load / revert (JSON for profiles.js) -----------------------------------------------------------------------------
 
 
+class ConfirmedRaise(BaseModel):
+    model_config = ConfigDict(extra="ignore")  # the preview's raise rows also carry label / text
+
+    path: str
+    delta_db: float
+    kind: str = "gain"
+
+
+class ConfirmedBody(BaseModel):
+    """The ``confirms`` of a preview or 409 sent back as the answer: only these raises / FIR loads are agreed to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raises: list[ConfirmedRaise] = []
+    fir_loads: list[int] = []
+
+    def to_confirmed(self) -> Confirmed:
+        return Confirmed(
+            raises=tuple(BigRaise(r.path, r.delta_db, r.kind) for r in self.raises),
+            fir_loads=frozenset(self.fir_loads),
+        )
+
+
 class LoadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     preset: int
     activate: bool = False
-    confirm: bool = False
+    confirm: bool = False  # skip every confirmation (API-style); the page sends ``confirmed`` instead
+    confirmed: ConfirmedBody | None = None
     preview: bool = False
     serial: int | None = None
 
@@ -569,7 +595,12 @@ class RevertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirm: bool = False
+    confirmed: ConfirmedBody | None = None
     preview: bool = False
+
+
+def _confirmed(body: LoadRequest | RevertRequest) -> Confirmed | None:
+    return body.confirmed.to_confirmed() if body.confirmed is not None else None
 
 
 def _json(content: dict[str, Any], status_code: int = 200) -> JSONResponse:
@@ -580,9 +611,9 @@ def _fail(status_code: int, error: str, detail: str, **extra: Any) -> JSONRespon
     return _json({"error": error, "detail": detail, **extra}, status_code)
 
 
-def _action_error(exc: Exception) -> JSONResponse:
+def _action_error(exc: Exception, session: DeviceSession | None = None) -> JSONResponse:
     if isinstance(exc, ConfirmationRequired):
-        return _fail(409, "confirmation_required", str(exc))
+        return _fail(409, "confirmation_required", confirmation_text(session, exc), confirms=exc.confirms())
     if isinstance(exc, RevisionConflict):
         return _fail(412, "revision_conflict", str(exc))
     if isinstance(exc, PresetSwitchInProgress):
@@ -593,6 +624,8 @@ def _action_error(exc: Exception) -> JSONResponse:
         return _fail(502, "daemon", f"The device did not accept the change: {exc}")
     status, message = _profile_error(exc)
     problems = exc.problems if isinstance(exc, DesiredValidationError) else []
+    problems = [humanize_paths(session, p) for p in problems]
+    message = humanize_paths(session, message)
     return _fail(status, "invalid" if status == 422 else "error", message, problems=problems)
 
 
@@ -618,14 +651,14 @@ async def _body[M: BaseModel](request: Request, model: type[M]) -> M | JSONRespo
 
 def _apply_note(preset: int, active: bool, mute_wrap: bool, activate: bool) -> str:
     if activate and not active:
-        return f"The device switches to preset {preset + 1} and applies it; audio may drop out for a few seconds" + (
-            " and the changed outputs stay muted until it is done." if mute_wrap else "."
+        return f"The device then switches to preset {preset + 1} and plays it; sound drops for a few seconds" + (
+            " and the changed outputs stay muted until it is sent." if mute_wrap else "."
         )
     if active:
-        return f"Preset {preset + 1} is active, so the changes are written now" + (
-            " (the changed outputs are muted while they land)." if mute_wrap else "."
+        return f"Preset {preset + 1} is playing, so it is sent now" + (
+            " (the changed outputs are muted for a few seconds while it lands)." if mute_wrap else "."
         )
-    return f"Preset {preset + 1} isn't active: the changes are staged and written when it becomes active."
+    return f"Preset {preset + 1} isn't playing: it waits and is sent when you switch to preset {preset + 1}."
 
 
 def outcome_note(session: DeviceSession, preset: int, flush: FlushResult | None) -> tuple[str, str]:
@@ -645,9 +678,43 @@ def outcome_note(session: DeviceSession, preset: int, flush: FlushResult | None)
     )
 
 
+LOAD_CHANGE_LINES = 6  # change lines a load question lists before "and N more"
+
+
+def load_question(info: dict[str, Any], preset: int, activate: bool) -> str:
+    """The one question before a profile load (phase9 design §14.8 step 4, P11): what changes, by name; every big
+    raise, which answering yes confirms (the load is then sent with ``confirm``); the unconfirmed settings that are
+    sent too; and when it plays."""
+    name, slot = info["name"], f"preset {preset + 1}"
+    if info["changes"] == 0 and not info["unknown"]:
+        question = f"Preset {preset + 1} already matches “{name}”."
+        if activate and not info["active"]:
+            question += f" Switch the device to {slot}?"
+        return question
+    lines = [f"Load “{name}” into {slot}?", ""]
+    shown = info.get("change_lines") or []
+    if shown:
+        count = info["changes"]
+        lines.append(f"{count} setting{'s' if count != 1 else ''} change:")
+        lines += [f"• {line}" for line in shown[:LOAD_CHANGE_LINES]]
+        if len(shown) > LOAD_CHANGE_LINES:
+            lines.append(f"• and {len(shown) - LOAD_CHANGE_LINES} more (Compare shows them all)")
+        lines.append("")
+    if info.get("confirmation"):
+        lines += [f"{info['confirmation']}. Pressing OK confirms it.", ""]
+    if info["unknown"]:
+        lines.append(
+            f"Preset {preset + 1} also has {info['unknown']} setting(s) the app hasn't confirmed on the device; "
+            "they're all sent too."
+        )
+    lines.append(_apply_note(preset, info["active"], info["mute_wrap"], activate))
+    return "\n".join(lines)
+
+
 @router.post("/ui/profiles/{profile_id}/load")
 async def load_profile(request: Request, profile_id: int) -> Response:
-    """JSON ``{preset, activate, confirm, preview, serial?}``. ``preview`` answers the confirmation question."""
+    """JSON ``{preset, activate, confirm, confirmed, preview, serial?}``. ``preview`` answers the confirmation
+    question and its ``confirms``; sending those back as ``confirmed`` loads only if nothing grew meanwhile (409)."""
     if refused := _refused(request):
         return refused
     body = await _body(request, LoadRequest)
@@ -659,25 +726,34 @@ async def load_profile(request: Request, profile_id: int) -> Response:
     try:
         if body.preview:
             info = await svc.load_preview(session, profile_id, body.preset)
-            if info["changes"] == 0 and not info["unknown"]:
-                question = f"Preset {body.preset + 1} already matches “{info['name']}”."
-                if body.activate and not info["active"]:
-                    question += f" Switch the device to preset {body.preset + 1}?"
-            else:
-                unknown = (
-                    f"{info['unknown']} setting(s) not yet confirmed on the device are written too. "
-                    if info["unknown"]
-                    else ""
+            changes = diff_rows(session, await svc.load_diff(session, profile_id, body.preset))
+            # Sent back as ``confirmed`` when the user answers yes: the load then asks again if a raise grew.
+            info["confirms"] = {"raises": info["raises"], "fir_loads": info["fir_loads"]}
+            info["raises"] = raise_rows(session, info["raises"])
+            info["problems"] = [humanize_paths(session, p) for p in info["problems"]]
+            # Levels, delays and switches first: a list led by filter coefficient rows hides what matters.
+            changes.sort(key=lambda c: _unit_kind(c["path"]) is not None)
+            info["change_lines"] = [f"{c['label']}: {c['a']} → {c['b']}" for c in changes]
+            if info["confirmation"] is not None:
+                info["confirmation"] = confirmation_text(
+                    session,
+                    ConfirmationRequired(
+                        info["confirmation"],
+                        raises=[BigRaise(r["path"], r["delta_db"], r["kind"]) for r in info["raises"]],
+                        limit_db=info["raise_limit_db"],
+                    ),
                 )
-                question = (
-                    f"Load “{info['name']}” into preset {body.preset + 1}? "
-                    f"{info['changes']} setting(s) change. {unknown}"
-                    + _apply_note(body.preset, info["active"], info["mute_wrap"], body.activate)
-                )
-            return _json({**info, "question": question})
-        result = await svc.load_profile(session, profile_id, body.preset, activate=body.activate, confirm=body.confirm)
+            return _json({**info, "question": load_question(info, body.preset, body.activate)})
+        result = await svc.load_profile(
+            session,
+            profile_id,
+            body.preset,
+            activate=body.activate,
+            confirm=body.confirm,
+            confirmed=_confirmed(body),
+        )
     except ACTION_ERRORS as exc:
-        return _action_error(exc)
+        return _action_error(exc, session)
     flush = result.edit.flush
     note, level = outcome_note(session, body.preset, flush)
     switched = f" Switched to preset {body.preset + 1}." if result.activated else ""
@@ -697,7 +773,7 @@ async def load_profile(request: Request, profile_id: int) -> Response:
 
 @router.post("/ui/devices/{serial}/presets/{preset}/history/{revision}/revert")
 async def revert_revision(request: Request, serial: int, preset: int, revision: int) -> Response:
-    """JSON ``{confirm, preview}``."""
+    """JSON ``{confirm, confirmed, preview}``; ``confirmed`` is the ``confirms`` of the 409 the user answered."""
     if refused := _refused(request):
         return refused
     body = await _body(request, RevertRequest)
@@ -718,9 +794,9 @@ async def revert_revision(request: Request, serial: int, preset: int, revision: 
                     + _apply_note(preset, info["active"], info["mute_wrap"], False)
                 )
             return _json({**info, "question": question})
-        result = await svc.revert_to(session, preset, revision, confirm=body.confirm)
+        result = await svc.revert_to(session, preset, revision, confirm=body.confirm, confirmed=_confirmed(body))
     except ACTION_ERRORS as exc:
-        return _action_error(exc)
+        return _action_error(exc, session)
     note, level = outcome_note(session, preset, result.flush)
     if result.paths:
         message = f"Preset {preset + 1} reverted to revision {revision} (now revision {result.revision}).{note}"

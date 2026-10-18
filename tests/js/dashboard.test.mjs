@@ -45,6 +45,10 @@ class El {
     this.attributes[name] = String(value);
   }
 
+  focus() {
+    document.activeElement = this;
+  }
+
   addEventListener(name, fn) {
     (this.listeners[name] ||= []).push(fn);
   }
@@ -100,6 +104,7 @@ function makePage(cards, preset = '0') {
 let calls = [];
 let refreshes = [];
 let toasts = [];
+let toastOptions = [];
 let confirms = [];
 let confirmAnswer = true;
 const listeners = [];
@@ -125,7 +130,10 @@ globalThis.fetch = (url, opts = {}) =>
 
 vm.runInThisContext(readFileSync(new URL('app/static/js/app.js', ROOT), 'utf8'), { filename: 'app.js' });
 vm.runInThisContext(readFileSync(new URL('app/static/js/dashboard.js', ROOT), 'utf8'), { filename: 'dashboard.js' });
-window.mdsp.toast = (message) => toasts.push(message);
+window.mdsp.toast = (message, level, options) => {
+  toasts.push(message);
+  toastOptions.push(options);
+};
 const factories = {};
 window.Alpine = { data: (name, factory) => (factories[name] = factory) };
 for (const [name, fn] of listeners) if (name === 'alpine:init') fn();
@@ -149,6 +157,7 @@ beforeEach(() => {
   calls = [];
   refreshes = [];
   toasts = [];
+  toastOptions = [];
   confirms = [];
   confirmAnswer = true;
 });
@@ -237,6 +246,51 @@ describe('outputCards', () => {
     assert.deepEqual(calls[1].body.values, { 'outputs.2.mute': true });
     assert.equal(muteButton(card).attributes['aria-pressed'], 'true');
     assert.match(card.querySelector('[data-gain-text]').textContent, /\(muted\)$/);
+  });
+
+  test('mute leaves an Undo toast that puts the previous state back', async () => {
+    const card = makeCard(0, { mute: false });
+    card.dataset.name = 'Shakers';
+    const page = mount([card]);
+    page.click(muteButton(card));
+    assert.deepEqual(toasts, ['Shakers muted.']);
+    const action = toastOptions[0].action;
+    assert.equal(action.label, 'Undo');
+    calls[0].reply(200, {});
+    await settle();
+    action.onClick();
+    assert.equal(card.dataset.mute, 'false');
+    assert.equal(muteButton(card).textContent, 'Mute');
+    assert.deepEqual(calls[1].body.values, { 'outputs.0.mute': false });
+    assert.equal(toasts.length, 1); // the undo itself leaves no new toast
+
+    // un-muting says so too, and its Undo mutes again
+    calls[1].reply(200, {});
+    await settle();
+    page.click(muteButton(card));
+    page.click(muteButton(card));
+    assert.deepEqual(toasts.slice(1), ['Shakers muted.', 'Shakers un-muted.']);
+    // an Undo for a state that changed since does nothing
+    toastOptions[1].action.onClick();
+    assert.equal(card.dataset.mute, 'false');
+  });
+
+  test('Undo after the playing preset changed leaves the other preset alone', async () => {
+    const card = makeCard(1, { mute: false });
+    card.dataset.name = 'Shakers';
+    const page = mount([card], '0');
+    page.click(muteButton(card));
+    calls[0].reply(200, {});
+    await settle();
+    // the device switched to preset 2 and the cards were re-fetched: the same output there is muted too
+    const other = makeCard(1, { mute: true });
+    const list = new El('output-cards', { editUrl: '/ui/devices/1/presets/1/edit', preset: '1' }, [other]);
+    page.box.children = [list];
+    list.parent = page.box;
+    toastOptions[0].action.onClick();
+    assert.equal(calls.length, 1); // nothing posted to preset 2
+    assert.equal(other.dataset.mute, 'true');
+    assert.deepEqual(toasts, ['Shakers muted.', 'Shakers was left as it is: the device has switched presets since.']);
   });
 
   test('a big step asks and resends with confirm; a refusal toasts and re-fetches the stored values', async () => {

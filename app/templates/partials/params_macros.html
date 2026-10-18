@@ -36,13 +36,14 @@
   </div>
 {%- endmacro %}
 
-{% macro toggle(id, path, checked, label, on_text, off_text, statuses, reasons, confirm_unmute=none) -%}
+{% macro toggle(id, path, checked, label, on_text, off_text, statuses, reasons, confirm_unmute=none, undo_name=none) -%}
   <div class="param param-toggle">
     <span class="param-label" id="{{ id }}-label">{{ label }}</span>
     <label class="switch">
       <input type="checkbox" id="{{ id }}" data-path="{{ path }}" data-type="bool" role="switch"
              aria-labelledby="{{ id }}-label"{% if checked %} checked{% endif %}
-             {%- if confirm_unmute %} data-confirm-unmute="{{ confirm_unmute }}"{% endif %}>
+             {%- if confirm_unmute %} data-confirm-unmute="{{ confirm_unmute }}"{% endif %}
+             {%- if undo_name %} data-undo-name="{{ undo_name }}"{% endif %}>
       <span class="switch-on" aria-hidden="true">{{ on_text }}</span>
       <span class="switch-off" aria-hidden="true">{{ off_text }}</span>
     </label>

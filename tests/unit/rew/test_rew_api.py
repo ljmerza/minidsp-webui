@@ -257,10 +257,10 @@ async def test_clearing_an_active_crossover_group_needs_confirmation(api, sessio
     lp = export_rew([LP, LP])  # both groups by default: group 2 (the high-pass) would become pass-through
     refused = await import_rew(api, text=lp, bank="outputs.1.crossover")
     assert refused.status_code == 409 and refused.json()["error"] == "confirmation_required"
-    assert "clears crossover group 2 of outputs.1.crossover" in refused.json()["detail"]
+    assert "clears Out 2 · band filter 2 to pass-through" in refused.json()["detail"]
     assert (await session.get_desired(0)).outputs[1].crossover[1].compiled[:2] == [HP, HP]
     one = await import_rew(api, text=lp, bank="outputs.1.crossover", index=0)
     assert one.status_code == 200
     confirmed = await import_rew(api, text=lp, bank="outputs.1.crossover", confirm=True)
     assert confirmed.status_code == 200
-    assert any("clears crossover group 2" in w["message"] for w in confirmed.json()["warnings"])
+    assert any("clears Out 2 · band filter 2" in w["message"] for w in confirmed.json()["warnings"])

@@ -19,6 +19,7 @@ import contextlib
 import logging
 import math
 import re
+import secrets
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -60,6 +61,7 @@ _FILTER_UNIT = re.compile(r"(inputs|outputs)\.(\d+)\.(peq|crossover)\.(\d+)\.")
 _FIR_UNIT = re.compile(r"outputs\.(\d+)\.fir\.")
 BULK_TIMEOUT_S = 60.0  # longest a bulk apply (push-all, import, adopt) is awaited by the caller
 _MISSING = object()
+ACCEPT_UNDO_S = 30.0  # how long an accept of device values can be undone
 NO_PRESET = -1  # what the writer sees as "active" while a preset switch is in progress: nothing matches it
 # minidspd mutes the device while it loads FIR taps (docs 03 §4), so changing them always needs confirm (docs 05).
 FIR_LOAD_WARNING = (
@@ -96,8 +98,80 @@ class MasterValidationError(ValueError):
     """A master change was rejected before reaching the device."""
 
 
+@dataclass(frozen=True)
+class BigRaise:
+    """One raise the big-step guard asks about: ``path`` is a gain path, or a PEQ band / crossover group / FIR
+    (``outputs.0.peq.3``) whose peak gain rises (``kind`` "peak")."""
+
+    path: str
+    delta_db: float
+    kind: str = "gain"  # gain | peak
+
+    def as_json(self) -> dict[str, Any]:
+        return {"path": self.path, "delta_db": round(self.delta_db, 2), "kind": self.kind}
+
+
 class ConfirmationRequired(MasterValidationError):
-    """The change is allowed but guarded (e.g. a big volume raise): repeat it with ``confirm`` set."""
+    """The change is allowed but guarded (e.g. a big volume raise): repeat it with ``confirm`` set.
+
+    ``raises`` lists the big-step raises behind it (empty for other guards) and ``limit_db`` the threshold, so a UI
+    can name them in words instead of showing the message's paths."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raises: Sequence[BigRaise] = (),
+        limit_db: float | None = None,
+        fir_loads: Sequence[int] = (),
+    ) -> None:
+        super().__init__(message)
+        self.raises = list(raises)
+        self.limit_db = limit_db
+        self.fir_loads = list(fir_loads)  # outputs whose FIR the change loads (the device mutes while it loads)
+
+    def confirms(self) -> dict[str, Any]:
+        """What answering yes agrees to, as JSON a client sends back as ``confirmed`` (see `Confirmed`)."""
+        return {"raises": [r.as_json() for r in self.raises], "fir_loads": list(self.fir_loads)}
+
+
+RAISE_TOLERANCE_DB = 0.01  # a confirmed raise still covers one this much bigger (the JSON rounds to 0.01 dB)
+
+
+@dataclass(frozen=True)
+class Confirmed:
+    """What the user agreed to when answering a confirmation: the big raises and FIR loads it named.
+
+    A guarded edit sent with it goes through only if every big raise it now makes is one of these and no bigger, and
+    every FIR load it makes is listed. Anything new or bigger (the state changed between the question and the answer)
+    raises `ConfirmationRequired` again, so the user is asked about what will really happen."""
+
+    raises: tuple[BigRaise, ...] = ()
+    fir_loads: frozenset[int] = frozenset()
+
+    def covers(self, raises: Sequence[BigRaise], fir_loads: Sequence[int]) -> bool:
+        def agreed(item: BigRaise) -> bool:
+            return any(
+                r.path == item.path and r.kind == item.kind and item.delta_db <= r.delta_db + RAISE_TOLERANCE_DB
+                for r in self.raises
+            )
+
+        return all(agreed(r) for r in raises) and set(fir_loads) <= self.fir_loads
+
+
+@dataclass(frozen=True)
+class ReplaceCheck:
+    """Dry run of `DeviceSession.replace_desired`'s checks (`DeviceSession.check_replace`): nothing is changed."""
+
+    problems: list[str] = field(default_factory=list)  # it would be refused (422)
+    confirmation: str | None = None  # it would ask first (409) with this message
+    raises: list[BigRaise] = field(default_factory=list)  # the big-step raises it would ask about
+    limit_db: float | None = None
+    fir_loads: list[int] = field(default_factory=list)  # the FIR loads it would ask about
+
+    @property
+    def needs_confirm(self) -> bool:
+        return self.confirmation is not None
 
 
 class DesiredValidationError(MasterValidationError):
@@ -122,6 +196,15 @@ class PresetSwitchInProgress(RuntimeError):
 
 class PresetSwitchTimeout(TimeoutError):
     """The device did not report the requested preset in time."""
+
+
+class UndoUnavailable(RuntimeError):
+    """There is nothing to undo: no accept of device values, a different one, or its undo window has passed.
+    ``code`` is ``nothing`` (none, or not this one) or ``expired``."""
+
+    def __init__(self, message: str, code: str = "nothing") -> None:
+        self.code = code
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -155,6 +238,59 @@ class AdoptResult:
     warnings: list[ScriptIssue] = field(default_factory=list)
     read_back: int = 0  # trust: device paths whose value was read from the device
     read_error: str | None = None  # trust: why the active preset couldn't be read back
+
+
+def _put(data: Any, path: str, value: Any) -> None:
+    """Set a `flatten` leaf in a dumped document (``model_dump(mode="json")``)."""
+    *parents, last = path.split(".")
+    node = data
+    for part in parents:
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    if isinstance(node, list):
+        node[int(last)] = value
+    else:
+        node[last] = value
+
+
+def undo_unit(path: str) -> str:
+    """The group a path is undone with: a whole PEQ band or crossover group (coefficients and design belong
+    together), else the path itself."""
+    if m := _FILTER_UNIT.match(path):
+        return m.group(0)[:-1]
+    return path
+
+
+@dataclass
+class AcceptSnapshot:
+    """What `DeviceSession.accept_device_values` replaced, so `restore_accept_snapshot` can put it back: the desired
+    values of the document paths it changed (``before`` -> ``after``) and the shadow of the device paths it
+    confirmed (``applied_before``, ``unknown_before``, ``failed_before`` -> ``applied_after``)."""
+
+    token: str
+    preset: int
+    taken_at: float  # monotonic
+    before: dict[str, Any]
+    after: dict[str, Any]
+    applied_before: dict[str, Any]
+    unknown_before: set[str]
+    failed_before: dict[str, str]
+    applied_after: dict[str, Any]
+
+    def expired(self, now: float | None = None) -> bool:
+        return (time.monotonic() if now is None else now) - self.taken_at > ACCEPT_UNDO_S
+
+    def units(self) -> list[str]:
+        return list(dict.fromkeys(undo_unit(p) for p in [*self.after, *self.applied_after]))
+
+
+@dataclass(frozen=True)
+class UndoResult:
+    preset: int
+    revision: int
+    restored: list[str]  # undo units (see `undo_unit`) put back
+    skipped: list[str]  # undo units changed since the accept, left alone
+    unknown: list[str] = field(default_factory=list)  # device paths that became unknown instead of queueing a write
+    settings: list[str] = field(default_factory=list)  # restored units holding an accepted device value
 
 
 @dataclass
@@ -488,6 +624,7 @@ class DeviceSession:
         self._seen_preset: int | None = None
         self._stopped = False
         self.audit = MasterAudit(self._log_master_change)
+        self.accept_undo: AcceptSnapshot | None = None  # the last accept of device values, while it can be undone
 
     # --- lifecycle ------------------------------------------------------------------------------------------------
 
@@ -1273,8 +1410,10 @@ class DeviceSession:
         confirm: bool,
         all_paths: bool = False,
         old_values: Mapping[str, Any] | None = None,
+        confirmed: Confirmed | None = None,
     ) -> list[str]:
-        """Raise `DesiredValidationError` or `ConfirmationRequired`; returns the changed device paths."""
+        """Raise `DesiredValidationError` or `ConfirmationRequired`; returns the changed device paths. ``confirm``
+        skips the confirmations; ``confirmed`` skips them only when it covers every one the change needs."""
         problems = validate_doc(new, self.profile)
         flagged = [p.split(":", 1)[0] for p in problems]
         if old_values is None:
@@ -1308,21 +1447,32 @@ class DeviceSession:
         ]
         if too_big:
             raise DesiredValidationError("filter boost too large", too_big)
+        if confirm:
+            return changed
         loads = [n for n in firs if old.outputs[n].fir.blob_id != new.outputs[n].fir.blob_id]
-        if loads and not confirm:
-            raise ConfirmationRequired(self._fir_warning([new.outputs[n].fir for n in loads], loads))
         step = self.settings.gain_step_confirm_db
-        if not confirm and step > 0:
+        raises: list[BigRaise] = []
+        if step > 0:
             raises = [
-                (p, new_values[p] - old_values[p])
+                BigRaise(p, new_values[p] - old_values[p])
                 for p in changed
                 if p.endswith("gain_db") and isinstance(old_values.get(p), int | float)
                 if new_values[p] - old_values[p] > step
             ]
-            raises += [(f"{unit} peak", after - before) for unit, before, after in boosts if after - before > step]
-            if raises:
-                text = ", ".join(f"{p} by {delta:.3g} dB" for p, delta in raises)
-                raise ConfirmationRequired(f"raising {text} needs confirmation (more than {step:g} dB at once)")
+            raises += [
+                BigRaise(unit, after - before, "peak") for unit, before, after in boosts if after - before > step
+            ]
+        limit = step if step > 0 else None
+        if confirmed is not None and confirmed.covers(raises, loads):
+            return changed
+        if loads:
+            message = self._fir_warning([new.outputs[n].fir for n in loads], loads)
+            raise ConfirmationRequired(message, raises=raises, limit_db=limit, fir_loads=loads)
+        if raises:
+            text = ", ".join(f"{r.path}{' peak' if r.kind == 'peak' else ''} by {r.delta_db:.3g} dB" for r in raises)
+            raise ConfirmationRequired(
+                f"raising {text} needs confirmation (more than {step:g} dB at once)", raises=raises, limit_db=limit
+            )
         return changed
 
     def _fir_problems(self, old: ConfigDoc, new: ConfigDoc, outputs: Sequence[int]) -> list[str]:
@@ -1450,6 +1600,7 @@ class DeviceSession:
         doc: ConfigDoc,
         *,
         confirm: bool = False,
+        confirmed: Confirmed | None = None,
         expected_revision: int | None = None,
         source: str = "api",
         summary: str | None = None,
@@ -1462,7 +1613,8 @@ class DeviceSession:
         (mute-wrapped when ``MUTE_WRAP_BULK_APPLY``) and awaited up to ``timeout``.
 
         ``push_unknown`` also writes the paths the shadow doesn't know, in the same bulk apply, so the preset ends up
-        holding exactly ``doc`` (a profile load) rather than ``doc`` only where it differs from the old desired."""
+        holding exactly ``doc`` (a profile load) rather than ``doc`` only where it differs from the old desired.
+        ``confirmed`` answers the confirmations a preview (`check_replace`) asked about; see `Confirmed`."""
         self._check_source(source)
         await self._ready(preset)
         async with self._edit_lock:
@@ -1471,7 +1623,9 @@ class DeviceSession:
             await self._prime_fir(self.writer.state(preset).desired, new)
             if push_unknown and (problems := self._ceiling_problems(new)):
                 raise DesiredValidationError("gains above a channel's ceiling; lower them before loading", problems)
-            change = self._stage(preset, new, confirm=confirm, source=source, summary=summary, check_all=True)
+            change = self._stage(
+                preset, new, confirm=confirm, confirmed=confirmed, source=source, summary=summary, check_all=True
+            )
             if push_unknown:
                 # No await since `_stage`, so these join the same (mute-wrapped) flush as the changed paths.
                 unknown = self.writer.state(preset).unknown_paths(self.profile)
@@ -1480,6 +1634,35 @@ class DeviceSession:
                     doc_after, paths, device_paths = change
                     change = (doc_after, paths, [*device_paths, *(p for p in unknown if p not in device_paths)])
         return await self._finish(preset, change, commit=commit, bulk=bulk, timeout=timeout)
+
+    async def check_replace(self, preset: int, doc: ConfigDoc, *, push_unknown: bool = False) -> ReplaceCheck:
+        """Dry run of `replace_desired` (``confirm=False``): what it would refuse or ask about, changing nothing.
+
+        Runs the same checks on the same inputs (`_normalize`, the ceiling check of ``push_unknown`` and `_validate`
+        against the shadow's values), so a load preview can ask for every confirmation at once."""
+        await self._ready(preset)
+        async with self._edit_lock:
+            state = self.writer.state(preset)
+            new = parse_doc(doc.model_dump(mode="json"))
+            await self._prime_fir(state.desired, new)
+            if push_unknown and (problems := self._ceiling_problems(new)):
+                return ReplaceCheck(problems=problems)
+            old = state.desired
+            try:
+                self._validate(
+                    old,
+                    self._normalize(old, new),
+                    confirm=False,
+                    all_paths=True,
+                    old_values=state.values(self.profile),
+                )
+            except ConfirmationRequired as exc:
+                return ReplaceCheck(
+                    confirmation=str(exc), raises=exc.raises, limit_db=exc.limit_db, fir_loads=exc.fir_loads
+                )
+            except DesiredValidationError as exc:
+                return ReplaceCheck(problems=exc.problems)
+        return ReplaceCheck()
 
     def _stage(
         self,
@@ -1490,13 +1673,16 @@ class DeviceSession:
         source: str,
         summary: str | None,
         check_all: bool = False,
+        confirmed: Confirmed | None = None,
     ) -> tuple[ConfigDoc, list[str], list[str]]:
         """Validate and hand the new doc to the writer. Synchronous on purpose: no other edit can interleave.
         ``check_all`` validates every path, not just the changed ones (whole-document replacements)."""
         state = self.writer.state(preset)
         old = state.desired
         new = self._normalize(old, new)
-        self._validate(old, new, confirm=confirm, all_paths=check_all, old_values=state.values(self.profile))
+        self._validate(
+            old, new, confirm=confirm, all_paths=check_all, old_values=state.values(self.profile), confirmed=confirmed
+        )
         old_flat, new_flat = self._flat(preset, old), flatten(new)
         paths = [p for p, v in new_flat.items() if old_flat.get(p, _MISSING) != v]
         if not paths:
@@ -1932,8 +2118,20 @@ class DeviceSession:
             device = device_values(new, self.profile)
             old_flat, new_flat = self._flat(preset, old), flatten(new)
             paths = [p for p, v in new_flat.items() if old_flat.get(p, _MISSING) != v]
+            confirmed = {p: device[p] for p in values if p in device}
+            self.accept_undo = AcceptSnapshot(
+                token=secrets.token_hex(8),
+                preset=preset,
+                taken_at=time.monotonic(),
+                before={p: old_flat.get(p) for p in paths},
+                after={p: new_flat[p] for p in paths},
+                applied_before={p: state.applied[p] for p in confirmed if p in state.applied},
+                unknown_before={p for p in confirmed if p not in state.applied},
+                failed_before={p: state.failed[p] for p in confirmed if p in state.failed},
+                applied_after=dict(confirmed),
+            )
             self._flat_cache[preset] = (new, new_flat)
-            self.writer.confirm(preset, {p: device[p] for p in values if p in device}, desired=new)
+            self.writer.confirm(preset, confirmed, desired=new)
             self._schedule_persist(preset)
             if paths:
                 self._mark_uncommitted(preset, "verify", summary)
@@ -1947,6 +2145,75 @@ class DeviceSession:
             preset=preset,
         )
         return EditResult(preset, revision, new, paths, [])
+
+    def _accept_snapshot(self, preset: int, token: str | None) -> AcceptSnapshot:
+        snap = self.accept_undo
+        if snap is None or snap.preset != preset or (token is not None and token != snap.token):
+            raise UndoUnavailable("there is no accept of device values to undo")
+        if snap.expired():
+            self.accept_undo = None
+            raise UndoUnavailable(f"the accept can only be undone for {ACCEPT_UNDO_S:.0f} seconds", "expired")
+        return snap
+
+    async def restore_accept_snapshot(self, preset: int, token: str | None = None) -> UndoResult:
+        """Undo the last `accept_device_values` (``token`` names it; None: whichever it was) within `ACCEPT_UNDO_S`:
+        the desired values and the shadow it replaced come back, and a revision (source ``verify``) is committed.
+        Nothing is written to the device and no write is queued. Settings changed since the accept (desired value or
+        shadow) are left alone and reported as skipped, a whole PEQ band or crossover group at a time. Raises
+        `UndoUnavailable`."""
+        await self._ready(preset)
+        async with self._edit_lock:
+            snap = self._accept_snapshot(preset, token)
+            state = self.writer.state(preset)
+            current = self._flat(preset, state.desired)
+            restored: list[str] = []
+            skipped: list[str] = []
+            for unit in snap.units():
+                docs = [p for p in snap.after if undo_unit(p) == unit]
+                shadow = [p for p in snap.applied_after if undo_unit(p) == unit]
+                changed = any(current.get(p, _MISSING) != snap.after[p] for p in docs) or any(
+                    state.applied.get(p, _MISSING) != snap.applied_after[p] for p in shadow
+                )
+                (skipped if changed else restored).append(unit)
+            back = {p: v for p, v in snap.before.items() if undo_unit(p) in restored}
+            new = state.desired
+            if back:
+                data = new.model_dump(mode="json")
+                for path, value in back.items():
+                    _put(data, path, value)
+                try:
+                    new = ConfigDoc.model_validate(data)
+                except ValidationError as exc:
+                    raise DesiredValidationError(
+                        "the earlier values can't be restored", validation_problems(exc)
+                    ) from None
+            device_paths = [p for p in snap.applied_after if undo_unit(p) in restored]
+            old_flat, new_flat = self._flat(preset, state.desired), flatten(new)
+            paths = [p for p, v in new_flat.items() if old_flat.get(p, _MISSING) != v]
+            self._flat_cache[preset] = (new, new_flat)
+            unknown = self.writer.restore(
+                preset,
+                new,
+                {p: snap.applied_before[p] for p in device_paths if p in snap.applied_before},
+                unknown=[p for p in device_paths if p in snap.unknown_before],
+                failed={p: r for p, r in snap.failed_before.items() if p in device_paths},
+            )
+            self.accept_undo = None
+            self._schedule_persist(preset)
+            if paths:
+                self._mark_uncommitted(preset, "verify", f"verify: undid accepting {len(restored)} device value(s)")
+                self._publish_desired(preset, new, paths, "verify", flat=new_flat)
+        revision = await self.commit(preset) if paths else self.revisions.get(preset, 0)
+        skipped_text = f"; {len(skipped)} changed since were left alone" if skipped else ""
+        self.log_event(
+            "info",
+            f"verify: undid accepting the device values of {len(restored)} setting(s) on preset {preset + 1}"
+            f"{skipped_text}; nothing was written",
+            kind="verify",
+            preset=preset,
+        )
+        accepted = {undo_unit(p) for p in snap.applied_after}
+        return UndoResult(preset, revision, restored, skipped, unknown, [u for u in restored if u in accepted])
 
     def _defaults_for_push(self) -> ConfigDoc:
         """docs 03 §8 option 2: the defaults with every unused output muted. An output counts as used once it has a
@@ -2149,6 +2416,7 @@ class SessionManager:
 __all__ = [
     "AdoptMode",
     "AdoptResult",
+    "BigRaise",
     "FIR_CLEAR_WARNING",
     "FIR_LOAD_WARNING",
     "ConfirmationRequired",
@@ -2160,6 +2428,7 @@ __all__ = [
     "MasterValidationError",
     "PresetSwitchInProgress",
     "PresetSwitchTimeout",
+    "ReplaceCheck",
     "RevisionConflict",
     "SessionManager",
     "SessionState",

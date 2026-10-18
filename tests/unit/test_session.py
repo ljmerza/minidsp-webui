@@ -9,7 +9,9 @@ from app.daemon.client import DaemonUnavailable, DeviceNotFound
 from app.model.device_profile import M2X4HD
 from app.model.master import MasterStatus, MasterUpdate
 from app.sync.session import (
+    BigRaise,
     ConfirmationRequired,
+    Confirmed,
     DeviceSession,
     MasterValidationError,
     PresetSwitchInProgress,
@@ -348,3 +350,15 @@ async def test_discovery_handles_a_malformed_device_list(client, bus, settings, 
     daemon.get("/devices").respond(json=[{"product_name": "2x4HD"}])
     assert await manager.discover() == []
     assert manager.daemon_up is False and "unexpected response" in manager.last_error
+
+
+def test_confirmed_covers_only_what_was_asked_about():
+    asked = Confirmed(raises=(BigRaise("outputs.0.gain_db", 8.0),), fir_loads=frozenset({1}))
+    assert asked.covers([BigRaise("outputs.0.gain_db", 8.0)], [1])
+    assert asked.covers([BigRaise("outputs.0.gain_db", 6.5)], [])  # smaller than agreed
+    assert asked.covers([BigRaise("outputs.0.gain_db", 8.004)], [])  # the JSON rounds to 0.01 dB
+    assert not asked.covers([BigRaise("outputs.0.gain_db", 38.0)], [])  # grew meanwhile
+    assert not asked.covers([BigRaise("outputs.1.gain_db", 7.0)], [])  # another output
+    assert not asked.covers([BigRaise("outputs.0.gain_db", 7.0, "peak")], [])  # another kind of raise
+    assert not asked.covers([], [0])  # a FIR load nobody was warned about
+    assert Confirmed().covers([], [])

@@ -11,7 +11,7 @@
                       channel.gain_min, channel.ceiling, channel.gain_max, statuses, failed_reasons) }}
     {{ m.toggle("mute-" ~ channel.kind ~ "-" ~ channel.index, mute_path, values[mute_path], "Mute",
                 "Muted", "Unmuted", statuses, failed_reasons,
-                confirm_unmute=channel.name if channel.kind == "output" else none) }}
+                confirm_unmute=channel.name if channel.kind == "output" else none, undo_name=channel.name) }}
     {% if channel.kind == "output" %}
       {%- set inv_path = side ~ ".invert" -%}
       {{ m.toggle("invert-" ~ channel.index, inv_path, values[inv_path], "Polarity", "180°", "0°",

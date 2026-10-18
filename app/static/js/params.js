@@ -38,7 +38,7 @@
     }
   };
 
-  const toast = (message, level) => window.mdsp && window.mdsp.toast(message, level);
+  const toast = (message, level, options) => window.mdsp && window.mdsp.toast(message, level, options);
   const round = (value, decimals) => {
     const f = 10 ** decimals;
     return Math.round(value * f) / f;
@@ -116,6 +116,7 @@
         const routes = this.root.querySelectorAll(`[data-route-output="${o}"]`);
         warn.hidden = Array.from(routes).some((el) => el.checked);
       }
+      this.updateMonoPreview();
     }
 
     // --- sync badges -------------------------------------------------------------------------------------------
@@ -200,6 +201,10 @@
 
     onChange(e) {
       const el = e.target;
+      if (el.matches && el.matches('[data-mono-target]')) {
+        this.updateMonoPreview();
+        return;
+      }
       if (!el.dataset || !el.dataset.path) return;
       const path = el.dataset.path;
       const value = this.readValue(el);
@@ -217,6 +222,28 @@
       }
       this.showValue(path, value, el);
       this.schedule(path, value, { commit: true, immediate: true });
+      if (el.dataset.type === 'bool' && el.hasAttribute('data-undo-name')) this.undoToast(el, path, value);
+    }
+
+    // "Shakers muted. [Undo]" (phase9 design §3.6, P20): Undo puts the previous state back, through the same guards
+    // as a click (un-muting a never-synced output still asks). Nothing happens if the switch moved on since.
+    undoToast(el, path, value) {
+      const name = el.dataset.undoName;
+      const label = path.endsWith('.mute') ? (value ? 'muted' : 'un-muted') : `set to ${value ? 'on' : 'off'}`;
+      toast(`${name} ${label}.`, 'info', {
+        action: {
+          label: 'Undo',
+          returnFocus: el,
+          onClick: () => {
+            if (!el.isConnected || el.checked !== value) return;
+            const back = !value;
+            if (back === false && el.hasAttribute('data-confirm-unmute') && !this.confirmUnmute(el, path)) return;
+            el.checked = back;
+            this.showValue(path, back, el);
+            this.schedule(path, back, { commit: true, immediate: true });
+          },
+        },
+      });
     }
 
     // Turning off an output's last route silences it, and the device can't report routing back (see routing.js).
@@ -231,7 +258,8 @@
       const message = guard.disableWarning({
         routes,
         input: Number(el.dataset.routeInput),
-        name: el.dataset.routeTitle || `Out ${Number(o) + 1}`,
+        name: el.dataset.routeName || `Out ${Number(o) + 1}`,
+        inputName: el.dataset.routeInputName,
         muted: this.desired[`outputs.${o}.mute`] === true,
         level: this.outputLevel(Number(o)),
       });
@@ -262,22 +290,62 @@
       this.schedule(el.dataset.path, value, { commit: true });
     }
 
+    // --- mono sum (phase9 design §10.1, P22): no default output, a preview, Apply, then an Undo toast -------------
+
+    monoPlan() {
+      const select = this.root.querySelector('[data-mono-target]');
+      const button = this.root.querySelector('[data-mono-sum]');
+      const guard = window.mdsp && window.mdsp.routing;
+      if (!select || !button || !guard || select.value === '') return null;
+      const o = Number(select.value);
+      const routes = [];
+      const paths = [];
+      for (const cell of this.root.querySelectorAll(`[data-route-output="${o}"]`)) {
+        const gainPath = cell.dataset.path.replace(/\.enabled$/, '.gain_db');
+        const gainEl = this.controls(gainPath)[0];
+        const gain = gainEl ? parseFloat(gainEl.value) : this.desired[gainPath];
+        routes.push({ name: cell.dataset.routeInputName || `In ${Number(cell.dataset.routeInput) + 1}`, enabled: cell.checked, gain });
+        paths.push({ enabled: cell.dataset.path, gain: gainPath });
+      }
+      if (!routes.length) return null;
+      const output = select.options[select.selectedIndex].textContent.trim();
+      return { output, ...guard.monoPlan({ output, routes, gain: Number(button.dataset.gain), paths }) };
+    }
+
+    updateMonoPreview() {
+      const button = this.root.querySelector('[data-mono-sum]');
+      const preview = this.root.querySelector('[data-mono-preview]');
+      if (!button || !preview) return;
+      const plan = this.monoPlan();
+      button.disabled = !plan || !plan.changes.length;
+      const text = plan ? plan.text : preview.dataset.emptyText || '';
+      if (preview.textContent !== text) preview.textContent = text;
+    }
+
     onClick(e) {
       const button = e.target.closest && e.target.closest('[data-mono-sum]');
-      if (!button || !this.root.contains(button)) return;
-      const select = this.root.querySelector('[data-mono-target]');
-      const o = Number(select.value);
-      const gain = Number(button.dataset.gain);
-      const name = select.options[select.selectedIndex].textContent.trim();
-      const values = {};
-      for (const el of this.root.querySelectorAll(`[data-route-output="${o}"]`)) {
-        values[el.dataset.path] = true;
-        values[el.dataset.path.replace(/\.enabled$/, '.gain_db')] = gain;
+      if (!button || !this.root.contains(button) || button.disabled) return;
+      const plan = this.monoPlan();
+      if (!plan || !plan.changes.length) return;
+      const before = {};
+      for (const path of Object.keys(plan.values)) {
+        const el = this.controls(path)[0];
+        before[path] = el ? this.readValue(el) : this.desired[path];
       }
-      if (!Object.keys(values).length) return;
-      if (!window.confirm(`Route every input to ${name} at ${window.mdsp.fmtDb(gain)}?`)) return;
-      for (const [path, value] of Object.entries(values)) this.showValue(path, value);
-      this.sendBatch(values);
+      for (const [path, value] of Object.entries(plan.values)) this.showValue(path, value);
+      this.sendBatch(plan.values);
+      this.updateMonoPreview();
+      toast(`${plan.output} now plays every input at ${window.mdsp.fmtDb(Number(button.dataset.gain))}.`, 'info', {
+        action: {
+          label: 'Undo',
+          returnFocus: this.root.querySelector('[data-mono-target]'),
+          onClick: () => {
+            for (const [path, value] of Object.entries(before)) this.showValue(path, value);
+            this.sendBatch(before);
+            this.updateMonoPreview();
+          },
+        },
+      });
     }
 
     // --- sending -----------------------------------------------------------------------------------------------

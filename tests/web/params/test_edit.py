@@ -43,7 +43,8 @@ async def test_big_raise_needs_confirmation(ctx):
     response = await ctx.edit(0, {"outputs.0.gain_db": 10.0})
     assert response.status_code == 409
     data = response.json()
-    assert data["error"] == "confirmation_required" and "confirmation" in data["detail"]
+    assert data["error"] == "confirmation_required"
+    assert data["detail"] == "This raises Out 1 output level by 10 dB at once (more than 6 dB in one step)"
     assert data["values"] == {"outputs.0.gain_db": 0.0}  # the client puts this back on cancel
     await asyncio.sleep(0.05)
     assert ctx.fake.configs == []

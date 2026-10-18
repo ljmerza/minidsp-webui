@@ -13,8 +13,8 @@
               hx-get="{{ t.all_url }}" hx-target="#sync-table">All ({{ c.synced + c.pending + c.failed + c.unknown }})</button>
     </div>
     <p class="hint">"On device" is the value the app last wrote or confirmed; &mdash; means unknown (never confirmed,
-      e.g. still a factory value). <a href="#verify">Verify device</a> reads the readable settings back and can accept
-      the device values. Push writes one setting again.</p>
+      e.g. still a factory value). <a href="#verify">Check device</a> reads the readable settings back and can use
+      the device's values. Push writes one setting again.</p>
   </div>
   {% if t.rows %}
     <div class="table-scroll">

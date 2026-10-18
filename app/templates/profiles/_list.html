@@ -33,7 +33,8 @@
     {% if not p.valid %}<p class="field-error">This profile's document is not valid any more and can't be loaded.</p>
     {% elif not p.model_ok %}<p class="field-error">This profile is for a {{ p.product_name }} and can't be loaded into this device.</p>{% endif %}
 
-    <div class="profile-actions" x-data="{ target: '{{ l.active_preset if l.active_preset is not none else 0 }}' }">
+    <div class="profile-actions" x-data="{ target: targetFor({{ p.id }}, '{{ l.active_preset if l.active_preset is not none else 0 }}') }"
+         x-init="$watch('target', (v) => rememberTarget({{ p.id }}, v))">
       {% if p.loadable %}
         <label class="visually-hidden" for="load-{{ p.id }}">Load {{ p.name }} into</label>
         <select id="load-{{ p.id }}" x-model="target">

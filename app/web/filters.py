@@ -44,6 +44,7 @@ from app.sync.session import (
     StateUnavailable,
     UnknownPreset,
 )
+from app.web.sync_ui import confirmation_text
 from app.web.ui_common import channel_color, channel_label, device_preset, is_htmx, load_state, manager_of
 
 router = APIRouter(include_in_schema=False, dependencies=[Depends(require_same_origin)])
@@ -153,13 +154,16 @@ def _validation_message(error: Any) -> str:
     return f"{where}: {message}" if where else message
 
 
-async def _run_edit(call: Callable[[], Awaitable[EditResult]], **on_error: Any) -> EditResult | JSONResponse:
+async def _run_edit(
+    session: DeviceSession, call: Callable[[], Awaitable[EditResult]], **on_error: Any
+) -> EditResult | JSONResponse:
     """Run a session edit, mapping its refusals to the JSON errors the components show. ``on_error`` is added to
-    error replies (the stored band or group, so the editor can put it back)."""
+    error replies (the stored band or group, so the editor can put it back). A confirmation question names the
+    settings in words (`confirmation_text`)."""
     try:
         return await call()
     except ConfirmationRequired as exc:
-        return _error(409, "confirmation_required", str(exc), **on_error)
+        return _error(409, "confirmation_required", confirmation_text(session, exc), **on_error)
     except UnknownPreset as exc:
         return _error(404, "unknown_preset", str(exc), **on_error)
     except DesiredValidationError as exc:
@@ -272,6 +276,7 @@ async def set_band(
         return body
     current = _current_band(session, preset, side, channel, band)
     result = await _run_edit(
+        session,
         lambda: svc.set_peq_band(
             session,
             preset,
@@ -333,6 +338,7 @@ async def peq_bank_action(request: Request, serial: int, preset: int, side: Lite
         what = "bypass all" if body.action == "bypass_all" else "reset all"
         name = channel_label(session, side[:-1], channel)
         result = await _run_edit(
+            session,
             lambda: session.edit(
                 preset,
                 {side: {str(channel): {"peq": patch_bands}}},
@@ -340,7 +346,7 @@ async def peq_bank_action(request: Request, serial: int, preset: int, side: Lite
                 commit=True,
                 source="ui",
                 summary=f"{name} PEQ: {what}",
-            )
+            ),
         )
         if isinstance(result, Response):
             return result
@@ -395,6 +401,7 @@ async def set_group(request: Request, serial: int, preset: int, channel: int, gr
         return body
     current = _current_group(session, preset, channel, group)
     result = await _run_edit(
+        session,
         lambda: svc.set_crossover_group(
             session,
             preset,
@@ -457,6 +464,7 @@ async def crossover_preset(request: Request, serial: int, preset: int, channel: 
     if patch:
         name = channel_label(session, "output", channel)
         result = await _run_edit(
+            session,
             lambda: session.edit(
                 preset,
                 {"outputs": {str(channel): {"crossover": patch}}},
@@ -464,7 +472,7 @@ async def crossover_preset(request: Request, serial: int, preset: int, channel: 
                 commit=True,
                 source="ui",
                 summary=f"{name} crossover: {chosen['label']}",
-            )
+            ),
         )
         if isinstance(result, Response):
             return result

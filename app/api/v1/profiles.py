@@ -32,6 +32,7 @@ from app.state import ProfileNameTaken, Repo
 from app.state.repo import UNSET
 from app.sync import profiles as svc
 from app.sync.session import DeviceSession
+from app.web.sync_ui import raise_rows
 
 router = APIRouter(tags=["profiles"], dependencies=[Depends(refresh_mqtt_after_write)])
 
@@ -304,7 +305,8 @@ async def apply_profile(
     ``activate``; the response carries the new revision and the flush result."""
     session = _device_session(request, serial)
     if preview:
-        return {"serial": session.serial, **await svc.load_preview(session, profile_id, preset)}
+        info = await svc.load_preview(session, profile_id, preset)
+        return {"serial": session.serial, **info, "raises": raise_rows(session, info["raises"])}
     result = await svc.load_profile(
         session,
         profile_id,
