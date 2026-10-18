@@ -49,7 +49,7 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     assert html.count('class="clip-led"') == 6
     assert html.count('<span aria-hidden="true">CLIP</span>') == 6
     assert "&ndash;" not in html.split('id="levels-title"')[1].split("</section>")[0]
-    assert "A grey CLIP box turns red" in html
+    assert "A grey CLIP box" in html and "turns red when its" in html
     assert html.count('class="output-card"') == 4
 
     # output cards: re-fetched on sync / desired events; dashboard.js handles preset switches and the quick controls
@@ -211,7 +211,7 @@ async def test_graph_defaults_reach_every_page(manager):
         html = (await http.get("/")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view=""' in body and 'data-graph-db="24"' in body  # "auto": each page keeps its own view
-    assert '"view": "sub"' in html and "5–300 Hz, active preset" in html
+    assert '"view": "sub"' in html and "5–300 Hz, playing preset" in html
 
     settings = Settings(_env_file=None, minidspd_url="http://daemon.invalid:5380", graph_view="full", graph_db_range=30)
     app = make_app(manager, settings)
@@ -220,7 +220,7 @@ async def test_graph_defaults_reach_every_page(manager):
         device = (await http.get("/device")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view="full"' in body and 'data-graph-db="30"' in body
-    assert '"view": "full"' in html and "10 Hz–20 kHz, active preset" in html
+    assert '"view": "full"' in html and "10 Hz–20 kHz, playing preset" in html
     assert 'data-graph-view="full"' in device
 
 
@@ -250,9 +250,12 @@ async def test_nav_links_only_served_pages(http):
     html = (await http.get("/device")).text
     nav = html.split('id="sidenav"', 1)[1].split("</nav>", 1)[0]
     assert '<a href="/"' in nav
-    assert '<a href="/device" aria-current="page">Device</a>' in nav
-    for label in ("Routing", "System", "Profiles", "Settings", "Out 1", "In 2"):
-        assert re.search(rf'<span class="nav-disabled"[^>]*>{label}</span>', nav), label
+    assert '<a href="/device" aria-current="page">Device &amp; sync</a>' in nav
+    assert '<a href="/help">Glossary</a>' in nav  # served by the same router as /device
+    for label in ("Routing", "Combined response", "Profiles", "Settings", "Out 1", "In 2"):
+        assert re.search(
+            rf'<span class="nav-disabled"[^>]*>{label}( <span class="muted">\(not available\)</span>)?</span>', nav
+        ), label
 
 
 async def test_root_path_prefixes_urls(manager):

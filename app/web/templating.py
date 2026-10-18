@@ -6,8 +6,11 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
+from markupsafe import Markup
 
 from app import __version__
+from app.web.glossary import help_button
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -88,7 +91,14 @@ def _request_globals(request: Request) -> dict[str, Any]:
     }
 
 
+@pass_context
+def _help(context: Any, term_id: str, key: str | None = None) -> Markup:
+    """``{{ help("q") }}``: the "?" toggletip for a glossary term (app/web/glossary.py); ``key`` inside Alpine x-for."""
+    return help_button(term_id, context.get("root", "") or "", key)
+
+
 templates = Jinja2Templates(directory=TEMPLATE_DIR, context_processors=[_request_globals])
+templates.env.globals["help"] = _help
 templates.env.filters["num"] = fmt_num
 templates.env.filters["db"] = fmt_db
 templates.env.filters["duration"] = fmt_duration

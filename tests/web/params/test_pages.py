@@ -111,7 +111,7 @@ async def test_pages_edit_the_active_preset_by_default_and_any_preset_on_request
     assert 'data-preset="2"' in html
     html = (await ctx.http.get("/routing?preset=1")).text
     assert 'data-preset="0"' in html
-    assert "isn&#39;t active on the device" in html or "isn't active on the device" in html
+    assert "isn&#39;t playing" in html or "isn't playing" in html
     assert (await ctx.http.get("/routing?preset=9")).status_code == 404
 
 
@@ -123,10 +123,10 @@ async def test_input_page_header_strip(ctx):
     assert "Main L" in html
     gain = _tag(html, r'type="range"[^>]*data-path="inputs\.0\.gain_db"')
     assert 'max="6.0"' in gain and 'min="-72.0"' in gain
-    assert "ceiling +6.0 dB" in html
+    assert "level limit +6.0 dB" in html
     assert 'data-path="inputs.0.mute"' in html
     assert 'data-path="inputs.0.invert"' not in html  # outputs only
-    assert "PEQ" in html
+    assert "EQ" in html
 
 
 async def test_output_page_strip_and_delay_tab(ctx):
@@ -139,7 +139,7 @@ async def test_output_page_strip_and_delay_tab(ctx):
     assert "data-confirm-unmute" in _tag(html, r'data-path="outputs\.1\.mute"')
     # tabs: Delay is current, the others are live links, FIR is hidden without FIR support
     assert 'class="tab is-current"' in html and ">Delay</a>" in html
-    assert re.search(r'<a class="tab"[^>]*>Compressor</a>', html)
+    assert re.search(r'<a class="tab"[^>]*>Compressor \(limiter\)</a>', html)
     assert ">FIR<" not in html
     # helpers: default distance 3 m at 343 m/s, the other outputs as references, the real device limit
     assert '"distance": 3.0' in html and '"speed": 343.0' in html
@@ -169,9 +169,9 @@ async def test_nav_links_the_new_pages(ctx):
 
 
 async def test_adopt_banner_until_adopted(ctx):
-    assert "hasn't been adopted yet" in (await ctx.http.get("/outputs/1")).text
+    assert "isn't set up yet" in (await ctx.http.get("/outputs/1")).text
     await ctx.session.adopt(AdoptMode.UNKNOWN, preset=0)
-    assert "hasn't been adopted yet" not in (await ctx.http.get("/outputs/1")).text
+    assert "isn't set up yet" not in (await ctx.http.get("/outputs/1")).text
 
 
 async def test_sync_badges_and_initial_state(ctx):
@@ -188,14 +188,16 @@ async def test_sync_badges_and_initial_state(ctx):
 async def test_header_sync_summary_and_staged_dots(ctx):
     html = (await ctx.http.get("/routing")).text
     assert "not tracked yet" not in html
-    assert re.search(r'class="hdr-sync" href="/device\?preset=1#sync"', html)
+    assert re.search(r'class="hdr-status" href="/device\?preset=1#sync"', html)
     assert 'hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"' in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
-    assert "all synced" in (await ctx.http.get("/ui/header")).text
-    # an edit to inactive preset 2 is staged: its header button and its editing tab get a dot
+    assert "All sent" in (await ctx.http.get("/ui/header")).text
+    # an edit to inactive preset 2 waits: its header button and its editing tab get a ⏸, and the header says so in
+    # words (no hover-only title, phase 9 §13.1)
     await ctx.session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})
     html = (await ctx.http.get("/routing")).text
     button = _tag(html, 'id="preset-2"')
-    assert "has-staged" in button and "1 staged change" in button
+    assert "has-staged" in button and "1 change waiting" in button and "title=" not in button
     assert "has-staged" not in _tag(html, 'id="preset-1"')
-    assert re.search(r'aria-label="Preset 2, 1 staged change\(s\)"', html)
+    assert re.search(r'aria-label="Preset 2, 1 change\(s\) waiting"', html)
+    assert "Preset 2: 1 waiting" in html

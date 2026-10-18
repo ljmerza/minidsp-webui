@@ -9,7 +9,7 @@
       {% if preview.ok %}<span class="sync-badge sync-synced"><span aria-hidden="true">✓</span> readable</span>
       {% else %}<span class="sync-badge sync-failed"><span aria-hidden="true">⚠</span> {{ preview.errors|length }} error(s)</span>{% endif %}
       {{ preview.ops }} setting(s) from the script, covering {{ preview.device_paths }} of the preset's {{ preview.total_paths }} device settings.
-      With <strong>trust</strong>, the other {{ preview.total_paths - preview.device_paths }} stay unknown unless you also trust the defaults.
+      With <strong>Remember</strong>, the other {{ preview.total_paths - preview.device_paths }} stay unknown unless you also remember the defaults.
     </p>
     {% if preview.errors %}
       <h4>Errors (fix these first)</h4>

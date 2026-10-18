@@ -1,4 +1,4 @@
-{#- Header strip of an input or output page: name, gain (with its ceiling), mute and, for outputs, polarity and
+{#- Header strip of an input or output page: name, level (with its level limit), mute and, for outputs, polarity and
     delay. Needs ``channel``, ``values``, ``statuses``, ``failed_reasons``. -#}
 {% import "partials/params_macros.html" as m %}
 {%- set side = channel.kind ~ "s." ~ channel.index -%}
@@ -7,15 +7,17 @@
 <section class="card channel-strip" aria-label="{{ channel.name }} settings" style="--chan: {{ channel.color }}">
   <div class="strip-grid">
     {% include "partials/channel_name.html" %}
-    {{ m.gain_control("gain-" ~ channel.kind ~ "-" ~ channel.index, gain_path, values[gain_path], "Gain",
-                      channel.gain_min, channel.ceiling, channel.gain_max, statuses, failed_reasons) }}
+    {{ m.gain_control("gain-" ~ channel.kind ~ "-" ~ channel.index, gain_path, values[gain_path],
+                      "Output level" if channel.kind == "output" else "Input level",
+                      channel.gain_min, channel.ceiling, channel.gain_max, statuses, failed_reasons,
+                      term="level" if channel.kind == "output" else "input-level") }}
     {{ m.toggle("mute-" ~ channel.kind ~ "-" ~ channel.index, mute_path, values[mute_path], "Mute",
                 "Muted", "Unmuted", statuses, failed_reasons,
-                confirm_unmute=channel.name if channel.kind == "output" else none, undo_name=channel.name) }}
+                confirm_unmute=channel.name if channel.kind == "output" else none, undo_name=channel.name, term="mute") }}
     {% if channel.kind == "output" %}
       {%- set inv_path = side ~ ".invert" -%}
       {{ m.toggle("invert-" ~ channel.index, inv_path, values[inv_path], "Polarity", "180°", "0°",
-                  statuses, failed_reasons) }}
+                  statuses, failed_reasons, term="polarity") }}
       {{ m.delay_control("delay-strip-" ~ channel.index, side ~ ".delay_ms", values[side ~ ".delay_ms"],
                          sample_rate, delay_max_ms, statuses, failed_reasons) }}
     {% endif %}

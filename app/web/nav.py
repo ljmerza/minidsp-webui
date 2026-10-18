@@ -71,8 +71,9 @@ def build_nav(
         item("Routing", "/routing"),
         item("Inputs", "/inputs", inputs),
         item("Outputs", "/outputs", outputs),
-        item("System", "/system"),
+        item("Combined response", "/system"),
         item("Profiles", "/profiles"),
-        item("Device", "/device"),
+        item("Device & sync", "/device"),
         item("Settings", "/settings"),
+        item("Glossary", "/help"),
     ]

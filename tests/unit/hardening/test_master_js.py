@@ -29,7 +29,7 @@ def cases() -> dict[str, dict]:
 def test_big_drop_asks_and_sends_confirm(cases):
     case = cases["big drop accepted"]
     assert case["prevented"] and case["issued"]
-    assert case["dialog"] == "Lower the master volume by 100.0 dB, to -120.0 dB?"
+    assert case["dialog"] == "Drop the volume from -20.0 to -120.0 dB? That's 100.0 dB quieter."
     assert case["confirm"] == "true"  # the server's UI guard accepts it
 
 
@@ -46,4 +46,4 @@ def test_drop_at_the_threshold_and_small_steps_pass(cases):
 
 
 def test_big_raise_still_asks(cases):
-    assert cases["big raise"]["dialog"] == "Raise the master volume by 10.0 dB, to -10.0 dB?"
+    assert cases["big raise"]["dialog"] == "Raise the volume from -20.0 to -10.0 dB? That's 10.0 dB louder."

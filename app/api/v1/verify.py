@@ -178,7 +178,8 @@ async def undo_accept(request: UndoRequest, session: Session) -> Any:
 
 _BADGE = {"ok": "synced", "drift": "failed", "unknown": "unknown", "unverifiable": "unknown"}
 _ICON = {"ok": "✓", "drift": "⚠", "unknown": "?", "unverifiable": "–"}
-_TEXT = {"ok": "matches", "drift": "drift", "unknown": "unknown", "unverifiable": "not readable"}
+# On-screen words (phase 9 design §2); the API keeps the status keys.
+_TEXT = {"ok": "matches", "drift": "changed on device", "unknown": "unknown", "unverifiable": "can't check"}
 _ORDER = {"drift": 0, "unknown": 1, "ok": 2, "unverifiable": 3}
 TOAST = "mdsp-toast"  # HX-Trigger event: app.js shows a toast, optionally with an action button (Undo)
 
@@ -188,7 +189,7 @@ def _row(session: DeviceSession, item: svc.VerifyItem) -> dict[str, Any]:
     note = item.note
     if item.status == svc.ItemStatus.UNKNOWN:
         relation = "matches" if item.matches_desired else "differs from"
-        note = f"Never confirmed written; the device value {relation} the desired one." + (f" {note}" if note else "")
+        note = f"Not sent by the app yet; the device value {relation} the app's value." + (f" {note}" if note else "")
     if svc.zero_filter(item):
         note = "All zeros (looks like a read error), so it is never used." + (f" {note}" if note else "")
     return {

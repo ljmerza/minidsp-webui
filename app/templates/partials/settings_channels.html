@@ -1,4 +1,4 @@
-{#- Channel names, colours and per-output gain ceilings. Rendered with ``c``. -#}
+{#- Channel names, colours and per-output level limits ("gain ceiling" in the code and API). Rendered with ``c``. -#}
 <form id="settings-channels" class="settings-form" hx-post="{{ c.channels_url }}" hx-target="this" hx-swap="outerHTML">
   {% if c.errors %}
     <div class="form-errors" role="alert"><ul>{% for e in c.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
@@ -9,7 +9,7 @@
     <table class="data-table settings-table">
       <thead>
         <tr><th scope="col">Channel</th><th scope="col">Name</th><th scope="col">Colour</th>
-            <th scope="col">Gain ceiling</th></tr>
+            <th scope="col">Level limit{{ help("level-limit") }}</th></tr>
       </thead>
       <tbody>
         {% for r in c.rows %}
@@ -24,7 +24,7 @@
                   <input type="number" name="{{ r.key }}-max_gain_db" inputmode="decimal" step="0.5"
                          min="{{ c.gain_min }}" max="{{ c.gain_max }}" placeholder="{{ '%+g'|format(c.gain_max) }}"
                          value="{{ r.max_gain_db if r.max_gain_db is not none else '' }}"
-                         aria-label="{{ r.default_name }} gain ceiling in dB">
+                         aria-label="{{ r.default_name }} level limit in dB">
                   <span class="unit">dB</span>
                 </span>
               {% else %}<span class="muted">&mdash;</span>{% endif %}
@@ -34,7 +34,7 @@
       </tbody>
     </table>
   </div>
-  <p class="hint">Names and colours are used on every page and graph. A ceiling caps the output's gain and every
-    route into it; leave it empty for the device range ({{ c.gain_min|db }} to {{ c.gain_max|db(signed=true) }}).</p>
+  <p class="hint">Names and colours are used on every page and graph. A level limit caps the output's level and every
+    route level into it; leave it empty for the device range ({{ c.gain_min|db }} to {{ c.gain_max|db(signed=true) }}).</p>
   <button type="submit">Save channels</button>
 </form>

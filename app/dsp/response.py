@@ -289,8 +289,8 @@ def _finish(
     warnings = []
     if deviation > FLOAT32_WARN_DB:
         warnings.append(
-            f"{label}: float32 coefficient rounding moves the response by up to {deviation:.2f} dB "
-            f"(the device stores float32)"
+            f"{label}: rounding note: the device stores filters as float32 numbers, which moves the response by up "
+            f"to {deviation:.2f} dB"
         )
     return Response.from_tf(tf, freqs, fs, float32_deviation_db=deviation, warnings=warnings)
 

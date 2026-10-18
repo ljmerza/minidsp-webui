@@ -46,13 +46,13 @@ def test_loading_a_profile_with_a_big_raise_asks_once_and_keeps_the_target(deskt
     asked = answer_dialogs(desktop, accept=True)
     visit(desktop, "/profiles")
     movies = desktop.locator("[data-profile-name='Movies']")
-    movies.get_by_label("Load Movies into").select_option(label="Preset 2")
-    movies.get_by_role("button", name="Load", exact=True).click()
-    expect(toast(desktop, "Loaded “Movies” into preset 2")).to_be_visible()
+    movies.get_by_label("Store Movies in").select_option(label="Preset 2")
+    movies.get_by_role("button", name="Store in preset 2", exact=True).click()
+    expect(toast(desktop, "Stored “Movies” in preset 2")).to_be_visible()
     assert len(asked) == 1, asked
     assert "Shakers output level" in asked[0] and "+12.00 dB" in asked[0]
     assert "outputs." not in asked[0]
-    expect(desktop.locator("[data-profile-name='Movies']").get_by_label("Load Movies into")).to_have_value("1")
+    expect(desktop.locator("[data-profile-name='Movies']").get_by_label("Store Movies in")).to_have_value("1")
     assert api.desired(1)["outputs"][0]["gain_db"] == 12.0
 
 

@@ -52,7 +52,7 @@
 {% endblock %}
 
 {% block content %}
-<h1>Profiles</h1>
+<h1>Profiles <span class="muted">saved in this app</span>{{ help("profile") }}</h1>
 <div class="profiles-page" x-data='profilesPage({{ profiles_cfg|tojson }})'>
 {% if page_error %}
   {% include "partials/edit_guard.html" %}
@@ -81,7 +81,7 @@
         <label>Preset
           <select name="preset">
             {% for o in preset_options %}
-              <option value="{{ o.index }}"{% if o.index == preset %} selected{% endif %}>{{ o.label }}{% if o.active %} (active){% endif %}</option>
+              <option value="{{ o.index }}"{% if o.index == preset %} selected{% endif %}>{{ o.label }}{% if o.active %} (playing){% endif %}</option>
             {% endfor %}
           </select></label>
         <label>Name <input type="text" name="name" required maxlength="80" placeholder="Movies" autocomplete="off"></label>
@@ -100,6 +100,9 @@
       </form>
     </div>
     {% if state_error %}<p class="hint">{{ state_error }}</p>{% endif %}
+    <p class="hint">Store puts a profile into a preset; Store and play now also switches the device to it{{ help("store-vs-play") }}.
+      Export saves a profile as JSON for importing here; Script saves it as a <code>minidsp -f</code> command script,
+      which writes to the device's playing preset.</p>
     <div id="profile-list" class="profile-list-wrap" hx-get="{{ list.list_url }}"
          hx-trigger="mdsp-profiles-reload from:body" hx-swap="innerHTML">
       {% with l = list %}{% include "profiles/_list.html" %}{% endwith %}
@@ -107,14 +110,14 @@
   </section>
   {% else %}
   <section class="card tab-panel" aria-labelledby="history-title">
-    <div class="card-head"><h2 id="history-title">History</h2></div>
+    <div class="card-head"><h2 id="history-title">History{{ help("history") }}</h2></div>
     {% if session is none or state_error %}
       {% include "partials/edit_guard.html" %}
     {% else %}
       <nav class="history-tabs" aria-label="Preset">
         {% for t in history_tabs %}
           <a class="btn-link btn-small{% if t.selected %} is-current{% endif %}" href="{{ t.url }}"{% if t.selected %} aria-current="page"{% endif %}>
-            {{- t.label }}{% if t.active %} <span class="preset-live" aria-hidden="true">&#9679;</span><span class="visually-hidden"> (active)</span>{% endif -%}
+            {{- t.label }}{% if t.active %} <span class="preset-live" aria-hidden="true">&#9654;</span><span class="visually-hidden"> (playing)</span>{% endif -%}
           </a>
         {% endfor %}
       </nav>

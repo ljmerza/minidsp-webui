@@ -25,7 +25,8 @@ EDIT_TOPICS = ("master", "device", "sync", "desired")
 KINDS = ("input", "output")
 STATUS_ORDER = ("failed", "pending", "unknown", "synced")  # worst first
 STATUS_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}
-STATUS_TEXT = {"synced": "synced", "pending": "pending", "failed": "failed", "unknown": "unknown"}
+# On-screen words (phase 9 design §2): the internal keys stay "synced"/"pending" in the API and CSS classes.
+STATUS_TEXT = {"synced": "sent", "pending": "sending", "failed": "failed", "unknown": "unknown"}
 
 # Default channel colours (Settings can override them), one per channel kind and index.
 DEFAULT_COLORS = {

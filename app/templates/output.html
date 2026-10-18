@@ -21,12 +21,13 @@
         <a class="tab{% if t.key == tab %} is-current{% endif %}" href="{{ tab_link(t.key) }}"
            {%- if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
       {% else %}
-        <span class="tab is-disabled" title="Arrives in a later phase">{{ t.label }}</span>
+        <span class="tab is-disabled">{{ t.label }} <span class="muted">(not available)</span></span>
       {% endif %}
     {% endfor %}
   </nav>
 
-  <section class="card tab-panel" aria-label="{{ tab|capitalize if tab else 'Sections' }}">
+  {%- set current_tab = output_tabs|selectattr("key", "equalto", tab)|first if tab else none %}
+  <section class="card tab-panel" aria-label="{{ current_tab.label if current_tab else 'Sections' }}">
     {% if tab_template %}
       {% include tab_template %}
     {% else %}

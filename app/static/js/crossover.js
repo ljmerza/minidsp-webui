@@ -31,7 +31,7 @@
     if (form.family === 'lr' && order % 2) return 'Linkwitz-Riley needs an even order';
     if (form.family === 'bessel' && order < 2) return 'Bessel needs order 2 or more';
     const n = needed({ ...form, order });
-    if (n > nBiquads) return `needs ${n} biquads, a group has ${nBiquads}`;
+    if (n > nBiquads) return `needs ${n} filter stages, a filter has ${nBiquads}`;
     return null;
   }
 
@@ -191,7 +191,7 @@
         const freqs = this.grid();
         const traces = this.groups.map((g) => ({
           id: `g${g.index}`,
-          label: `Group ${g.index + 1}${g.bypass ? ' (bypassed)' : ''}`,
+          label: `Filter ${g.index + 1}${g.bypass ? ' (off)' : ''}`,
           color: this.color(g.index),
           dash: g.bypass ? [5, 5] : undefined,
           width: 1.4,
@@ -256,12 +256,12 @@
       commit(group) {
         group.dirty = false;
         if (!group.form.freq || this.tooBig(group)) {
-          toast(`Group ${group.index + 1}: ${this.tooBig(group) ? orderProblem(group.form, Number(group.form.order), cfg.nBiquads) : 'enter a frequency'}`);
+          toast(`Filter ${group.index + 1}: ${this.tooBig(group) ? orderProblem(group.form, Number(group.form.order), cfg.nBiquads) : 'enter a frequency'}`);
           this.revert(group);
           return;
         }
         if (!this.preview(group) && group.form.family !== 'bessel') {
-          toast(`Group ${group.index + 1}: ${group.invalid}`);
+          toast(`Filter ${group.index + 1}: ${group.invalid}`);
           this.revert(group);
           return;
         }
@@ -290,7 +290,7 @@
         const biquads = this.rows.map((r) => F().biquadFromForm(r));
         const bad = biquads.findIndex((bq) => !F().stability(bq).ok);
         if (bad >= 0) {
-          toast(`Group ${group.index + 1}, biquad ${bad + 1}: ${F().stability(biquads[bad]).text}`);
+          toast(`Filter ${group.index + 1}, stage ${bad + 1}: ${F().stability(biquads[bad]).text}`);
           return;
         }
         group.preview = biquads;
@@ -298,12 +298,12 @@
         this.queue(group, { biquads });
       },
       flatten(group) {
-        if (!window.confirm(`Flatten group ${group.index + 1} of ${cfg.name}? Every biquad becomes pass-through.`)) return;
+        if (!window.confirm(`Flatten filter ${group.index + 1} of ${cfg.name}? Every stage becomes pass-through.`)) return;
         this.queue(group, { biquads: [] });
       },
 
       async applyPreset(preset) {
-        if (!window.confirm(`Apply "${preset.label}" to ${cfg.name}? Both crossover groups change.`)) return;
+        if (!window.confirm(`Apply the template "${preset.label}" to ${cfg.name}? Both band filters change.`)) return;
         const res = await F().send(cfg.presetUrl, { preset: preset.key });
         if (!res.ok) {
           if (!res.cancelled) toast(F().errorText(res));
@@ -340,7 +340,7 @@
               if (!group.queued && !group.dirty) this.replace(res.data.group, 'biquads' in body);
               else Object.assign(group, res.data.group, { server: res.data.group }); // keeps the form being edited
             } else {
-              if (!res.cancelled) toast(`Group ${k + 1}: ${F().errorText(res)}`);
+              if (!res.cancelled) toast(`Filter ${k + 1}: ${F().errorText(res)}`);
               group.queued = null;
               if (res.data && res.data.group) this.replace(res.data.group);
               else this.revert(group);

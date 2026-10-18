@@ -1,0 +1,58 @@
+/* "?" toggletips and the glossary page (phase 9 design §13). Loaded on every page by base.html. */
+
+/* The button is a 44×44 hit area around a 20 px glyph; negative margins keep it from pushing the text around. */
+.tt { display: inline; position: relative; margin-left: 0.3em; }
+.tt-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; min-height: 44px; margin: -12px -10px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--text);
+  vertical-align: middle; position: relative; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  text-transform: none; letter-spacing: normal; font-weight: 600;
+}
+.tt-btn:hover:not(:disabled) { border: 0; }
+.tt-btn:focus-visible { outline: none; }
+.tt-glyph {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid var(--text-muted); /* ≥ 3:1 on the page and card backgrounds */
+  color: var(--text); background: var(--bg-input);
+  font: 600 12px/1 var(--font);
+}
+.tt-btn:hover .tt-glyph, .tt-btn[aria-expanded="true"] .tt-glyph { border-color: var(--accent); color: var(--accent); }
+.tt-btn:focus-visible .tt-glyph { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tt-glyph-inline { vertical-align: text-bottom; }
+
+/* The panel: fixed next to its button (help.js places it), in the top layer where the Popover API exists. */
+.tt-pop {
+  position: fixed; inset: auto; margin: 0; z-index: 1000;
+  display: none; flex-direction: column; gap: 0.35rem;
+  width: max-content; max-width: min(320px, calc(100vw - 16px));
+  padding: 0.65rem 0.8rem; overflow: visible;
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  background: var(--bg-raised); color: var(--text);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.5);
+  font: 0.875rem/1.45 var(--font); text-align: left; text-transform: none; letter-spacing: normal; white-space: normal;
+}
+.tt-pop.is-open { display: flex; }
+.tt-pop[hidden] { display: none; }
+.tt-title { font-weight: 600; }
+.tt-text { display: block; }
+.tt-more { align-self: flex-start; min-height: 24px; display: inline-flex; align-items: center; }
+
+/* Glossary page. */
+.help-index ul { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin: 0; padding: 0; list-style: none; }
+.help-index a { display: inline-flex; align-items: center; min-height: 2rem; }
+.help-terms { margin: 0; }
+.help-term { padding: 0.6rem 0; border-top: 1px solid var(--border); scroll-margin-top: 1rem; }
+.help-term:first-child { border-top: 0; }
+.help-term dt { font-weight: 600; }
+.help-term dd { margin: 0.2rem 0 0; }
+.help-term dd p { margin: 0 0 0.35rem; max-width: 70ch; }
+.help-term:target { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--radius); }
+.help-related { color: var(--text-muted); font-size: 0.85rem; }
+.help-group { scroll-margin-top: 1rem; }
+.lead { max-width: 70ch; }
+
+@media (prefers-contrast: more) {
+  .tt-glyph { border-width: 2px; border-color: var(--text); }
+}

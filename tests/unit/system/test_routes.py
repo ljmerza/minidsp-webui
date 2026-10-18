@@ -33,13 +33,13 @@ async def test_page_renders(ctx):
     r = await ctx.http.get("/system")
     assert r.status_code == 200
     html = r.text
-    assert "<h1>System</h1>" in html
-    assert "Electrical sum" in html and "electrical sum" in html.lower()
+    assert "<h1>Combined response</h1>" in html
+    assert "calculated sum" in html and 'id="calc-response"' not in html and "/help#calc-response" in html
     assert "Sub/Tactile 5&ndash;300 Hz" in html and "Full 10 Hz&ndash;20 kHz" in html
     assert "x-data='systemView(" in html
     assert "/static/js/system.js" in html and "/static/js/graph.js" in html and "uPlot.iife.min.js" in html
     assert f"/ui/devices/{SERIAL}/presets/0/system" in html
-    assert 'aria-current="page"' in html and ">System</a>" in html  # the sidebar entry lights up
+    assert 'aria-current="page"' in html and ">Combined response</a>" in html  # the sidebar entry lights up
     assert "20&ndash;100 Hz" in html and "120&deg;" in html
     # one checkbox per output, plus the pair selects
     assert html.count('type="checkbox" :checked="isSelected(') == 4
@@ -80,7 +80,7 @@ async def test_data_defaults(ctx):
     assert data["range"] == [5.0, 300.0]
     assert _ids(data) == ["o0", "o1", "o2", "o3", "sum"]
     total = data["traces"][-1]
-    assert total["label"] == "Electrical sum" and total["bold"] and total["kind"] == "sum"
+    assert total["label"] == "Sum" and total["bold"] and total["kind"] == "sum"
     # In 1 feeds Out 1-3, Out 4 is silent: three coherent unity outputs
     assert _db_at(total["response"], 50) == pytest.approx(20 * math.log10(3), abs=1e-3)
     assert "no selected input is routed to Out 4, so it is silent" in data["warnings"]

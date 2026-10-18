@@ -62,7 +62,7 @@ async def test_bad_channel_values_are_422(ctx):
     form = _channels_form(**{"output-2-max_gain_db": "30", "input-1-name": "x" * 40})
     response = await ctx.http.post(f"{UI}/channels", data=form, headers=HX)
     assert response.status_code == 422
-    assert "gain ceiling must be within" in response.text and "at most 32 characters" in response.text
+    assert "level limit must be within" in response.text and "at most 32 characters" in response.text
     response = await ctx.http.post(f"{UI}/channels", data=_channels_form(**{"output-0-max_gain_db": "abc"}), headers=HX)
     assert response.status_code == 422
 

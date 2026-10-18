@@ -61,9 +61,9 @@ DEFAULT_DISTANCE_M = 3.0
 # phases light up a tab just by adding the template. ``fir`` is also hidden unless the profile supports FIR.
 OUTPUT_TABS: tuple[tuple[str, str], ...] = (
     ("delay", "Delay"),
-    ("crossover", "Crossover"),
-    ("peq", "PEQ"),
-    ("compressor", "Compressor"),
+    ("crossover", "Band (crossover)"),
+    ("peq", "EQ"),
+    ("compressor", "Compressor (limiter)"),
     ("fir", "FIR"),
     ("response", "Response"),
 )
@@ -506,10 +506,10 @@ async def retry(request: Request, serial: int, preset: int, page: str | None = N
 
 def _flush_message(result: Any, writes: int) -> str:
     if result.ok:
-        return f"Push complete ({writes} write{'s' if writes != 1 else ''})."
+        return f"All sent ({writes} write{'s' if writes != 1 else ''})."
     if result.staged:
-        return "Staged: the push runs when this preset becomes active."
-    return f"Push incomplete: {len(result.pending)} pending, {len(result.failed)} failed. {result.error or ''}".strip()
+        return "Waiting: everything is sent when this preset plays."
+    return f"Not all sent: {len(result.pending)} sending, {len(result.failed)} failed. {result.error or ''}".strip()
 
 
 @router.post("/ui/devices/{serial}/presets/{preset}/push", response_class=HTMLResponse)

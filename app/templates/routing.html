@@ -2,7 +2,7 @@
 {% import "partials/params_macros.html" as m %}
 
 {% block content %}
-<h1>Routing</h1>
+<h1>Routing{{ help("routing") }}</h1>
 {% if session is none or state_error or page_error %}
   {% include "partials/edit_guard.html" %}
 {% else %}
@@ -26,8 +26,7 @@
               <th scope="col" style="--chan: {{ output_colors[o] }}">
                 <span class="chan-dot" aria-hidden="true"></span>{{ name }}
                 <span class="silent-warning" data-silent-output="{{ o }}" role="img"
-                      aria-label="No input is routed to {{ name }}: it will be silent"
-                      title="No input is routed to {{ name }}: it will be silent"{% if routed[o] %} hidden{% endif %}>&#9888;</span>
+                      aria-label="No input is routed to {{ name }}: it will be silent"{% if routed[o] %} hidden{% endif %}>&#9888; silent</span>
               </th>
             {% endfor %}
           </tr>
@@ -52,7 +51,7 @@
                   <span class="num-field route-gain">
                     <input type="number" data-path="{{ gp }}" data-type="number" data-gain data-enabled-by="{{ ep }}"
                            inputmode="decimal" step="0.1" min="{{ session.profile.gain_min_db }}" max="{{ ceilings[o] }}"
-                           value="{{ '%.1f'|format(values[gp]) }}" aria-label="Gain from {{ in_name }} to {{ out_name }} in dB"
+                           value="{{ '%.1f'|format(values[gp]) }}" aria-label="Route level from {{ in_name }} to {{ out_name }} in dB"
                            {%- if not on %} disabled{% endif %}>
                     <span class="unit">dB</span>
                   </span>
@@ -64,15 +63,16 @@
         </tbody>
       </table>
     </div>
-    <p class="hint">Tick a cell to route the input to that output; the gain applies to that route only.
-      Routing gains are limited by the destination output's ceiling. Routes can't be read back from the device, so
-      turning off an un-muted or playing output's last route asks first.</p>
+    <p class="hint">Tick a cell to route the input to that output; the number is that route's level{{ help("route-level") }}
+      and applies to that route only. Route levels are capped by the output's level limit{{ help("level-limit") }}.
+      Routes can't be read back from the device, so turning off an un-muted or playing output's last route asks
+      first.</p>
   </section>
 
   {% if input_names|length > 1 %}
   {%- set every = "both inputs" if input_names|length == 2 else "every input" %}
   <section class="card" aria-labelledby="mono-title">
-    <h2 id="mono-title">Play {{ every }} on one output (mono sum)</h2>
+    <h2 id="mono-title">Play {{ every }} on one output (mono sum){{ help("mono-sum") }}</h2>
     <div class="mono-sum">
       <label for="mono-target">Output</label>
       <select id="mono-target" data-mono-target aria-describedby="mono-preview">

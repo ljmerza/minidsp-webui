@@ -15,6 +15,8 @@
   const LOCAL_HOLD_MS = 1500; // ignore echoes of a path for this long after the last local change
   const RANK = { synced: 0, unknown: 1, pending: 2, failed: 3 };
   const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
+  // On-screen words for the statuses (phase 9 design §2; app/web/ui_common.py STATUS_TEXT).
+  const WORD = { synced: 'sent', pending: 'sending', failed: 'failed', unknown: 'unknown' };
   const KEY_STEP = 0.5;
   const KEY_STEP_FINE = 0.1;
   const LEVELS_STALE_MS = 2500; // routing page: output levels older than this don't count as signal
@@ -135,8 +137,19 @@
         const icon = badge.querySelector('.sync-icon');
         const text = badge.querySelector('.sync-text');
         if (icon) icon.textContent = ICON[worst];
-        if (text) text.textContent = worst;
-        badge.title = worst.charAt(0).toUpperCase() + worst.slice(1) + (reason && worst === 'failed' ? `: ${reason}` : '');
+        if (text) text.textContent = WORD[worst];
+        // The failure reason is read out after the status word (no hover-only title, phase 9 §13.1).
+        let why = badge.querySelector('.sync-reason');
+        if (reason && worst === 'failed') {
+          if (!why) {
+            why = document.createElement('span');
+            why.className = 'sync-reason visually-hidden';
+            badge.appendChild(why);
+          }
+          why.textContent = `: ${reason}`;
+        } else if (why) {
+          why.remove();
+        }
       }
     }
 
@@ -272,7 +285,7 @@
       const unknown = [`${side}.gain_db`, `${side}.mute`].some((p) => (this.status[p] || 'unknown') === 'unknown');
       if (!unknown) return true;
       const name = el.dataset.confirmUnmute || 'this output';
-      return window.confirm(`${name} has never been synced, so its gain on the device is unknown. Un-mute it anyway?`);
+      return window.confirm(`${name} has never been sent, so its level on the device is unknown. Un-mute it anyway?`);
     }
 
     onKey(e) {

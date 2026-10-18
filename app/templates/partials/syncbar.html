@@ -8,19 +8,19 @@
      hx-trigger="sse:sync throttle:750ms, sse:master throttle:750ms, mdsp-sync-changed from:body"
      hx-target="this" hx-swap="outerHTML">
   <nav class="preset-tabs" aria-label="Preset to edit">
-    <span class="hdr-label">Editing</span>
+    <span class="hdr-label" id="syncbar-editing">Editing preset</span>{{ help("editing-preset") }}
     {% for t in bar.tabs %}
       {%- set cls = "preset-tab" ~ (" is-selected" if t.selected else "") ~ (" is-active" if t.active else "") -%}
-      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (active on the device)" if t.active else "") ~ (", " ~ t.staged ~ " staged change(s)" if t.staged else "") -%}
+      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (playing)" if t.active else "") ~ (", " ~ t.staged ~ " change(s) waiting" if t.staged else "") -%}
       {% if bar.preset_link %}
-        <a class="{{ cls }}" href="{{ bar.preset_link(t.index) }}" aria-label="{{ desc }}" title="{{ desc }}"
+        <a class="{{ cls }}" href="{{ bar.preset_link(t.index) }}" aria-label="{{ desc }}"
            {%- if t.selected %} aria-current="page"{% endif %}>
       {% else %}
-        <span class="{{ cls }}" aria-label="{{ desc }}" title="{{ desc }}">
+        <span class="{{ cls }}" role="img" aria-label="{{ desc }}">
       {% endif %}
           {{- t.index + 1 -}}
-          {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9679;</span>{% endif -%}
-          {%- if t.staged %}<span class="staged-dot" aria-hidden="true"></span>{% endif -%}
+          {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9654;</span>{% endif -%}
+          {%- if t.staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
       {% if bar.preset_link %}</a>{% else %}</span>{% endif %}
     {% endfor %}
   </nav>
@@ -29,10 +29,11 @@
     <span class="sync-badge sync-{{ st }}" role="status">
       <span class="sync-icon" aria-hidden="true">{{ status_icon[st] }}</span>
       <span class="sync-text">
-        {%- if st == "synced" %}all {{ total }} synced
-        {%- else %}{% if c.pending %}{{ c.pending }} pending{% endif %}{% if c.failed %}{% if c.pending %}, {% endif %}{{ c.failed }} failed{% endif %}{% if c.unknown %}{% if c.pending or c.failed %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif -%}
+        {%- if st == "synced" %}all {{ total }} sent
+        {%- else %}{% if c.pending %}{{ c.pending }} {{ "sending" if bar.is_active else "waiting for preset " ~ (bar.preset + 1) }}{% endif %}{% if c.failed %}{% if c.pending %}, {% endif %}{{ c.failed }} failed{% endif %}{% if c.unknown %}{% if c.pending or c.failed %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif -%}
       </span>
     </span>
+    {{ help("status") }}
     {% if bar.page != "/device" %}<a class="syncbar-link" href="{{ root }}/device?preset={{ bar.preset + 1 }}#sync">details</a>{% endif %}
   </div>
 
@@ -41,21 +42,21 @@
       <button type="button" class="btn-small" hx-post="{{ bar.retry_url }}" hx-disabled-elt="this">Retry now</button>
     {% endif %}
     <button type="button" class="btn-small" hx-post="{{ bar.push_url }}" hx-disabled-elt="this"
-            hx-confirm="Push every setting of preset {{ bar.preset + 1 }} to the device?{% if bar.mute_wrap %} The affected outputs are muted while it runs.{% endif %}{% if not bar.is_active %} Preset {{ bar.preset + 1 }} isn't active, so the push waits until it is.{% endif %}">
-      Push all<span class="htmx-indicator spinner" aria-hidden="true"></span>
+            hx-confirm="Send every setting of preset {{ bar.preset + 1 }} to the device?{% if bar.mute_wrap %} The affected outputs are muted while it runs.{% endif %}{% if not bar.is_active %} Preset {{ bar.preset + 1 }} isn't playing, so it waits until it plays.{% endif %}">
+      Send all<span class="htmx-indicator spinner" aria-hidden="true"></span>
     </button>
     {% if not bar.is_active and bar.active_preset is not none %}
       <button type="button" class="btn-small" hx-post="{{ bar.activate_url }}" hx-disabled-elt="this"
-              hx-confirm="Switch the device to preset {{ bar.preset + 1 }} and apply its staged changes? Audio may drop out for a few seconds while the device reloads.">
-        Switch &amp; apply now<span class="htmx-indicator spinner" aria-hidden="true"></span>
+              hx-confirm="Switch the device to preset {{ bar.preset + 1 }} and send its waiting changes? Audio may drop out for a few seconds while the device reloads.">
+        Switch to preset {{ bar.preset + 1 }} now&hellip;<span class="htmx-indicator spinner" aria-hidden="true"></span>
       </button>
     {% endif %}
   </div>
 
   {% if not bar.is_active %}
     <p class="syncbar-note">
-      Preset {{ bar.preset + 1 }} isn't active on the device{% if bar.active_preset is not none %} (preset {{ bar.active_preset + 1 }} is){% endif %}.
-      Changes are staged and written when it becomes active, whether from here, the remote or another app.
+      <span aria-hidden="true">&#9208;</span> You're editing preset {{ bar.preset + 1 }}. It isn't playing{% if bar.active_preset is not none %} (preset {{ bar.active_preset + 1 }} is){% endif %}.
+      Changes wait and are sent when preset {{ bar.preset + 1 }} plays, whether you switch here, with the remote or from another app.
     </p>
   {% endif %}
   {% if bar.summary.error and (c.failed or c.pending) %}<p class="syncbar-error">Last error: {{ bar.summary.error }}</p>{% endif %}
