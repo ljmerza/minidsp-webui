@@ -48,7 +48,7 @@ def persist_failing(session: DeviceSession) -> bool:
     persister = getattr(session, "_persister", None)  # owned by the session; read-only use here
     if persister is None:
         return False
-    return any(persister.failures(key) > 0 for key in persister.pending_keys)
+    return persister.failing
 
 
 def storage_problem(manager: SessionManager, sessions: Iterable[DeviceSession] | None = None) -> str | None:

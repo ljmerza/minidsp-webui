@@ -4,7 +4,8 @@ import httpx
 import pytest
 
 from app.daemon.client import DaemonClient, DaemonRejected, DaemonUnavailable, DeviceNotFound
-from app.model.master import MasterStatus
+from app.model.master import MasterStatus, StatusSummary
+from app.sync.session import describe_master_change
 
 from .conftest import DEVICE_JSON, MASTER_JSON, SERIAL
 
@@ -48,6 +49,15 @@ async def test_post_master_sends_only_set_fields(client, daemon):
     result = await client.post_master(0, MasterStatus(volume=-10.0))
     assert json.loads(route.calls.last.request.content) == {"volume": -10.0}
     assert result.volume == -10.0
+
+
+async def test_negative_zero_volume_reads_as_zero(client, daemon):
+    """The daemon reports 0 dB as -0.0; it must not reach the UI, the event log or Home Assistant as "-0.0"."""
+    daemon.get("/devices/0").respond(json={"master": {**MASTER_JSON, "volume": -0.0}})
+    status = await client.get_status(0)
+    assert str(status.master.volume) == "0.0"
+    assert StatusSummary.model_validate_json('{"master": {"volume": -0.0}}').master.volume.hex() == (0.0).hex()
+    assert describe_master_change("api", "volume", -98.5, status.master.volume) == "api: volume −98.5 → 0.0 dB"
 
 
 async def test_post_config_body_and_empty_response(client, daemon):

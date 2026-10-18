@@ -53,6 +53,7 @@ def test_topics():
         ("minidsp-webui/911111/cmd/volume/extra", None),
         ("other/911111/cmd/volume", None),
         ("minidsp-webui-x/911111/cmd/volume", None),
+        ("minidsp-webui/" + "1" * 5000 + "/cmd/volume", None),  # int() would raise past 4300 digits
     ],
 )
 def test_parse_command_topic(topic, expected):
@@ -127,6 +128,20 @@ def test_volume_number():
     assert config["unit_of_measurement"] == "dB"
     assert render(config["value_template"], state()) == "-20.0"
     assert render(config["value_template"], state(volume=None)) == "None"  # HA's payload_reset -> unknown
+
+
+def test_volume_below_the_floor_renders_the_floor():
+    """HA drops a number state outside ``min..max`` and keeps the stale value; a volume below the floor (IR remote,
+    knob, web UI) shows as the floor instead."""
+    config = configs()["homeassistant/number/minidsp_911111/volume/config"]
+    assert config["min"] == -80.0
+    assert render(config["value_template"], state(volume=-100.0)) == "-80.0"
+    assert render(config["value_template"], state(volume=-80.0)) == "-80.0"
+    assert render(config["value_template"], state(volume=-79.5)) == "-79.5"
+    assert render(config["value_template"], state(volume=None)) == "None"
+    unfloored = p.discovery_configs(INFO, TOPICS, volume_floor_db=-200.0)
+    unfloored = unfloored["homeassistant/number/minidsp_911111/volume/config"]
+    assert render(unfloored["value_template"], state(volume=-127.0)) == "-127.0"
 
 
 def test_volume_floor_never_below_device_range():
@@ -348,8 +363,18 @@ def test_output_delay_number_is_config():
     config = configs()["homeassistant/number/minidsp_911111/output_1_delay/config"]
     assert config["entity_category"] == "config" and config["unit_of_measurement"] == "ms"
     assert (config["min"], config["step"]) == (0.0, 0.01)
-    assert config["max"] == 79.83 and config["max"] <= M2X4HD.delay_max_ms
+    assert config["max"] == 79.833
     assert render(config["value_template"], outputs_state()) == "1.5"
+
+
+def test_delay_at_the_device_maximum_is_inside_the_advertised_range():
+    """HA drops a number state above ``max``: a delay at the 7664-sample maximum (79.8333 ms) must still show."""
+    config = configs()["homeassistant/number/minidsp_911111/output_1_delay/config"]
+    at_max = M2X4HD.delay_ms_from_samples(M2X4HD.delay_max_samples)
+    published = float(render(config["value_template"], state(outputs=[p.output_state(0.0, False, at_max)])))
+    assert config["min"] <= published <= config["max"]
+    assert p.parse_delay(str(config["max"]), M2X4HD) == config["max"]  # and HA may send the max back
+    assert M2X4HD.delay_samples(config["max"]) == M2X4HD.delay_max_samples
 
 
 def test_profile_select_only_with_profiles():
@@ -417,6 +442,26 @@ def test_parse_delay():
     for bad in ("-0.01", "80", "nan", "x"):
         with pytest.raises(p.CommandError):
             p.parse_delay(bad, M2X4HD)
+
+
+@pytest.mark.parametrize(
+    "parse",
+    [
+        lambda payload: p.parse_volume(payload, M2X4HD, -80.0),
+        lambda payload: p.parse_number(payload + "nan", "gain", 0.0, 1.0, "dB"),
+        p.parse_switch,
+        lambda payload: p.parse_source(payload, M2X4HD),
+        lambda payload: p.parse_preset(payload, M2X4HD),
+        lambda payload: p.parse_preset("Preset 9" + "0" * len(payload), M2X4HD),
+        lambda payload: p.parse_profile(payload, ["Games"]),
+        p.parse_press,
+    ],
+)
+def test_rejection_messages_quote_a_bounded_payload(parse):
+    """The error text goes into the persistent event log: a huge payload must not be copied in whole."""
+    with pytest.raises(p.CommandError) as exc:
+        parse("x" * 100_000)
+    assert len(str(exc.value)) < 200
 
 
 def test_parse_press_and_profile():

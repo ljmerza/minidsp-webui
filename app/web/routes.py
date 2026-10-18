@@ -34,7 +34,9 @@ ERROR_HEADER = "X-Mdsp-Error"
 
 # "sync" and "desired" refresh the output cards (other tabs, Home Assistant, the writer); "master" a preset switch.
 DASHBOARD_TOPICS = ("levels", "master", "device", "sync", "desired")
-DEVICE_TOPICS = ("master", "device")
+# One feed per page: each EventSource holds one of the browser's ~6 HTTP/1.1 connections per host, and the header
+# (outside any nested feed) needs "sync" to keep its badge current while the sync table pushes.
+DEVICE_TOPICS = ("master", "device", "sync", "log", "verify")
 
 
 # --- context helpers --------------------------------------------------------------------------------------------------

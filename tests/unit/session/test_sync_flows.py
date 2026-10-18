@@ -78,6 +78,26 @@ async def test_push_all_on_an_inactive_preset_is_staged(session, fake):
     assert fake.configs[0] == {"outputs": [{"index": n, "mute": True} for n in range(4)]}
 
 
+async def test_staged_push_all_survives_a_restart(make_session, fake):
+    s = await make_session()
+    await s.adopt("trust", preset=1, confirm_defaults=True)
+    assert (await s.push_all(1)).staged
+    total = len(s.sync_status(1))
+    assert s.sync_summary(1)["counts"]["pending"] == total
+    await s.stop()
+
+    s2 = await make_session()
+    assert s2.sync_summary(1)["counts"]["pending"] == total  # still staged, not "synced"
+    assert (await settle(s2, 1)).staged
+    assert fake.configs == []
+    await switch_externally(s2, fake, 1)
+    assert (await settle(s2, 1, timeout=5)).ok
+    assert fake.configs[0] == {"outputs": [{"index": n, "mute": True} for n in range(4)]}  # still mute-wrapped
+    assert fake.configs[-1] == {"outputs": [{"index": n, "mute": False} for n in range(4)]}
+    assert len(fake.configs) > 2
+    assert set(s2.sync_status(1).values()) == {"synced"}
+
+
 async def test_reconnect_marks_the_active_preset_unknown(session, fake, repo):
     await session.adopt("trust", confirm_defaults=True)
     await session.adopt("trust", preset=1, confirm_defaults=True)
@@ -155,10 +175,12 @@ async def test_master_changes_do_not_touch_desired_state(session, fake):
 
 async def test_manager_loads_state_and_records_the_device(client, bus, settings, fake, repo):
     manager = SessionManager(client, bus, settings, repo=repo)
+    manager.usb_identity = lambda: ((1, 4),)
     try:
         await manager.discover()
         session = manager.get(SERIAL)
         assert session is not None and session.loaded and session.repo is repo
+        assert session.usb_identity is manager.usb_identity  # embedded mode: tells a daemon restart on reconnect
         device = await repo.get_device(SERIAL)
         assert device is not None and device.product_name == "2x4HD" and device.fw == "1.75"
     finally:

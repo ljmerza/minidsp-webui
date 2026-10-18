@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import logging
 import time
 from typing import Any
 
@@ -563,6 +564,19 @@ async def test_callbacks_and_bus_events(daemon, make_writer):
     writer.set_desired(0, set_path(DEFAULT, "outputs.0.gain_db", -2.0))
     await settle(writer)
     assert any(level == "warning" and "write failed" in message for level, message in logs)
+    await writer.stop()
+
+
+async def test_messages_handed_to_on_log_are_not_logged_twice(daemon, make_writer, caplog):
+    logs = []
+    writer = make_writer(on_log=lambda level, message, **data: logs.append((level, message)), max_attempts=1)
+    attach_trusted(writer)
+    daemon.fail_when = lambda body: rejected()
+    caplog.set_level(logging.DEBUG, logger="app.sync.writer")
+    writer.set_desired(0, set_path(DEFAULT, "outputs.0.gain_db", -2.0))
+    await settle(writer)
+    assert any(level == "warning" and "write failed" in message for level, message in logs)
+    assert not [r for r in caplog.records if r.name == "app.sync.writer" and "write failed" in r.getMessage()]
     await writer.stop()
 
 

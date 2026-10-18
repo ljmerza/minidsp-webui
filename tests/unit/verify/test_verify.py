@@ -95,7 +95,7 @@ async def test_unreadable_settings_are_reported_not_compared(shaker, reader_fact
     items = by_path(await run(shaker, reader_factory))
     unverifiable = {p: i.note for p, i in items.items() if i.status == svc.ItemStatus.UNVERIFIABLE}
     assert unverifiable["inputs.0.routing.0.enabled"] == svc.UNVERIFIABLE_ROUTING
-    assert unverifiable["inputs.1.routing.3.gain_db"] == svc.UNVERIFIABLE_ROUTING
+    assert unverifiable["inputs.1.routing.3.gain_db"] == svc.UNVERIFIABLE_ROUTING_GAIN  # own registers, not status
     assert unverifiable["inputs.0.peq.3.bypass"] == svc.UNVERIFIABLE_BYPASS
     assert unverifiable["outputs.0.crossover.0.bypass"] == svc.UNVERIFIABLE_BYPASS
     assert unverifiable["outputs.0.compressor.bypass"] == svc.UNVERIFIABLE_COMPRESSOR_BYPASS
@@ -166,6 +166,15 @@ async def test_gain_tolerance(shaker, reader_factory, bridge):
     assert (await run(shaker, reader_factory)).status == "ok"
     bridge.memory[addr] = f32(-6.6)
     assert [i.path for i in (await run(shaker, reader_factory)).drifted] == ["outputs.1.gain_db"]
+
+
+async def test_gain_reading_above_the_sent_value_is_drift(shaker, reader_factory, bridge):
+    """The device's gain quantization only ever reads low (spike 0.2), so a reading above the sent value is drift."""
+    addr = M2X4HD_MAP.output_gain[1]  # -6 dB in the shadow
+    bridge.memory[addr] = f32(-5.8)
+    assert [i.path for i in (await run(shaker, reader_factory)).drifted] == ["outputs.1.gain_db"]
+    bridge.memory[addr] = f32(-5.995)  # an accepted reading rounded to 0.01 dB may sit just below the device's value
+    assert (await run(shaker, reader_factory)).status == "ok"
 
 
 async def test_biquads_allow_one_float32_ulp(shaker, reader_factory, bridge):

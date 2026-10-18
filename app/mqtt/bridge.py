@@ -43,6 +43,8 @@ OFFLINE_TIMEOUT_S = 2.0
 STABLE_CONNECTION_S = 30.0  # a connection that lasted this long resets the reconnect backoff
 LEVELS_INTERVAL_S = 1.0  # levels go to MQTT at most once a second (4 Hz in the UI)
 REFRESH_INTERVAL_S = 60.0  # re-check discovery (channel names, ceilings, profiles) even without bus events
+REJECT_QUOTE_MAX = 64  # characters of a rejected command's entity / payload quoted in the event log
+REJECT_REASON_MAX = 200
 
 type ProfileLoader = Callable[[DeviceSession, ProfileEntry], Any]
 
@@ -472,6 +474,9 @@ class MqttBridge:
 
     def submit_command(self, serial: int, entity: str, payload: str) -> None:
         """Queue a command. Commands for the same entity coalesce: only the newest waiting payload runs."""
+        if self.manager.get(serial) is None:
+            log.info("mqtt: command for unknown device %s ignored", serial)
+            return
         key = (serial, entity)
         self._pending_cmd[key] = payload
         worker = self._cmd_workers.get(key)
@@ -479,9 +484,14 @@ class MqttBridge:
             self._cmd_workers[key] = asyncio.create_task(self._drain(key), name=f"mqtt-cmd-{serial}-{entity}")
 
     async def _drain(self, key: tuple[int, str]) -> None:
-        while key in self._pending_cmd:
-            payload = self._pending_cmd.pop(key)
-            await self.handle_command(*key, payload)
+        try:
+            while key in self._pending_cmd:
+                payload = self._pending_cmd.pop(key)
+                await self.handle_command(*key, payload)
+        finally:
+            # No await between the empty queue and here, so no command can slip in; junk topics must not pile up.
+            if self._cmd_workers.get(key) is asyncio.current_task():
+                del self._cmd_workers[key]
 
     async def handle_command(self, serial: int, entity: str, payload: str) -> bool:
         """Apply one command through the session layer. On any rejection the state is re-published so HA snaps back.
@@ -584,8 +594,13 @@ class MqttBridge:
     def _reject(
         self, session: DeviceSession, entity: str, payload: str, reason: str, *, level: str = "warning"
     ) -> None:
+        # Everything here comes from the broker and is persisted: keep the event small whatever was published.
+        entity, quoted = entity[:REJECT_QUOTE_MAX], repr(payload[:REJECT_QUOTE_MAX])
         session.log_event(
-            level, f"MQTT {entity} command {payload[:64]!r} rejected: {reason}", source="mqtt", entity=entity
+            level,
+            f"MQTT {entity} command {quoted} rejected: {reason[:REJECT_REASON_MAX]}",
+            source="mqtt",
+            entity=entity,
         )
         self.schedule_state(session.serial, force=True)
 

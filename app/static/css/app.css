@@ -392,7 +392,10 @@ textarea { width: 100%; font-family: var(--mono); font-size: 0.85rem; resize: ve
 .sync-table .table-scroll { max-height: 32rem; overflow-y: auto; }
 .sync-table thead th { position: sticky; top: 0; background: var(--bg-raised); z-index: 1; }
 
-.adopt fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 var(--gap); padding: 0.6rem 0.8rem; }
+.adopt fieldset {
+  border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 var(--gap); padding: 0.6rem 0.8rem;
+  min-width: 0; /* the browser default (min-content) made it 6 px wider than a 360 px phone */
+}
 .adopt legend { font-weight: 600; padding: 0 0.3rem; }
 .adopt .radio { display: block; margin: 0.35rem 0; }
 .adopt .radio.sub { margin-left: 1.6rem; color: var(--text-muted); }

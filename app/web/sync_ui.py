@@ -407,6 +407,8 @@ async def adopt(request: Request, serial: int) -> Response:
         "known": result.known,
         "unknown": result.unknown,
         "writes": result.writes,
+        "read_back": result.read_back,
+        "read_error": result.read_error,
         "warnings": result.warnings,
         "flush_ok": flush.ok if flush is not None else None,
         "flush_error": flush.error if flush is not None else None,

@@ -197,3 +197,52 @@ async def test_partial_unsupported_model(http, monkeypatch):
 async def test_cross_site_ui_posts_are_refused(http):
     r = await http.post(f"/ui/devices/{SERIAL}/verify", headers={"Sec-Fetch-Site": "cross-site"})
     assert r.status_code == 403
+
+
+# --- accept device values -----------------------------------------------------------------------------------------
+
+
+async def test_accept_device_values_json(http, bridge, shaker, fake):  # noqa: F811
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 0})
+    assert r.status_code == 404 and r.json()["error"] == "not_verified"
+    bridge.memory[M2X4HD_MAP.output_gain[0]] = f32(-6.0206)
+    await http.post(f"/api/v1/devices/{SERIAL}/verify")
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 1})
+    assert r.status_code == 409 and r.json()["error"] == "report_changed"
+
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 0, "paths": ["outputs.0.gain_db"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["accepted"] == ["outputs.0.gain_db"]
+    assert body["report"]["status"] == "ok" and body["report"]["accepted"] == ["outputs.0.gain_db"]
+    assert shaker.desired(0).outputs[0].gain_db == -6.02
+    assert shaker.sync_status(0)["outputs.0.gain_db"] == "synced"
+    assert fake.configs == []
+
+
+async def test_accept_refuses_a_gain_above_the_ceiling(http, bridge, shaker):  # noqa: F811
+    await shaker.set_channel_meta("output", 1, name="Sub", max_gain_db=0.0)
+    bridge.memory[M2X4HD_MAP.output_gain[1]] = f32(5.7448344)
+    await http.post(f"/api/v1/devices/{SERIAL}/verify")
+    r = await http.post(f"/api/v1/devices/{SERIAL}/verify/accept", json={"preset": 0})
+    assert r.status_code == 422 and r.json()["problems"]
+
+
+async def test_partial_offers_and_accepts_device_values(http, bridge, shaker):  # noqa: F811
+    shaker.writer.invalidate(0, ["outputs.0.delay_ms"])
+    bridge.memory[M2X4HD_MAP.output_delay[0]] = f32(0.0)
+    r = await http.post(f"/ui/devices/{SERIAL}/verify")
+    assert "no drift; 1 never-confirmed setting(s)" in r.text
+    assert "Accept device values (1)" in r.text
+    r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": ["outputs.0.delay_ms"]})
+    assert r.status_code == 200
+    assert "Accepted 1 device value(s)" in r.text
+    assert "mdsp-sync-changed" in r.headers["HX-Trigger"]
+    assert shaker.sync_status(0)["outputs.0.delay_ms"] == "synced"
+    assert shaker.desired(0).outputs[0].delay_ms == 0.0
+
+
+async def test_partial_accept_needs_a_matching_report(http):
+    r = await http.post(f"/ui/devices/{SERIAL}/verify/accept", data={"preset": "0", "path": "x"})
+    assert "verify again" in r.text
+    assert "HX-Trigger" not in r.headers

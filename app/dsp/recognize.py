@@ -10,10 +10,15 @@ snapped to round numbers (80 Hz, Q = 1/√2, +6.0 dB) when the snapped design st
 Recognition never changes coefficients: callers keep the imported biquads as ``compiled`` and only attach the design.
 """
 
+import functools
 import itertools
 import math
-from collections.abc import Callable, Iterable, Sequence
+import statistics
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from typing import Any
+
+import numpy as np
 
 from app.dsp import design as d
 from app.dsp import response as r
@@ -108,20 +113,124 @@ def _snap_candidates(
     return list(dict.fromkeys(x for x in out if x != 0))
 
 
+def _combos(names: list[str], lists: list[list[float]]) -> Iterator[dict[str, float]]:
+    """Joint parameter combinations, coarsest (lowest summed candidate index) first."""
+    combos = sorted(itertools.product(*(list(enumerate(c)) for c in lists)), key=lambda c: sum(i for i, _ in c))
+    for combo in combos:
+        yield dict(zip(names, (v for _, v in combo), strict=True))
+
+
+def _is_float32(c: Coeffs) -> bool:
+    return r.to_float32(c) == tuple(c)
+
+
+def _float32_exact(bq: Biquad, target: Coeffs) -> bool:
+    """``bq`` rounded to float32 is ``target`` (within 2 ulps): what a readback of exactly this design looks like."""
+    got = np.array(bq.as_tuple(), dtype=np.float32).astype(float)
+    want = np.array(target, dtype=np.float32)
+    return bool(np.all(np.abs(got - want.astype(float)) <= 2 * np.spacing(np.abs(want)).astype(float)))
+
+
+# How far (relative) a round frequency may be from a float32 input's estimate and still be tried, and the steps (Hz)
+# whose nearest multiples on each side are tried.
+_FLOAT32_FREQ_WINDOW = 0.25
+_FLOAT32_FREQ_STEPS = (10.0, 5.0, 1.0, 0.5, 0.1)
+
+
+def _round_neighbours(value: float, levels: Sequence[int]) -> list[float]:
+    """The multiples of 10^-n just below and above ``value``, for each level ``n``."""
+    out = []
+    for n in levels:
+        step = 10.0**-n
+        low = math.floor(value / step) * step
+        out += [round(low, n), round(low + step, n)]
+    return out
+
+
+def _float32_freqs(f: float) -> list[float]:
+    """Round frequencies near a float32 input's estimate: two multiples of each step on either side, coarse first."""
+    out = []
+    for step in _FLOAT32_FREQ_STEPS:
+        low = math.floor(f / step)
+        out += [round(k * step, 1) for k in (low, low + 1, low - 1, low + 2)]
+    return [x for x in dict.fromkeys(out) if x > 0 and abs(x - f) <= _FLOAT32_FREQ_WINDOW * f]
+
+
+def _float32_trials(params: dict[str, float]) -> Iterator[dict[str, float]]:
+    """Extra candidates for float32 inputs: round frequencies near the estimate, each with Q scaled to keep the
+    estimated bandwidth (f/Q), which float32 coefficients pin down far better than f or Q alone at low frequencies."""
+    if "freq" not in params:
+        return
+    f = params["freq"]
+    names = list(params)
+    for fc in _float32_freqs(f):
+        lists = {"freq": [fc]}
+        if "q" in params:
+            lists["q"] = _snap_candidates(params["q"] * fc / f, (0, 1, 2), _SPECIAL_QS, (3, 4))
+        if "gain_db" in params:
+            lists["gain_db"] = _snap_candidates(params["gain_db"], (0, 1), (), (2,))
+        yield from _combos(names, [lists[n] for n in names])
+
+
+def _matching(build: Callable[[dict[str, float]], Biquad], trial: dict[str, float], target: Coeffs) -> Biquad | None:
+    """The design for ``trial`` when it matches ``target`` within tolerance, else None."""
+    try:
+        bq = build(trial)
+    except (DesignError, ValueError, ZeroDivisionError, OverflowError):
+        return None
+    return bq if coeffs_match(bq, target) and responses_match([bq], [target]) else None
+
+
 def _snap(params: dict[str, float], build: Callable[[dict[str, float]], Biquad], target: Coeffs) -> dict | None:
     """The coarsest rounding of the estimated parameters whose re-design matches ``target``, or None.
 
     The parameters are searched jointly (an off estimate of Q can hide a perfectly round frequency), coarsest
     combination first.
+
+    Float32 inputs (device readbacks, dumps) are ambiguous at low frequencies: the estimate can be a few % off and
+    several nearby designs match, some even bit for bit (Notch 19.74 Hz Q 4.935 and 20 Hz Q 5 round to the same
+    float32 coefficients). There the roundest design whose float32 rounding reproduces the input wins, searched over
+    more candidates; without such a design, the first tolerance match, as for float64 inputs.
     """
     names = list(params)
-    lists = [_snap_candidates(params[n], *_SNAP_RULES[n]) for n in names]
-    combos = sorted(itertools.product(*(list(enumerate(c)) for c in lists)), key=lambda c: sum(i for i, _ in c))
-    for combo in combos:
-        trial = dict(zip(names, (v for _, v in combo), strict=True))
-        if _try(lambda trial=trial: build(trial), target):
+    trials = list(_combos(names, [_snap_candidates(params[n], *_SNAP_RULES[n]) for n in names]))
+    if not _is_float32(target):
+        return next((t for t in trials if _matching(build, t, target) is not None), None)
+    fallback_rank: dict[tuple[float, ...], int] = {}
+    for k, t in enumerate(trials):
+        fallback_rank.setdefault(tuple(t.values()), k)
+    # The extra candidates go first so that, between equally round exact matches, a step-5 frequency (31.5 Hz) beats
+    # the estimate's own rounding (31.7 Hz). Duplicates hold equal values, so the dict keeps first positions.
+    candidates = list({tuple(t.values()): t for t in [*_float32_trials(params), *trials]}.values())
+    fallback: tuple[int, dict[str, float]] | None = None
+    for trial in sorted(candidates, key=_roundness):
+        bq = _matching(build, trial, target)
+        if bq is None:
+            continue
+        if _float32_exact(bq, target):
             return trial
-    return None
+        rank = fallback_rank.get(tuple(trial.values()), len(trials))
+        if fallback is None or rank < fallback[0]:
+            fallback = (rank, trial)
+    return fallback[1] if fallback is not None else None
+
+
+@functools.lru_cache(maxsize=4096)
+def _digits(name: str, value: float) -> tuple[float, float]:
+    """How "typed" a value looks: (significant digits, decimals), e.g. 20 → (1, 0), 19.74 → (4, 2), 0.45 → (2, 2).
+    Special Qs (1/√2, BW / Bessel section Qs) count as (2.5, 2.5)."""
+    if name == "q" and value in _SPECIAL_QS:
+        return 2.5, 2.5
+    for digits in range(1, 9):
+        if float(f"{value:.{digits}g}") == value:
+            return digits, next(n for n in range(10) if round(value, n) == value)
+    return 10, 10
+
+
+def _roundness(trial: dict[str, float]) -> tuple[float, float]:
+    """Lower is rounder: total significant digits, then total decimals (10 Hz Q 0.5 before 9 Hz Q 0.45)."""
+    scores = [_digits(name, value) for name, value in trial.items()]
+    return sum(s for s, _ in scores), sum(n for _, n in scores)
 
 
 def _shared_denominator(a1: float, a2: float, fs: float) -> tuple[float, float, float] | None:
@@ -255,8 +364,44 @@ def _bessel_norms() -> list[str]:
     return ["phase", "mag"] if "bessel_norm" in CrossoverDesign.model_fields else ["phase"]
 
 
+@dataclass(frozen=True)
+class _Section:
+    """A crossover section's shape and rough (unsnapped) corner, read from its coefficients alone."""
+
+    type: str  # lp1 / lp2 / hp1 / hp2
+    freq: float
+    q: float | None
+
+
+def _near(x: float, y: float) -> bool:
+    return abs(x - y) <= TOL_REL * max(abs(x), abs(y))
+
+
+def _section_shape(c: Coeffs, fs: float) -> _Section | None:
+    """Low- or high-pass section by its numerator zeros (z = −1 or z = 1), with the pole estimate of its corner.
+
+    No snapping and no per-section match: crossover sections (Bessel's especially, or any float32 readback) often
+    aren't at round values, so `_recognize_part` checks the whole group against each candidate design instead.
+    """
+    b0, b1, b2, a1, a2 = c
+    if b0 == 0:
+        return None
+    if abs(b2) <= _ZERO and abs(a2) <= _ZERO:
+        if not -1 < a1 < 1:
+            return None
+        f0 = 2 * math.atan((1 - a1) / (1 + a1)) * fs / (2 * math.pi)
+        kind = "lp1" if _near(b1, b0) else "hp1" if _near(b1, -b0) else None
+        return _Section(kind, f0, None) if kind else None
+    shared = _shared_denominator(a1, a2, fs)
+    if shared is None or not _near(b2, b0):
+        return None
+    f0, q, _ = shared
+    kind = "lp2" if _near(b1, 2 * b0) else "hp2" if _near(b1, -2 * b0) else None
+    return _Section(kind, f0, q) if kind else None
+
+
 def _part_candidates(
-    kind: str, sections: list[FilterDesign], include_bessel: bool
+    kind: str, sections: list[_Section], include_bessel: bool
 ) -> Iterable[tuple[str, int, float, str | None]]:
     """``(family, order, fc, bessel_norm)`` guesses for a run of all-LP or all-HP sections."""
     n2 = sum(1 for s in sections if s.type in ("lp2", "hp2"))
@@ -264,7 +409,7 @@ def _part_candidates(
     if n1 > 1:
         return
     order_bw = 2 * n2 + n1
-    fc = min(s.freq for s in sections)
+    fc = statistics.median(s.freq for s in sections)  # every BW / LR section sits at fc; the median damps noise
     yield "bw", order_bw, fc, None
     if n1 == 0:
         yield "lr", 2 * len(sections), fc, None
@@ -276,30 +421,77 @@ def _part_candidates(
                 yield "bessel", order_bw, (top.freq / w_top if kind == "lp" else top.freq * w_top), norm
 
 
-def _snap_freq(fc: float, check: Callable[[float], bool]) -> float | None:
-    for candidate in [*(round(fc, n) for n in (0, 1, 2, 3)), fc]:
-        if candidate > 0 and check(candidate):
-            return candidate
-    return None
+def _freq_tiers(fc: float) -> list[list[float]]:
+    """Corner-frequency candidates, coarsest tier first: multiples of 10, 5, 1, 0.5 and 0.1 Hz on either side of the
+    estimate (float32 inputs can put it a few % off at low frequencies), then finer roundings and the estimate."""
+    tiers = []
+    for step in _FLOAT32_FREQ_STEPS:
+        low = math.floor(fc / step)
+        tiers.append([round(k * step, 1) for k in (low, low + 1, low - 1, low + 2)])
+    tiers += [[round(fc, n), *_round_neighbours(fc, (n,))] for n in (2, 3)]
+    tiers.append([fc])
+    return [[f for f in dict.fromkeys(t) if f > 0 and abs(f - fc) <= _FLOAT32_FREQ_WINDOW * fc] for t in tiers]
+
+
+def _pole_size(c: Coeffs) -> float:
+    """``1 + a2`` (second order) or ``1 − a1`` (first order): roughly proportional to the corner frequency, and stored
+    precisely even in float32, unlike the pole angle, which hangs on ``1 − a1 − a2``."""
+    return 1 + c[4] if abs(c[4]) > _ZERO else 1 - c[3]
+
+
+def _refine_fc(
+    kind: str, family: str, order: int, fc: float, norm: str | None, given: list[Coeffs], fs: float
+) -> float:
+    """The corner at which the candidate design's summed `_pole_size` equals the given sections' (a few
+    multiplicative secant steps from the estimate ``fc``); ``fc`` itself when the design can't be built or sized."""
+    target = sum(_pole_size(c) for c in given)
+    f = fc
+    for _ in range(8):
+        try:
+            proto = d.prototype_sections(kind, family, order, f, norm or "phase")  # type: ignore[arg-type]
+        except (DesignError, ValueError):
+            return fc
+        if len(proto) != len(given):
+            return fc
+        size = sum(_pole_size(s.biquad(fs).as_tuple()) for s in proto)
+        if not (size > 0 and target > 0):
+            return fc
+        new = min(max(f * target / size, f / 2), f * 2)
+        if abs(new - f) <= 1e-12 * f:
+            break
+        f = new
+    return f
 
 
 def _recognize_part(
-    kind: str, sections: list[FilterDesign], given: list[Coeffs], fs: float, include_bessel: bool
+    kind: str, sections: list[_Section], given: list[Coeffs], fs: float, include_bessel: bool
 ) -> tuple[str, int, float, str | None] | None:
-    for family, order, fc, norm in _part_candidates(kind, sections, include_bessel):
+    """The first candidate design matching the whole run of sections, at the coarsest frequency rounding.
 
-        def check(f: float, family: str = family, order: int = order, norm: str | None = norm) -> bool:
-            try:
-                proto = d.prototype_sections(kind, family, order, f, norm or "phase")  # type: ignore[arg-type]
-                return _match_multiset([s.biquad(fs) for s in proto], given)
-            except (DesignError, ValueError):
-                return False
+    Roundings are tried tier by tier across *all* candidates, closest to its own estimate first within a tier: the two
+    Bessel normalizations differ only by a frequency scale, so both match, and only one of them sits at a round corner
+    (Bessel4 −3 dB at 80 Hz is phase-normalized at 121.14 Hz).
+    """
+    candidates = [
+        (family, order, _refine_fc(kind, family, order, fc, norm, given, fs), norm)
+        for family, order, fc, norm in _part_candidates(kind, sections, include_bessel)
+        if 1 <= order <= 8
+    ]
 
-        if not (1 <= order <= 8):
-            continue
-        snapped = _snap_freq(fc, check)
-        if snapped is not None:
-            return family, order, snapped, norm
+    def check(family: str, order: int, f: float, norm: str | None) -> bool:
+        try:
+            proto = d.prototype_sections(kind, family, order, f, norm or "phase")  # type: ignore[arg-type]
+            return _match_multiset([s.biquad(fs) for s in proto], given)
+        except (DesignError, ValueError):
+            return False
+
+    tiers = [_freq_tiers(fc) for _, _, fc, _ in candidates]
+    for level in range(len(tiers[0]) if tiers else 0):
+        trials = sorted((abs(f - fc) / fc, k, f) for k, (_, _, fc, _) in enumerate(candidates) for f in tiers[k][level])
+        for _, k, f in trials:
+            family, order, _, norm = candidates[k]
+            if check(family, order, f, norm):
+                return family, order, f, norm
     return None
 
 
@@ -315,9 +507,10 @@ def recognize_crossover(
     active = [c for c in given if not coeffs_match(c, PASSTHROUGH)]
     if not active:
         return None
-    designs = [recognize_biquad(c, fs) for c in active]
-    if any(x.type not in ("lp1", "lp2", "hp1", "hp2") for x in designs):
+    shapes = [_section_shape(c, fs) for c in active]
+    if any(x is None for x in shapes):
         return None
+    designs: list[_Section] = shapes  # type: ignore[assignment]
     parts: dict[str, Any] = {}
     for kind in ("lp", "hp"):
         idx = [k for k, x in enumerate(designs) if x.type.startswith(kind)]

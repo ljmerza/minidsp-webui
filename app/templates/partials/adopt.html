@@ -6,7 +6,8 @@
   {% if result %}
     <div class="adopt-result{% if result.flush_ok == false %} is-warn{% endif %}" role="status">
       <h3>Adopted preset {{ result.preset + 1 }} ({{ result.mode }})</h3>
-      <p>{{ result.known }} setting(s) known, {{ result.unknown }} unknown. {{ result.writes }} write(s) sent to the device{% if result.mode != "push" %} (nothing is written by "{{ result.mode }}"){% endif %}.</p>
+      <p>{{ result.known }} setting(s) known{% if result.read_back %} ({{ result.read_back }} read from the device){% endif %}, {{ result.unknown }} unknown. {{ result.writes }} write(s) sent to the device{% if result.mode != "push" %} (nothing is written by "{{ result.mode }}"){% endif %}.</p>
+      {% if result.read_error %}<p class="field-error">The preset couldn't be read back ({{ result.read_error }}), so it was trusted without reading it.</p>{% endif %}
       {% if result.flush_ok == false %}<p class="field-error">The push didn't complete{% if result.flush_error %}: {{ result.flush_error }}{% endif %}. See the sync table; the affected outputs stay muted until it does.</p>{% endif %}
       {% if result.warnings %}
         <details><summary>{{ result.warnings|length }} ignored line(s)</summary>
@@ -82,14 +83,18 @@
     <fieldset>
       <legend>3. What the device holds</legend>
       <label class="radio"><input type="radio" name="mode" value="trust" x-model="mode"{% if f_mode == "trust" %} checked{% endif %}>
-        <strong>Trust</strong>: this is exactly what's on the device. Nothing is written.</label>
+        <strong>Trust</strong>: this is exactly what's on the device. Nothing is written. On the active preset the
+        readable settings (gains, mutes, delays, polarity, filter coefficients, compressor thresholds) are read from
+        the device instead; the rest comes from here.</label>
       <label class="radio sub" x-show="mode === 'trust' && source === 'script'">
         <input type="checkbox" name="trust_all"{% if form.trust_all %} checked{% endif %}>
         Also trust the defaults for everything the script doesn't set (otherwise those stay unknown)</label>
       <div class="radio sub confirm-defaults" x-show="mode === 'trust' && source === 'defaults'">
-        <p class="field-error">Trusting the defaults tells the app the device is flat without reading it. That is
-          rarely true for a device that was set up before: import the command script you used instead. If it's wrong,
-          later edits (un-bypassing a filter, for example) act on whatever the device really holds.</p>
+        <p class="field-error">Trusting the defaults tells the app, without checking, that the settings it can't
+          read back (bypass flags, routing, compressor ratio and timing) are flat; on an inactive preset, which can't
+          be read at all, it claims that for every setting. That is rarely true for a device that was set up before:
+          import the command script you used instead. If it's wrong, later edits (un-bypassing a filter, for example)
+          act on whatever the device really holds.</p>
         <details open>
           <summary>What will be trusted on the chosen preset</summary>
           <ul class="issues">{% for line in defaults_summary %}<li>{{ line }}</li>{% endfor %}</ul>

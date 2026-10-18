@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.daemon.client import DaemonClient
-from app.daemon.embedded import UsbProbe, UsbStatus
+from app.daemon.embedded import UsbProbe, UsbStatus, usb_identity
 from app.main import create_app
 
 from .conftest import pid_alive, starts, wait_for
@@ -118,6 +118,7 @@ async def test_external_mode_starts_no_daemon(tmp_path):
         app = create_app(settings, client=client)
         async with running(app) as http:
             assert app.state.daemon_supervisor is None and app.state.usb_probe is None
+            assert app.state.manager.usb_identity is None  # an external daemon: a reconnect can't be told apart
             await wait_for(lambda: app.state.manager.get(911111) is not None)
             body = (await http.get("/api/v1/health")).json()
         await client.aclose()
@@ -131,6 +132,7 @@ async def test_embedded_mode_supervises_the_daemon(embedded_settings, record):
     async with running(app) as http:
         sup = app.state.daemon_supervisor
         app.state.usb_probe = UsbProbe(probe=lambda: UsbStatus(False, "not_mounted", "/dev/bus/usb isn't mounted"))
+        assert app.state.manager.usb_identity is usb_identity
         await wait_for(lambda: len(starts(record)) == 1)
         pid = sup.pid
         assert app.state.client.base_url == embedded_settings.minidspd_url
@@ -149,6 +151,7 @@ async def test_embedded_mode_supervises_the_daemon(embedded_settings, record):
 
         page = await http.get("/device")
         assert page.status_code == 200 and "minidspd process" in page.text
+        assert 'x-if="h.daemon_process_error"' in page.text  # shown while running too (listener errors)
         pid = sup.pid
     assert sup.state == "stopped"
     assert not pid_alive(pid)

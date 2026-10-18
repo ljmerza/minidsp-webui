@@ -99,6 +99,31 @@ async def test_failing_persist_is_degraded(session, repo, monkeypatch):
     assert health.health_report(make_manager([session], repo=repo))["status"] == "ok"
 
 
+async def test_persist_still_failing_while_a_retry_is_in_flight(session, repo, monkeypatch):
+    await connected(session)
+    retry_started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def locked(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > 1:  # the retry waits on the lock (busy_timeout) before failing again
+            retry_started.set()
+            await release.wait()
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(repo, "save_preset_state", locked)
+    await session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})
+    assert await session._persister.flush() is False
+    retry = asyncio.create_task(session._persister.flush())
+    await asyncio.wait_for(retry_started.wait(), 1)
+    assert not session._persister.pending_keys  # the value is out for writing
+    assert health.persist_failing(session)
+    assert health.storage_problem(make_manager([session], repo=repo)) == health.STORAGE_FAILING
+    release.set()
+    assert await retry is False
+
+
 async def test_writes_given_up_are_reported(session, fake):
     await connected(session)
     session.writer.backoff_min_s = session.writer.backoff_max_s = 0.01

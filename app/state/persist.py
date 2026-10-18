@@ -55,6 +55,12 @@ class DebouncedPersister[K: Hashable, V]:
     def is_pending(self, key: K) -> bool:
         return key in self._pending
 
+    @property
+    def failing(self) -> bool:
+        """Whether some key's last write failed and no write has succeeded since, including while a retry is in
+        flight (the key is briefly not pending then)."""
+        return any(n > 0 for n in self._failures.values())
+
     def failures(self, key: K) -> int:
         """Consecutive failed writes for ``key`` (0 once a write succeeds)."""
         return self._failures.get(key, 0)

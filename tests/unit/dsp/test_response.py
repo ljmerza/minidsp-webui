@@ -96,6 +96,30 @@ def test_float32_deviation_small_for_ordinary_peq():
     assert r.filter_response([d.peaking(1000, 1, 6)], float32=False).float32_deviation_db < 1e-4
 
 
+def test_peak_gain_covers_dc_and_above_24khz():
+    # A Linkwitz Transform to 5 Hz peaks at DC: +32.9 dB with float32 coefficients, though only +21.6 dB at 5 Hz.
+    lt = d.linkwitz_transform(25, 0.7, 5, 0.5)
+    dc = 20 * np.log10(abs(r.cascade_tf([lt], np.array([0.0])).h[0]))
+    assert dc == pytest.approx(32.87, abs=0.05)
+    assert r.peak_gain_db([lt]) == pytest.approx(dc, abs=1e-9)
+    # Resonances above 24 kHz (up to Nyquist) count too.
+    assert r.peak_gain_db([d.peaking(40000, 2, 60)]) == pytest.approx(60, abs=0.01)
+    assert r.peak_gain_db([d.high_shelf(40000, 0.7071, 40)]) == pytest.approx(40, abs=0.01)
+    # A very sharp peak is caught at its pole angle, not just wherever the grid happens to fall.
+    assert r.peak_gain_db([d.peaking(30000, 30, 12)]) == pytest.approx(12, abs=0.01)
+    assert r.peak_gain_db([d.peaking(1000, 1, 6)]) == pytest.approx(6, abs=1e-3)
+
+
+def test_float32_deviation_is_judged_on_the_full_band():
+    # Float32 rounding lifts that LT's DC gain ~4.9 dB above the float64 design, all of it below the 5 Hz plot edge.
+    lt = d.linkwitz_transform(25, 0.7, 5, 0.5)
+    resp = r.filter_response([lt])
+    assert resp.float32_deviation_db > 4.5
+    assert "float32" in resp.warnings[0]
+    # The same holds on a zoomed grid that never gets near DC.
+    assert r.filter_response([lt], r.view_grid("full")).float32_deviation_db == pytest.approx(resp.float32_deviation_db)
+
+
 def test_float32_deviation_ignores_deep_stopband():
     exact = r.Tf(np.array([1e-8, 1.0]), np.zeros(2))
     rounded = r.Tf(np.array([2e-8, 1.0]), np.zeros(2))

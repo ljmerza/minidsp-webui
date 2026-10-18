@@ -138,8 +138,9 @@
           {%- else %}{% if c.failed %}{{ c.failed }} failed{% endif %}{% if c.pending %}{% if c.failed %}, {% endif %}{{ c.pending }} pending{% endif %}{% if c.unknown %}{% if c.failed or c.pending %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif %}
         </span>
       </a>
-      {#- Re-render the header when sync status changes (on pages whose feed carries "sync"). -#}
-      <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}" hx-trigger="sse:sync delay:500ms"
+      {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action). -#}
+      <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
+            hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"
             hx-target="#app-header" hx-swap="innerHTML"></span>
     {% else %}
     <div class="hdr-sync" title="Sync tracking starts once the stored preset state is loaded">

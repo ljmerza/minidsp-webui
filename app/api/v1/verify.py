@@ -6,9 +6,13 @@ JSON (``router``, mounted under ``/api/v1``):
 - ``POST /devices/{serial}/verify``: run a verify; ``?mark_unknown=true`` also drops the drifted paths from the shadow
   (they become "unknown"; nothing is written). ``?preset=p`` (0-based) refuses with 409 unless ``p`` is active.
 - ``GET /devices/{serial}/verify``: the last report since the app started (404 before the first run).
+- ``POST /devices/{serial}/verify/accept``: accept the device values of the last report's drifted and never-confirmed
+  items (``{"preset": p, "paths": [...]}``, all of them without ``paths``): they become the desired values and are
+  confirmed. Nothing is written to the device; a revision (source ``verify``) is committed.
 
 HTML partial (``ui_router``, mounted at the root): ``/ui/devices/{serial}/verify`` (GET: last report and the button;
-POST: run) and ``/ui/devices/{serial}/verify/mark-unknown`` (POST ``preset`` plus ``path`` fields).
+POST: run), ``/ui/devices/{serial}/verify/mark-unknown`` and ``/ui/devices/{serial}/verify/accept`` (POST ``preset``
+plus ``path`` fields).
 """
 
 import json
@@ -16,12 +20,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_session, require_same_origin
 from app.daemon.client import DaemonError, DaemonRejected, DaemonUnavailable, DeviceNotFound
 from app.daemon.rawframes import RawFrameError
 from app.sync import verify as svc
-from app.sync.session import DeviceSession, PresetSwitchInProgress, StateUnavailable
+from app.sync.session import DesiredValidationError, DeviceSession, PresetSwitchInProgress, StateUnavailable
 from app.web.sync_ui import SYNC_CHANGED, describe_path, format_value
 from app.web.ui_common import manager_of, render, url
 
@@ -84,6 +89,36 @@ async def get_verify(session: Session) -> Any:
     return report.as_json()
 
 
+class AcceptRequest(BaseModel):
+    preset: int = Field(description="The (0-based) preset of the last report; refused with 409 if it changed")
+    paths: list[str] | None = Field(
+        default=None, description="Paths to accept; default every drifted or never-confirmed path with a usable reading"
+    )
+
+
+@router.post("/devices/{serial}/verify/accept")
+async def accept_values(request: AcceptRequest, session: Session) -> Any:
+    """Make the device values of the last report the desired values, confirmed. Writes nothing to the device."""
+    report = svc.last_report(session.serial)
+    if report is None:
+        return _error(404, "not_verified", "this device has not been verified since the app started")
+    if request.preset != report.preset:
+        return _error(409, "report_changed", f"the last report is for preset {report.preset}; verify again")
+    try:
+        accepted = await svc.accept_device_values(session, report, request.paths)
+    except DesiredValidationError as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc), "error": "invalid", "problems": exc.problems})
+    except StateUnavailable as exc:
+        return _error(503, "state_unavailable", str(exc))
+    return {
+        "serial": session.serial,
+        "preset": report.preset,
+        "accepted": accepted,
+        "revision": session.revisions.get(report.preset, 0),
+        "report": report.as_json(),
+    }
+
+
 # --- HTML partial -------------------------------------------------------------------------------------------------
 
 _BADGE = {"ok": "synced", "drift": "failed", "unknown": "unknown", "unverifiable": "unknown"}
@@ -128,9 +163,11 @@ def verify_context(
         "rows": [r for r in rows if r["status"] != "unverifiable"],
         "unverifiable": [r for r in rows if r["status"] == "unverifiable"],
         "drift_paths": [i.path for i in report.drifted] if report else [],
+        "accept_paths": [i.path for i in report.acceptable] if report else [],
         "mismatch_count": len(report.mismatched) if report else 0,
         "verify_url": url(request, base),
         "mark_url": url(request, f"{base}/mark-unknown"),
+        "accept_url": url(request, f"{base}/accept"),
         "supported": svc.memory_map_for(session.profile.product_name) is not None,
         "error": error,
         "message": message,
@@ -184,5 +221,36 @@ async def verify_mark_unknown(request: Request, serial: int) -> Response:
     message = f"Marked {len(marked)} setting(s) unknown. Push them from the sync table." if marked else None
     response = render(request, "partials/verify.html", verify_context(request, session, message=message))
     if marked:
+        response.headers["HX-Trigger"] = json.dumps({SYNC_CHANGED: {"preset": report.preset}})
+    return response
+
+
+@ui_router.post("/ui/devices/{serial}/verify/accept", response_class=HTMLResponse)
+async def verify_accept(request: Request, serial: int) -> Response:
+    """Accept the device values of the last report's drifted and never-confirmed settings. Nothing is written."""
+    session = _ui_session(request, serial)
+    if isinstance(session, Response):
+        return session
+    form = await request.form()
+    report = svc.last_report(serial)
+    preset = form.get("preset")
+    if report is None or not isinstance(preset, str) or preset != str(report.preset):
+        ctx = verify_context(request, session, error="The report changed; verify again.")
+        return render(request, "partials/verify.html", ctx)
+    paths = [p for p in form.getlist("path") if isinstance(p, str)]
+    try:
+        accepted = await svc.accept_device_values(session, report, paths)
+    except (DesiredValidationError, StateUnavailable) as exc:
+        problems = exc.problems if isinstance(exc, DesiredValidationError) else [str(exc)]
+        ctx = verify_context(request, session, error="; ".join(problems))
+        return render(request, "partials/verify.html", ctx)
+    message = (
+        f"Accepted {len(accepted)} device value(s): they are now the desired values and confirmed. "
+        "Nothing was written to the device."
+        if accepted
+        else None
+    )
+    response = render(request, "partials/verify.html", verify_context(request, session, message=message))
+    if accepted:
         response.headers["HX-Trigger"] = json.dumps({SYNC_CHANGED: {"preset": report.preset}})
     return response

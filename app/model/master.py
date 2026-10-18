@@ -1,6 +1,6 @@
 """Daemon-facing read models (device list, status) and the master-control request model."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DeviceVersion(BaseModel):
@@ -35,6 +35,12 @@ class MasterStatus(BaseModel):
     volume: float | None = None
     mute: bool | None = None
     dirac: bool | None = None
+
+    @field_validator("volume")
+    @classmethod
+    def _no_negative_zero(cls, value: float | None) -> float | None:
+        # The daemon reports 0 dB as -0.0, which would show as "-0.0" in the UI, the event log and Home Assistant.
+        return value + 0.0 if value is not None else None
 
     def merged(self, update: "MasterStatus") -> "MasterStatus":
         """Return a copy with every non-None field of ``update`` applied."""

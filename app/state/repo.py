@@ -29,7 +29,7 @@ N_PRESETS = 4
 ChannelKind = Literal["input", "output"]
 EventLevel = Literal["debug", "info", "warning", "error"]
 EVENT_LEVELS: tuple[str, ...] = ("debug", "info", "warning", "error")
-REVISION_SOURCES = frozenset({"ui", "api", "import", "profile", "adopt", "revert", "mqtt"})
+REVISION_SOURCES = frozenset({"ui", "api", "import", "profile", "adopt", "revert", "mqtt", "verify"})
 
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _FIR_DTYPE = np.dtype("<f8")

@@ -83,9 +83,12 @@ async def test_design_raw_biquads(stateless):
     data = (await stateless.post("/api/v1/dsp/design", json=body)).json()
     assert data["label"] is None and data["biquads_used"] == 4
     assert data["response"]["magnitude_db"][0] == pytest.approx(SHAKER_DB[80], abs=0.1)
-    assert data["response"]["warnings"] == []  # float32 rounding matters only near 10 Hz
+    # Float32 rounding matters only near 10 Hz, but the warning describes the device, not the plotted range: it's
+    # there even when the plot is zoomed to 80-160 Hz.
+    assert "float32" in data["response"]["warnings"][0]
     full = (await stateless.post("/api/v1/dsp/design", json={"biquads": body["biquads"]})).json()
     assert "float32" in full["response"]["warnings"][0]
+    assert full["response"]["float32_deviation_db"] == pytest.approx(data["response"]["float32_deviation_db"])
 
 
 async def test_design_float32_flag(stateless):

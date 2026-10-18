@@ -87,6 +87,15 @@ describe('stability', () => {
     assert.equal(dsp.biquadProblem({ b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }), null);
   });
 
+  test('instability caused only by float32 rounding says so and quotes the float32 radius', () => {
+    // Low shelf 3 Hz Q 0.7071 +20 dB: float64 pole radius 0.99992 (stable), float32 rounding puts it on the circle.
+    const bq = dsp.lowShelf(3, 0.7071, 20);
+    assert.ok(dsp.poleRadius(bq.a1, bq.a2) < 1);
+    const problem = dsp.biquadProblem(bq);
+    assert.match(problem, /^unstable after float32 rounding \(device precision\): pole radius 1(\.\d+)?; raise/);
+    assert.throws(() => dsp.designFilter({ type: 'lowshelf', freq: 3, q: 0.7071, gain_db: 20 }), isDesignError(/float32/));
+  });
+
   test('pole radius', () => {
     assert.ok(Math.abs(dsp.poleRadius(0, -0.25) - 0.5) < 1e-12); // complex pair, |p|² = −a2
     assert.ok(Math.abs(dsp.poleRadius(1.5, -0.56) - 0.8) < 1e-12); // real poles 0.8, 0.7
@@ -173,6 +182,19 @@ describe('crossovers', () => {
     const r = dsp.filterResponse([...lp, ...hp]);
     assert.ok(r.float32_deviation_db > 0.1 && r.float32_deviation_db < 0.3, r.float32_deviation_db);
     assert.match(r.warnings[0], /float32 coefficient rounding moves the response by up to 0\.\d\d dB/);
+  });
+
+  test('float32 deviation is judged on the full band, not just the plotted grid (same as the server)', () => {
+    // LT 25 Hz Q 0.7 -> 5 Hz Q 0.5: float32 rounding lifts its DC gain ~4.9 dB, all of it below the 5 Hz plot edge.
+    const lt = [dsp.linkwitzTransform(25, 0.7, 5, 0.5)];
+    const r = dsp.filterResponse(lt);
+    assert.ok(r.float32_deviation_db > 4.5, r.float32_deviation_db);
+    assert.match(r.warnings[0], /float32/);
+    const zoomed = dsp.filterResponse(lt, dsp.freqGrid(10, 20000));
+    assert.ok(Math.abs(zoomed.float32_deviation_db - r.float32_deviation_db) < 1e-9);
+    const grid = dsp.fullBandGrid();
+    assert.equal(grid[0], 0);
+    assert.equal(grid[grid.length - 1], 48000);
   });
 });
 

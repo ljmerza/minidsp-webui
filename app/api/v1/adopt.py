@@ -78,6 +78,8 @@ async def adopt(request: AdoptRequest, session: Session) -> dict:
         "known": result.known,
         "unknown": result.unknown,
         "writes": result.writes,
+        "read_back": result.read_back,
+        "read_error": result.read_error,
         "flush": flush_json(result.flush),
         "warnings": [{"line": w.line, "text": w.text, "message": w.message} for w in result.warnings],
         "summary": session.sync_summary(result.preset),

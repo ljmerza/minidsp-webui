@@ -3,17 +3,22 @@ shadow (docs 03 §9, docs 08 Phase 6). Read-only: it never writes to the device.
 
 What can be read back (spike results 0.2, 0.8 and the compressor table):
 
-- gains (dB, quantized and biased low by up to ~0.36 dB, so compared with `GAIN_TOLERANCE_DB`), mute gates,
+- gains (dB, quantized and biased low by up to ~0.36 dB, never high, so a reading may sit up to `GAIN_TOLERANCE_DB`
+  below the sent value but at most `GAIN_EXCESS_TOLERANCE_DB` above it), mute gates,
   delay (whole samples), output polarity, PEQ and crossover coefficients (bit-exact float32) and the compressor
   threshold (plain float32 dB).
 - Not readable, reported as unverifiable: every bypass flag (PEQ, crossover, compressor, FIR), the routing matrix
-  (its status registers read 1 whatever was written), compressor ratio/attack/release (always read 0) and FIR taps.
+  (the enable status registers read 1 whatever was written; the routing gain registers were never checked against
+  a write), compressor ratio/attack/release (always read 0) and FIR taps.
 
 Only the active preset can be verified: DSP memory holds the active preset only. Paths the shadow doesn't know are
 compared with the desired value and reported as ``unknown``; if any of them differ the report's status is ``mismatch``,
 and with nothing confirmed at all it is ``unverified`` (``ok`` needs at least one confirmed setting). Optionally the
 drifted paths are marked unknown in the shadow (`DeviceWriter.invalidate`), which writes nothing; the user then pushes
-them from the sync table.
+them from the sync table, or accepts the device values (`accept_device_values`: they become the desired values and are
+confirmed, nothing is written).
+
+The same reads re-confirm the shadow after a reconnect (`reconfirm`) and seed an adopt with "trust" (`read_back`).
 
 Each run logs one event and publishes a ``verify`` bus event; `drift_discovery` / `drift_state` turn those into a Home
 Assistant drift sensor. `nightly_verify_loop` runs it once a night.
@@ -54,7 +59,9 @@ log = logging.getLogger(__name__)
 
 VERIFY = "verify"  # bus topic
 
-GAIN_TOLERANCE_DB = 0.5
+GAIN_TOLERANCE_DB = 0.5  # how far below the sent value the device may read (its quantization only ever reads low)
+# How far above: none from the device, only the 0.01 dB rounding of an accepted reading (`device_value`) and float32.
+GAIN_EXCESS_TOLERANCE_DB = 0.01
 # D_GAIN reads exactly this after a gain below about -100 dB was written (spike 0.2): out of range, maybe dangerous.
 GAIN_UNDERFLOW_READBACK_DB = 6.287154
 THRESHOLD_TOLERANCE_DB = 1e-3
@@ -63,6 +70,7 @@ _BIQUAD_KEYS = ("b0", "b1", "b2", "a1", "a2")
 
 UNVERIFIABLE_BYPASS = "bypass state has no readable register"
 UNVERIFIABLE_ROUTING = "routing status registers read the same whatever was written"
+UNVERIFIABLE_ROUTING_GAIN = "routing gain registers have never been checked against a write, so they aren't trusted"
 UNVERIFIABLE_COMPRESSOR = "write-only: reads back 0 whatever was written"
 UNVERIFIABLE_COMPRESSOR_BYPASS = "the status register reads a factory value the API can't write back"
 UNVERIFIABLE_FIR = "FIR taps and state are not read back"
@@ -146,6 +154,8 @@ def _input_probe(mmap: MemoryMap, ch: int, rest: list[str]) -> Probe | str:
             return Probe("gain", mmap.input_gain[ch])
         case ["mute"]:
             return Probe("gate", mmap.input_gate[ch])
+        case ["routing", _, "gain_db"]:
+            return UNVERIFIABLE_ROUTING_GAIN
         case ["routing", *_]:
             return UNVERIFIABLE_ROUTING
         case ["peq", band, key]:
@@ -226,7 +236,8 @@ def matches(probe: Probe, decoded: Decoded, expected: Any, profile: DeviceProfil
     try:
         match probe.kind:
             case "gain":
-                return abs(decoded.actual - float(expected)) <= GAIN_TOLERANCE_DB
+                delta = decoded.actual - float(expected)
+                return -GAIN_TOLERANCE_DB <= delta <= GAIN_EXCESS_TOLERANCE_DB
             case "threshold":
                 return abs(decoded.actual - float(expected)) <= THRESHOLD_TOLERANCE_DB
             case "gate" | "invert":
@@ -238,6 +249,32 @@ def matches(probe: Probe, decoded: Decoded, expected: Any, profile: DeviceProfil
     except (TypeError, ValueError, KeyError, OverflowError):
         return False
     return False
+
+
+def device_value(item: "VerifyItem") -> Any:
+    """The document value a read item says the device holds, or None when the register holds nothing usable (an
+    invalid value, or the readback of a gain below about -100 dB). Gains are rounded to 0.01 dB: the readback is
+    quantized, so more digits would only be noise."""
+    if item.status == ItemStatus.UNVERIFIABLE or item.actual is None or item.note:
+        return None
+    if item.path.endswith(".gain_db") and isinstance(item.actual, float):
+        return round(item.actual, 2)
+    return item.actual
+
+
+def accepted_values(items: Iterable["VerifyItem"], desired: Mapping[str, Any]) -> dict[str, Any]:
+    """Document value per readable item: the desired value where the device holds it (within the readback tolerance,
+    so a recognized design and full-precision coefficients survive), else the decoded device value. Items without a
+    usable reading are left out."""
+    out: dict[str, Any] = {}
+    for item in items:
+        if item.status == ItemStatus.UNVERIFIABLE:
+            continue
+        if item.matches_desired and item.path in desired:
+            out[item.path] = desired[item.path]
+        elif (value := device_value(item)) is not None:
+            out[item.path] = value
+    return out
 
 
 def _hint(probe: Probe, decoded: Decoded) -> str | None:
@@ -295,6 +332,7 @@ class VerifyReport:
     items: list[VerifyItem] = field(default_factory=list)
     source: str = "ui"
     marked_unknown: list[str] = field(default_factory=list)
+    accepted: list[str] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -312,6 +350,13 @@ class VerifyReport:
         """Unknown paths whose device value differs from the desired one (e.g. after a power cycle invalidated the
         shadow): not drift from what the app wrote, but the device doesn't hold the desired config either."""
         return [i for i in self.items if i.status == ItemStatus.UNKNOWN and i.matches_desired is False]
+
+    @property
+    def acceptable(self) -> list[VerifyItem]:
+        """Drifted and never-confirmed items with a usable reading: their device values can be accepted."""
+        return [
+            i for i in self.items if i.status in (ItemStatus.DRIFT, ItemStatus.UNKNOWN) and device_value(i) is not None
+        ]
 
     @property
     def status(self) -> str:
@@ -332,7 +377,7 @@ class VerifyReport:
             case "drift":
                 head += f"{c['drift']} setting(s) differ from what the app last wrote"
             case "mismatch":
-                head += f"{len(self.mismatched)} never-confirmed setting(s) differ from the desired value"
+                head += f"no drift; {len(self.mismatched)} never-confirmed setting(s) differ from the desired value"
             case "unverified":
                 head += "nothing verified, no setting is confirmed on the device"
             case _:
@@ -365,6 +410,8 @@ class VerifyReport:
             "duration_ms": round(self.duration_ms, 1),
             "reads": self.reads,
             "marked_unknown": self.marked_unknown,
+            "accepted": self.accepted,
+            "acceptable": [i.path for i in self.acceptable],
             "items": [i.as_json() for i in self.items],
         }
 
@@ -427,6 +474,88 @@ def build_items(
     return items
 
 
+@dataclass
+class Readback:
+    """One read of the active preset: the shadow and desired values it was taken against, and the raw blocks."""
+
+    preset: int
+    applied: dict[str, Any]
+    values: dict[str, Any]
+    probes: dict[str, Probe]
+    unreadable: dict[str, str]
+    blocks: list[FloatData]
+    reads: int
+    started: float
+    checked_at: str
+
+    def items(
+        self,
+        profile: DeviceProfile,
+        *,
+        values: Mapping[str, Any] | None = None,
+        applied: Mapping[str, Any] | None = None,
+    ) -> list[VerifyItem]:
+        """Items compared against the shadow and desired values of the read, or the given ones."""
+        return build_items(
+            self.values if values is None else values,
+            self.applied if applied is None else applied,
+            self.probes,
+            self.unreadable,
+            self.blocks,
+            profile,
+        )
+
+    def report(self, session: DeviceSession, items: list[VerifyItem], *, source: str) -> VerifyReport:
+        return VerifyReport(
+            serial=session.serial,
+            preset=self.preset,
+            checked_at=self.checked_at,
+            duration_ms=(monotonic() - self.started) * 1000,
+            reads=self.reads,
+            items=items,
+            source=source,
+        )
+
+
+async def _read(
+    session: DeviceSession, reader_factory: ReaderFactory | None, *, values: Mapping[str, Any] | None = None
+) -> Readback:
+    """Read the active preset's readable registers (of ``values``' paths, default the preset's device paths). The
+    caller holds `_lock`."""
+    mmap = memory_map_for(session.profile.product_name)
+    if mmap is None:
+        raise VerifyUnsupported(f"readback is not supported on the {session.profile.product_name}")
+    await session.ensure_loaded()
+    if session.preset_switching is not None:
+        raise PresetSwitchInProgress(f"preset switch to {session.preset_switching} in progress")
+    preset = await session.active_preset(max_age_s=0)
+    index = session.daemon_index if session.daemon_index is not None else await session.resolve_index()
+    url = raw_ws_url(session.client.base_url, index)
+    factory = reader_factory or session.raw_reader_factory or RawFrameReader
+    started = monotonic()
+    checked_at = datetime.now(UTC).isoformat(timespec="seconds")
+    async with factory(url) as reader:
+        # No writes may land between the snapshot of the shadow and the reads (an app preset switch waits too).
+        async with session.writer.paused():
+            if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
+                raise VerifyError("the active preset changed; try again")
+            state = session.writer.state(preset)
+            applied = dict(state.applied)
+            current = dict(state.values(session.profile))
+            probes, unreadable, reads = plan(current if values is None else values, mmap)
+            blocks = await reader.read_many(reads)
+            if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
+                raise VerifyError("the active preset changed while reading; try again")
+            # The cached preset only follows other clients' switches (CLI, front panel) on the monitor's poll,
+            # so ask the daemon again before trusting the reads.
+            if await session.active_preset(max_age_s=0) != preset:
+                raise VerifyError("the active preset changed while reading; try again")
+        read_count = reader.reads
+    return Readback(
+        preset, applied, current, probes, unreadable, list(blocks.values()), read_count, started, checked_at
+    )
+
+
 async def verify_device(
     session: DeviceSession,
     *,
@@ -441,50 +570,94 @@ async def verify_device(
     while reading) and `DaemonError` subclasses (`RawFrameError` for bridge problems). Nothing is written to the
     device; with ``mark_unknown`` the drifted paths are dropped from the shadow so the sync table offers to push them.
     """
-    mmap = memory_map_for(session.profile.product_name)
-    if mmap is None:
-        raise VerifyUnsupported(f"readback is not supported on the {session.profile.product_name}")
     async with _lock(session):
-        await session.ensure_loaded()
-        if session.preset_switching is not None:
-            raise PresetSwitchInProgress(f"preset switch to {session.preset_switching} in progress")
-        preset = await session.active_preset(max_age_s=0)
-        index = session.daemon_index if session.daemon_index is not None else await session.resolve_index()
-        url = raw_ws_url(session.client.base_url, index)
-        factory = reader_factory or RawFrameReader
-        started = monotonic()
-        checked_at = datetime.now(UTC).isoformat(timespec="seconds")
-        async with factory(url) as reader:
-            # No writes may land between the snapshot of the shadow and the reads (an app preset switch waits too).
-            async with session.writer.paused():
-                if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
-                    raise VerifyError("the active preset changed; try again")
-                state = session.writer.state(preset)
-                applied = dict(state.applied)
-                values = dict(state.values(session.profile))
-                probes, unreadable, reads = plan(values, mmap)
-                blocks = await reader.read_many(reads)
-                if session.preset_switching is not None or _cached_preset(session) not in (None, preset):
-                    raise VerifyError("the active preset changed while reading; try again")
-                # The cached preset only follows other clients' switches (CLI, front panel) on the monitor's poll,
-                # so ask the daemon again before trusting the reads.
-                if await session.active_preset(max_age_s=0) != preset:
-                    raise VerifyError("the active preset changed while reading; try again")
-            read_count = reader.reads
-        items = build_items(values, applied, probes, unreadable, blocks.values(), session.profile)
-        report = VerifyReport(
-            serial=session.serial,
-            preset=preset,
-            checked_at=checked_at,
-            duration_ms=(monotonic() - started) * 1000,
-            reads=read_count,
-            items=items,
-            source=source,
-        )
+        read = await _read(session, reader_factory)
+        report = read.report(session, read.items(session.profile), source=source)
         if mark_unknown and report.drifted:
-            report.marked_unknown = mark_drift_unknown(session, preset, [i.path for i in report.drifted])
+            report.marked_unknown = mark_drift_unknown(session, read.preset, [i.path for i in report.drifted])
         _record(session, report, persist=persist_ok or report.status in _WARN_STATES)
         return report
+
+
+async def reconfirm(
+    session: DeviceSession, *, power_cycle: bool, reader_factory: ReaderFactory | None = None
+) -> VerifyReport:
+    """After the device stream reconnected: verify the active preset and settle its shadow from the reads.
+
+    Readable paths that hold the shadow's value stay confirmed, unknown ones that hold the desired value become
+    confirmed and drifted ones become unknown. Unreadable paths (bypass, routing, compressor timing) keep their shadow
+    unless ``power_cycle`` is plausible, then they become unknown. Nothing is written. Raises like `verify_device`.
+    """
+    async with _lock(session):
+        read = await _read(session, reader_factory)
+        items = read.items(session.profile)
+        report = read.report(session, items, source="reconnect")
+        state = session.writer.state(read.preset)
+        current = state.values(session.profile)
+        # Only act on paths nothing touched since the read (a write may have landed after it).
+        confirm = {
+            i.path: read.values[i.path]
+            for i in items
+            if i.status == ItemStatus.UNKNOWN
+            and i.matches_desired
+            and i.path not in state.applied
+            and i.path in current
+            and current[i.path] == read.values[i.path]
+        }
+        forget = [i.path for i in report.drifted if state.applied.get(i.path, _NOTHING) == i.expected]
+        if power_cycle:
+            forget += [p for p in read.unreadable if p in state.applied]
+        if forget:
+            session.writer.invalidate(read.preset, forget)
+        if confirm:
+            session.writer.confirm(read.preset, confirm)
+        _record(session, report, persist=True)
+        return report
+
+
+async def read_back(
+    session: DeviceSession, values: Mapping[str, Any], *, reader_factory: ReaderFactory | None = None
+) -> tuple[int, list[VerifyItem]]:
+    """Read the active preset for an adopt: ``(preset, items)``, every readable path compared with ``values`` (all
+    ``unknown``, ``matches_desired`` against ``values``). Nothing is recorded or changed. Raises like `verify_device`.
+    """
+    async with _lock(session):
+        read = await _read(session, reader_factory, values=values)
+    return read.preset, read.items(session.profile, values=values, applied={})
+
+
+async def accept_device_values(
+    session: DeviceSession, report: VerifyReport, paths: Iterable[str] | None = None
+) -> list[str]:
+    """Accept the device values of ``report``'s acceptable items (all, or those in ``paths``): they become the desired
+    values and are confirmed in the shadow. Nothing is written to the device. The report is updated (the items become
+    ``ok``) and published again. Returns the accepted paths. Raises `DesiredValidationError` (e.g. a gain above a
+    channel's ceiling)."""
+    chosen = None if paths is None else set(paths)
+    items = [i for i in report.acceptable if chosen is None or i.path in chosen]
+    if not items:
+        return []
+    desired = session.writer.state(report.preset).values(session.profile)
+    values = accepted_values(items, desired)
+    await session.accept_device_values(report.preset, values, summary=f"verify: accepted {len(values)} device value(s)")
+    confirmed = session.writer.state(report.preset).applied
+    accepted = set(values)
+    report.items = [
+        VerifyItem(
+            i.path,
+            ItemStatus.OK,
+            expected=confirmed.get(i.path, i.expected),
+            actual=i.actual,
+            raw=i.raw,
+            matches_desired=True,
+        )
+        if i.path in accepted
+        else i
+        for i in report.items
+    ]
+    report.accepted = sorted(set(report.accepted) | accepted)
+    _record(session, report, persist=False)
+    return sorted(accepted)
 
 
 def _cached_preset(session: DeviceSession) -> int | None:
@@ -505,6 +678,7 @@ def mark_drift_unknown(session: DeviceSession, preset: int, paths: Iterable[str]
 
 
 _WARN_STATES = ("drift", "mismatch")
+_NOTHING = object()
 
 
 def _record(session: DeviceSession, report: VerifyReport, *, persist: bool) -> None:

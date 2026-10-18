@@ -69,6 +69,23 @@ def test_float32_rounding_onto_the_unit_circle_is_unstable():
     assert not poles_stable(0.0, a2)
 
 
+def test_float32_only_instability_names_the_rounding():
+    # Low shelf 3 Hz Q 0.7071 +20 dB: stable as designed (float64 radius 0.99992), but float32 rounding puts the pole
+    # on the unit circle. The message must not quote the stable float64 radius as if it were the problem.
+    from app.dsp import design as d
+
+    bq = d.low_shelf(3, 0.7071, 20)
+    assert pole_radius(bq.a1, bq.a2) < 1
+    problem = biquad_problem(bq)
+    assert problem is not None
+    assert problem.startswith("unstable after float32 rounding (device precision): pole radius ")
+    assert "0.99992" not in problem
+    radius = float(problem.split("pole radius ")[1].split(";")[0])
+    assert radius >= 1
+    # A biquad already unstable in float64 keeps the plain message.
+    assert biquad_problem((1.0, 0.0, 0.0, 0.0, 1.5)).startswith("unstable biquad: pole radius 1.22474")
+
+
 @pytest.mark.parametrize(
     ("coeffs", "message"),
     [

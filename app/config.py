@@ -28,8 +28,11 @@ class Settings(BaseSettings):
     webui_bind: str = "0.0.0.0"
     webui_port: int = 8480
     db_path: str = "/data/minidsp-webui.sqlite3"
-    log_level: str = "info"
+    log_level: str = "warning"  # SD-card budget (docs/01): info adds startup/event lines, debug every request
     public_url: str = ""  # used for links back to the UI (e.g. HA configuration_url)
+    # Comma-separated host names the UI is reached by (IP addresses and localhost always work). Set, other names are
+    # refused, which stops DNS-rebinding pages; empty serves any Host header.
+    allowed_hosts: str = ""
 
     # Sync behaviour
     write_coalesce_ms: int = 50

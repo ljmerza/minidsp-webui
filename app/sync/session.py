@@ -55,6 +55,7 @@ from app.sync.writer import DeviceWriter, FlushResult, PresetState, SyncStatus
 log = logging.getLogger(__name__)
 
 COMMIT_IDLE_S = 5.0
+COMMIT_RETRY_MAX_S = 60.0  # a failing revision save is retried with exponential backoff up to this interval
 _FILTER_UNIT = re.compile(r"(inputs|outputs)\.(\d+)\.(peq|crossover)\.(\d+)\.")
 _FIR_UNIT = re.compile(r"outputs\.(\d+)\.fir\.")
 BULK_TIMEOUT_S = 60.0  # longest a bulk apply (push-all, import, adopt) is awaited by the caller
@@ -72,6 +73,10 @@ PENDING_KEY = "#pending"
 # Reserved key: outputs an unfinished mute-wrapped bulk apply holds muted. Restored on load, so a restart doesn't
 # un-mute them before the rest of the apply has landed.
 WRAP_KEY = "#wrap"
+# Reserved keys: a push-all (paths written whatever the shadow says) and a mute wrap that haven't run yet, e.g. staged
+# for an inactive preset. Without them a staged push-all would be forgotten on restart and the preset shown as synced.
+FORCE_KEY = "#force"
+WRAP_REQUESTED_KEY = "#wrap_requested"
 
 
 class SessionState(StrEnum):
@@ -148,6 +153,8 @@ class AdoptResult:
     writes: int  # calls sent to the daemon by the adopt itself
     flush: FlushResult | None = None
     warnings: list[ScriptIssue] = field(default_factory=list)
+    read_back: int = 0  # trust: device paths whose value was read from the device
+    read_error: str | None = None  # trust: why the active preset couldn't be read back
 
 
 @dataclass
@@ -428,6 +435,11 @@ class DeviceSession:
             on_disconnected=self._on_monitor_disconnected,
         )
         self.on_lost: Callable[[], None] | None = None  # set by SessionManager: called when the device seems gone
+        # Embedded mode: the miniDSP's USB (bus, device number) pairs, None if unknown. A re-enumeration (new device
+        # number) means the device may have been power cycled; the same numbers mean only the stream/daemon restarted.
+        self.usb_identity: Callable[[], Any] | None = None
+        self._usb_seen: Any = None
+        self.raw_reader_factory: Callable[[str], Any] | None = None  # readback's frame reader (tests swap it)
 
         self.writer = DeviceWriter(
             serial,
@@ -452,6 +464,7 @@ class DeviceSession:
         self._flat_cache: dict[int, tuple[ConfigDoc, dict[str, Any]]] = {}
         self._uncommitted: dict[int, _Uncommitted] = {}
         self._commit_timers: dict[int, asyncio.TimerHandle] = {}
+        self._commit_failures: dict[int, int] = {}  # consecutive failed revision saves per preset (retry backoff)
         self._load_lock = asyncio.Lock()
         self._edit_lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
@@ -626,14 +639,29 @@ class DeviceSession:
     async def _index(self) -> int:
         return self.daemon_index if self.daemon_index is not None else await self.resolve_index()
 
+    def _usb_now(self) -> Any:
+        if self.usb_identity is None:
+            return None
+        try:
+            return self.usb_identity()
+        except Exception:
+            log.exception("[%s] reading the USB identity failed", self.serial)
+            return None
+
     async def _on_monitor_connected(self, recovered: bool) -> None:
+        usb = self._usb_now()
+        # Only an unchanged, known USB device number rules a power cycle out (embedded mode, daemon restart).
+        power_cycle = not usb or usb != self._usb_seen
+        self._usb_seen = usb
         self.set_state(SessionState.CONNECTED, force_event=True)
         if recovered:
             self.log_event("warning", "device stream reconnected", kind="reconnect")
-            self._spawn(self._handle_reconnect(), "reconnect")
+            self._spawn(self._handle_reconnect(power_cycle=power_cycle), "reconnect")
 
-    async def _handle_reconnect(self) -> None:
-        """Possibly a power cycle (docs 03 §8): the active preset's shadow becomes unknown, then optionally re-apply."""
+    async def _handle_reconnect(self, *, power_cycle: bool = True) -> None:
+        """The stream reconnected (docs 03 §8): read the active preset back and settle its shadow from the reads
+        (`verify.reconfirm`). Unreadable settings become unknown only if a power cycle is plausible. Without a
+        readback the whole shadow of the active preset becomes unknown. Then optionally re-apply."""
         try:
             await self.ensure_loaded()
             active = await self.active_preset(max_age_s=0)
@@ -642,17 +670,40 @@ class DeviceSession:
             self.writer.kick()
             return
         await self.record_device(touch=True)
-        self.writer.invalidate(active)
         if not self.settings.reapply_on_reconnect:
-            self.log_event(
-                "warning",
-                f"device reconnected: preset {active + 1} marked unknown "
-                "(use push-all if the device lost its settings)",
-                kind="reconnect",
-                preset=active,
-            )
+            from app.sync import verify  # verify builds on this module
+
+            try:
+                report = await verify.reconfirm(self, power_cycle=power_cycle)
+            except (DaemonError, RuntimeError) as exc:
+                self.writer.invalidate(active)
+                self.log_event(
+                    "warning",
+                    f"device reconnected: preset {active + 1} could not be read back ({exc}) and is marked unknown "
+                    "(use push-all if the device lost its settings)",
+                    kind="reconnect",
+                    preset=active,
+                )
+            else:
+                counts = report.counts
+                matched = sum(1 for i in report.items if i.status == "unknown" and i.matches_desired)
+                kept = (
+                    "marked unknown (the device may have been power cycled; use push-all if it lost its settings)"
+                    if power_cycle
+                    else "kept (only the daemon or the stream restarted)"
+                )
+                self.log_event(
+                    "warning" if power_cycle or report.drifted else "info",
+                    f"device reconnected: preset {report.preset + 1} read back: {counts['ok'] + matched} confirmed, "
+                    f"{len(report.drifted)} drifted (now unknown), {counts['unknown'] - matched} unknown; "
+                    f"{counts['unverifiable']} unreadable setting(s) {kept}",
+                    kind="reconnect",
+                    preset=report.preset,
+                    power_cycle=power_cycle,
+                )
             self.writer.kick()
             return
+        self.writer.invalidate(active)
         self.log_event("warning", f"device reconnected: re-applying preset {active + 1}", kind="reconnect")
         self.writer.kick()
         try:
@@ -924,6 +975,10 @@ class DeviceSession:
             applied[PENDING_KEY] = pending
         if state.wrap:
             applied[WRAP_KEY] = sorted(state.wrap)
+        if state.force:
+            applied[FORCE_KEY] = sorted(state.force)
+        if state.wrap_requested:
+            applied[WRAP_REQUESTED_KEY] = True
         statuses = self.writer.status(preset)
         unknown = [p for p, status in statuses.items() if status == SyncStatus.UNKNOWN]
         return applied, unknown
@@ -974,6 +1029,8 @@ class DeviceSession:
             doc, applied, unknown, revision, baseline = default_config_doc(self.profile), {}, [], 0, None
             pending: list[str] = []
             wrap: list[int] = []
+            force: list[str] = []
+            wrap_requested = False
             row = rows.get(preset)
             if row is not None:
                 revision = row.revision
@@ -995,14 +1052,20 @@ class DeviceSession:
                     stored_applied = dict(row.applied or {})
                     stored_pending = stored_applied.pop(PENDING_KEY, [])
                     stored_wrap = stored_applied.pop(WRAP_KEY, [])
+                    stored_force = stored_applied.pop(FORCE_KEY, [])
+                    wrap_requested = stored_applied.pop(WRAP_REQUESTED_KEY, False) is True
                     applied = {p: v for p, v in stored_applied.items() if p in values}
                     unknown = row.unknown_paths
                     if isinstance(stored_pending, list):
                         pending = [p for p in stored_pending if p in values and p not in applied]
                     if isinstance(stored_wrap, list):
                         wrap = [n for n in stored_wrap if isinstance(n, int) and not isinstance(n, bool)]
+                    if isinstance(stored_force, list):
+                        force = [p for p in stored_force if isinstance(p, str) and p in values]
                     baseline = await self._load_baseline(preset, revision) or doc
-            self.writer.attach(preset, doc, applied=applied, unknown=unknown, wrap=wrap)
+            self.writer.attach(
+                preset, doc, applied=applied, unknown=unknown, wrap=wrap, force=force, wrap_requested=wrap_requested
+            )
             if wrap:
                 self.log_event(
                     "warning",
@@ -1503,8 +1566,10 @@ class DeviceSession:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
+        failures = self._commit_failures.get(preset, 0)
+        delay = min(self.commit_idle_s * 2**failures, max(COMMIT_RETRY_MAX_S, self.commit_idle_s))
         self._commit_timers[preset] = loop.call_later(
-            self.commit_idle_s, lambda: self._spawn(self._commit_quietly(preset), "idle-commit")
+            delay, lambda: self._spawn(self._commit_quietly(preset), "idle-commit")
         )
 
     async def _commit_quietly(self, preset: int) -> None:
@@ -1548,9 +1613,14 @@ class DeviceSession:
                     )
                 except Exception as exc:
                     self._uncommitted.setdefault(preset, pending or _Uncommitted(origin, summary))
+                    failures = self._commit_failures.get(preset, 0)
+                    self._commit_failures[preset] = failures + 1
                     self._arm_commit_timer(preset)
-                    self.log_event("error", f"saving a revision of preset {preset + 1} failed: {exc}", persist=False)
+                    # Only the first failure of a streak is an error; the backed-off retries log at debug.
+                    level = "error" if failures == 0 else "debug"
+                    self.log_event(level, f"saving a revision of preset {preset + 1} failed: {exc}", persist=False)
                     raise StateUnavailable(f"saving the revision failed: {exc}") from exc
+                self._commit_failures.pop(preset, None)
             elif paths or force:
                 revision += 1
             self.revisions[preset] = revision
@@ -1647,13 +1717,17 @@ class DeviceSession:
         confirm_defaults: bool = False,
         trust_all: bool = False,
         timeout: float | None = BULK_TIMEOUT_S,
+        read_back: bool = True,
     ) -> AdoptResult:
         """Adopt the device (docs 03 §8). The starting document is a CLI script applied to defaults, an explicit
         doc, or the defaults. Then:
 
-        - ``trust``: the shadow says the device holds it, nothing is written. For a script only the paths the script
-          sets are trusted (everything else stays unknown) unless ``trust_all``. Trusting the defaults (no script, no
-          doc) claims the device is flat, which is rarely true and later un-bypasses whatever is really there, so it
+        - ``trust``: the shadow says the device holds it, nothing is written. If the preset is active (and
+          ``read_back``) its readable settings are read from the device first: they come from the reads (desired and
+          confirmed; a reading that holds the starting value keeps it) and only the unreadable ones (bypass flags,
+          routing, compressor timing) from the starting document. For a script only the unreadable paths the script
+          sets are trusted (the rest stay unknown) unless ``trust_all``. Trusting the defaults (no script, no doc)
+          claims the device is flat, which is rarely true and later un-bypasses whatever is really there, so it
           needs ``confirm_defaults`` (docs 05 §8 adopt guard).
         - ``push``: write all of it, mute-wrapped. Destructive, so it needs ``confirm``.
         - ``unknown``: nothing is known and nothing is written.
@@ -1698,10 +1772,26 @@ class DeviceSession:
                 "(unity gains, no delay, every filter bypassed); import a script instead, or repeat with "
                 "confirm_defaults if the device really is at factory defaults"
             )
+        readings, read_error = None, None
+        if mode == AdoptMode.TRUST and read_back:
+            readings, read_error = await self._adopt_readings(preset, new)
 
         async with self._edit_lock:
             old = self.writer.state(preset).desired
             new = self._normalize(old, new)
+            readable: set[str] = set()
+            seeded: dict[str, Any] = {}
+            if readings is not None:
+                from app.sync import verify  # verify builds on this module
+
+                start = device_values(new, self.profile)
+                readable = {i.path for i in readings if i.status != verify.ItemStatus.UNVERIFIABLE}
+                seeded = verify.accepted_values(readings, start)
+                differs = {p: v for p, v in seeded.items() if p in start and start[p] != v}
+                for path, value in differs.items():
+                    new = set_path(new, path, value)
+                if differs:
+                    new = await asyncio.to_thread(annotate_designs, new)
             problems = validate_doc(new, self.profile)
             if problems:
                 raise DesiredValidationError("invalid settings", problems)
@@ -1716,7 +1806,9 @@ class DeviceSession:
             values = device_values(new, self.profile)
             if mode == AdoptMode.TRUST:
                 trusted = values if parsed is None or trust_all else parsed.device_paths
-                known = {p: values[p] for p in trusted if p in values}
+                # Readable paths are known from the reads only (one without a usable reading stays unknown).
+                known = {p: values[p] for p in trusted if p in values and p not in readable}
+                known.update({p: values[p] for p in seeded if p in values})
             else:
                 known = {}
             before = self.writer.writes_sent
@@ -1735,18 +1827,32 @@ class DeviceSession:
         n_known = sum(1 for p in values if p in self.writer.state(preset).applied)
         self.log_event(
             "info",
-            f"adopted preset {preset + 1} ({mode}): {n_known} known, {len(values) - n_known} unknown, "
-            f"{writes} write(s)",
+            f"adopted preset {preset + 1} ({mode}): {n_known} known ({len(seeded)} read from the device), "
+            f"{len(values) - n_known} unknown, {writes} write(s)",
             kind="adopt",
             preset=preset,
             mode=str(mode),
             writes=writes,
+            read_back=len(seeded),
         )
-        if trusting_defaults:
+        if read_error is not None:
             self.log_event(
                 "warning",
-                f"adopt: confirmed that preset {preset + 1} on the device is at factory defaults; trusted without "
-                "reading it",
+                f"adopt: preset {preset + 1} could not be read back ({read_error}); trusted without reading it",
+                kind="adopt",
+                preset=preset,
+                mode=str(mode),
+            )
+        if trusting_defaults:
+            what = (
+                "its readable settings were read from the device, the unreadable ones (bypass flags, routing, "
+                "compressor timing) trusted as defaults"
+                if readings is not None
+                else "trusted without reading it"
+            )
+            self.log_event(
+                "warning",
+                f"adopt: confirmed that preset {preset + 1} on the device is at factory defaults; {what}",
                 kind="adopt",
                 preset=preset,
                 mode=str(mode),
@@ -1763,7 +1869,69 @@ class DeviceSession:
             writes=writes,
             flush=flush,
             warnings=list(parsed.warnings) if parsed else [],
+            read_back=len(seeded),
+            read_error=read_error,
         )
+
+    async def _adopt_readings(self, preset: int, doc: ConfigDoc) -> tuple[list[Any] | None, str | None]:
+        """Read ``preset`` back for a trust adopt: ``(items compared with doc, None)``, or ``(None, why not)``. An
+        inactive preset can't be read (DSP memory holds the active one only); that is not an error."""
+        from app.sync import verify  # verify builds on this module
+
+        try:
+            if await self.active_preset() != preset:
+                return None, None
+            read_preset, items = await verify.read_back(self, device_values(doc, self.profile))
+        except (DaemonError, RuntimeError) as exc:
+            return None, str(exc) or type(exc).__name__
+        if read_preset != preset:
+            return None, "the active preset changed while reading"
+        return items, None
+
+    async def accept_device_values(
+        self, preset: int, values: Mapping[str, Any], *, summary: str | None = None
+    ) -> EditResult:
+        """The device holds ``values`` (device path -> document value, read back by verify): make them the desired
+        values and confirm them in the shadow, then commit a revision (source ``verify``). Nothing is written to the
+        device. Raises `DesiredValidationError` for invalid values or gains above a channel's ceiling."""
+        await self._ready(preset)
+        async with self._edit_lock:
+            state = self.writer.state(preset)
+            old = new = state.desired
+            current = state.values(self.profile)
+            differs = {p: v for p, v in values.items() if current.get(p, _MISSING) != v}
+            try:
+                for path, value in differs.items():
+                    new = set_path(new, path, value)
+            except (PathError, ValidationError) as exc:
+                raise DesiredValidationError(f"the device values can't be applied: {exc}") from None
+            if differs:
+                new = await asyncio.to_thread(annotate_designs, new)
+            if problems := validate_doc(new, self.profile):
+                raise DesiredValidationError("invalid settings", problems)
+            if ceilings := self._ceiling_problems(new):
+                raise DesiredValidationError(
+                    "gains above a channel's ceiling (raise the ceiling in Settings if the device really has them)",
+                    ceilings,
+                )
+            device = device_values(new, self.profile)
+            old_flat, new_flat = self._flat(preset, old), flatten(new)
+            paths = [p for p, v in new_flat.items() if old_flat.get(p, _MISSING) != v]
+            self._flat_cache[preset] = (new, new_flat)
+            self.writer.confirm(preset, {p: device[p] for p in values if p in device}, desired=new)
+            self._schedule_persist(preset)
+            if paths:
+                self._mark_uncommitted(preset, "verify", summary)
+                self._publish_desired(preset, new, paths, "verify", flat=new_flat)
+        revision = await self.commit(preset) if paths else self.revisions.get(preset, 0)
+        self.log_event(
+            "info",
+            f"verify: accepted {len(values)} device value(s) on preset {preset + 1} ({len(paths)} desired setting(s) "
+            "changed); nothing was written",
+            kind="verify",
+            preset=preset,
+        )
+        return EditResult(preset, revision, new, paths, [])
 
     def _defaults_for_push(self) -> ConfigDoc:
         """docs 03 §8 option 2: the defaults with every unused output muted. An output counts as used once it has a
@@ -1838,6 +2006,7 @@ class SessionManager:
         self.daemon_version: str | None = None
         self._version_read = False
         self.last_error: str | None = None
+        self.usb_identity: Callable[[], Any] | None = None  # embedded mode: handed to each session
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
 
@@ -1918,6 +2087,7 @@ class SessionManager:
                     repo=self.repo,
                 )
                 session.on_lost = self.request_rescan
+                session.usb_identity = self.usb_identity
                 self.sessions[serial] = session
                 session.set_state(SessionState.CONNECTED)
                 session.log_event("info", f"found {device.product_name} at daemon index {index}")

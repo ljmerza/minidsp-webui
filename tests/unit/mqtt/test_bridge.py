@@ -385,6 +385,38 @@ async def test_commands_for_one_entity_coalesce(bridge, daemon, session):
     assert sent == [-21.0, -24.0]
 
 
+async def test_command_workers_do_not_accumulate(bridge, daemon):
+    """Every (serial, entity) worker is dropped once its queue is empty, and unknown devices never get one, so junk
+    command topics can't grow memory for the life of the process."""
+    daemon.post("/devices/0").respond(json=MASTER_JSON)
+    bridge.submit_command(SERIAL, "volume", "-21")
+    for n in range(20):
+        bridge.submit_command(SERIAL, f"junk_{n}", "x")
+        bridge.submit_command(SERIAL + 1 + n, "volume", "-21")
+    await until(lambda: not bridge._cmd_workers)
+    bridge.submit_command(SERIAL, "volume", "-22")  # a later command still gets a fresh worker
+    await until(lambda: not bridge._cmd_workers)
+
+
+async def test_huge_serial_in_a_command_topic_keeps_the_connection(bridge, broker, daemon):
+    route = daemon.post("/devices/0").respond(json={**MASTER_JSON, "mute": True})
+    broker.send(f"{BASE}/{'9' * 5000}/cmd/mute", "ON")
+    broker.send(f"{BASE}/{SERIAL}/cmd/mute", "ON")
+    await until(lambda: route.called)
+    assert bridge.connected.is_set() and bridge.last_error is None
+
+
+async def test_rejection_event_is_bounded(bridge, bus):
+    """A rejected command is persisted in the event log: a huge payload or topic must not be copied in whole."""
+    logs = bus.subscribe([LOG])
+    assert await bridge.handle_command(SERIAL, "volume", "x" * 50_000) is False
+    assert await bridge.handle_command(SERIAL, "y" * 50_000, "1") is False
+    for _ in range(2):
+        event = logs.get_nowait()
+        assert "rejected" in event.data["message"] and len(event.data["message"]) < 400
+        assert len(event.data["entity"]) <= 64
+
+
 # --- connection lifecycle -----------------------------------------------------------------------------------------
 
 

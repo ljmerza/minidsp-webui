@@ -14,6 +14,7 @@ from app.daemon.embedded import (
     _denied_detail,
     health_fields,
     health_problems,
+    usb_identity,
     usb_status,
 )
 
@@ -174,6 +175,12 @@ def test_failed_daemon_is_a_problem():
     assert problems == ["embedded minidspd is failing: minidspd exited (exit code 1)"]
 
 
+def test_listener_error_of_a_running_daemon_is_a_problem():
+    error = "minidspd: HTTP/TCP listener error: Cannot assign requested address (os error 99)"
+    problems = health_problems(_fields(daemon_process_error=error), device_connected=False)
+    assert problems == [f"embedded minidspd is running but unreachable: {error}"]
+
+
 def test_usb_problem_only_while_no_device_is_connected():
     fields = _fields(usb_access="denied", usb_detail="/dev/bus/usb/001/004 is visible but not openable (EACCES)")
     assert health_problems(fields, device_connected=False) == [
@@ -185,3 +192,14 @@ def test_usb_problem_only_while_no_device_is_connected():
 def test_mock_mode_without_usb_is_fine():
     fields = _fields(daemon_mock=True, usb_access="not_mounted", usb_detail="/dev/bus/usb isn't mounted")
     assert health_problems(fields, device_connected=False) == []
+
+
+def test_usb_identity_changes_only_on_re_enumeration(roots):
+    _dev_root, sys_root = roots
+    assert usb_identity(sys_root) is None  # no sysfs: can't tell
+    add_sysfs_device(sys_root, "usb1", "1d6b", 1, 1, "root hub")
+    assert usb_identity(sys_root) == ()  # no miniDSP plugged in
+    add_sysfs_device(sys_root, "1-1.3", "2752", 1, 4)
+    assert usb_identity(sys_root) == ((1, 4),)
+    (sys_root / "1-1.3" / "devnum").write_text("5\n")  # power cycled: the kernel hands out a new number
+    assert usb_identity(sys_root) == ((1, 5),)

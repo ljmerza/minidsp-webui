@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import logging
+import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,13 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__, web
 from app.api import v1
 from app.api.errors import register_exception_handlers
+from app.api.hosts import AllowedHostsMiddleware, parse_allowed_hosts
 from app.api.limits import BodyLimitMiddleware
 from app.api.v1 import verify as verify_api
 from app.api.v1.health import full_health_report
 from app.bus import Bus
 from app.config import Settings, get_settings
-from app.daemon.client import DaemonClient
-from app.daemon.embedded import DaemonSupervisor, EmbeddedOptions, UsbProbe
+from app.daemon.client import DaemonClient, DaemonError
+from app.daemon.embedded import DaemonSupervisor, EmbeddedOptions, UsbProbe, UsbWatcher, usb_identity
 from app.mqtt import create_bridge
 from app.state import Database, Repo
 from app.sync.backup import apply_staged_restore, start_nightly_backups
@@ -54,7 +57,11 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Embedded mode (docs/11) starts the bundled minidspd first and stops it last, also when startup fails."""
-        supervisor = DaemonSupervisor(EmbeddedOptions.from_settings(settings)) if settings.embedded_daemon else None
+        supervisor = (
+            DaemonSupervisor(EmbeddedOptions.from_settings(settings), usb_identity=usb_identity)
+            if settings.embedded_daemon
+            else None
+        )
         app.state.daemon_supervisor = supervisor
         app.state.usb_probe = UsbProbe() if supervisor else None
         if supervisor:
@@ -85,6 +92,19 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         if repo:
             await apply_stored_runtime_settings(repo, settings)  # values saved on the Settings page override the env
         manager = SessionManager(daemon, bus, settings, repo=repo)
+        usb_watcher = None
+        if app.state.daemon_supervisor is not None:
+            manager.usb_identity = usb_identity  # tells a daemon restart from a possible power cycle on reconnect
+
+            async def listed_usb_devices() -> int | None:
+                try:
+                    devices = await daemon.list_devices()
+                except DaemonError:
+                    return None
+                return sum(1 for d in devices if d.url.startswith("usb:") and d.serial is not None)
+
+            # minidspd can't see a re-plugged miniDSP inside a container; this restarts it when that happens
+            usb_watcher = UsbWatcher(app.state.daemon_supervisor, listed_usb_devices)
         await restore_fir_capability(repo, settings, manager)  # the persisted experimental-FIR toggle
         mqtt = create_bridge(manager, bus, settings)
         app.state.bus = bus
@@ -94,6 +114,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         app.state.manager = manager
         app.state.mqtt = mqtt
         manager.start()  # discovery retries in the background, so the app serves even when the daemon is down
+        if usb_watcher:
+            usb_watcher.start()
         if mqtt:
             mqtt.start()
         maintenance = asyncio.create_task(maintenance_loop(repo), name="maintenance") if repo else None
@@ -103,6 +125,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
         try:
             yield
         finally:
+            if usb_watcher:
+                await usb_watcher.stop()
             for task in (maintenance, backups, verify_task):
                 if task:
                     task.cancel()
@@ -122,6 +146,8 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.state.usb_probe = None
     register_exception_handlers(app)
     app.add_middleware(BodyLimitMiddleware)  # caps upload/import bodies before they are spooled or parsed
+    if allowed_hosts := parse_allowed_hosts(settings.allowed_hosts):
+        app.add_middleware(AllowedHostsMiddleware, allowed=allowed_hosts)  # outermost: refuses rebound host names
     app.include_router(v1.build_router())
     app.include_router(web.router)
     app.include_router(state_ui.router)
@@ -148,16 +174,33 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
 app = create_app()
 
 
+def configure_logging(level: str) -> bool:
+    """Root logging for ``run``. Per-request lines (httpx's daemon calls, uvicorn's access log) only appear at debug,
+    so an idle app at info or warning writes nothing to the log on an SD card (docs/01). Returns ``access_log``.
+
+    The embedded daemon's info/debug lines are forwarded at debug. It runs with ``RUST_LOG=warn`` unless ``RUST_LOG``
+    is set, so a ``RUST_LOG`` that asks for info, debug or trace is a request for them: they are shown whatever
+    ``LOG_LEVEL`` is."""
+    logging.basicConfig(level=level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    debug = level.lower() == "debug"
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.DEBUG if debug else logging.WARNING)
+    if re.search(r"\b(info|debug|trace)\b", os.environ.get("RUST_LOG", ""), re.IGNORECASE):
+        logging.getLogger("minidspd").setLevel(logging.DEBUG)
+    return debug
+
+
 def run() -> None:
     import uvicorn
 
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    access_log = configure_logging(settings.log_level)
     uvicorn.run(
-        "app.main:app",
+        app,  # the app object built above: an import string would import this module again and build it twice
         host=settings.webui_bind,
         port=settings.webui_port,
         log_level=settings.log_level,
+        access_log=access_log,
         proxy_headers=True,
     )
 

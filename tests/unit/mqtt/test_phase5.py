@@ -224,6 +224,16 @@ async def test_delay_command_rounds_to_whole_samples(bridge, broker, session, fa
     assert session.desired(0).outputs[0].delay_ms == 1.0
 
 
+async def test_delay_at_the_slider_max_publishes_a_state_ha_accepts(bridge, broker, session):
+    """79.83 snaps to the 7664-sample maximum (79.8333 ms): the published delay must not exceed the advertised max,
+    or HA drops the state and keeps showing the previous value."""
+    config = discovery(broker, "number", "output_1_delay")
+    assert await bridge.handle_command(SERIAL, "output_1_delay", str(config["max"]))
+    assert session.desired(0).outputs[0].delay_ms == M2X4HD.delay_ms_from_samples(M2X4HD.delay_max_samples)
+    await until(lambda: broker.state()["outputs"][0]["delay"] > 79)
+    assert config["min"] <= broker.state()["outputs"][0]["delay"] <= config["max"]
+
+
 @pytest.mark.parametrize(
     ("entity", "payload"),
     [("output_5_gain", "0"), ("output_1_gain", "abc"), ("output_1_mute", "toggle"), ("output_1_delay", "nan")],

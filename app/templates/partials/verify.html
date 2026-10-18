@@ -22,7 +22,7 @@
     <div class="adopt-result{% if status != 'ok' %} is-warn{% endif %}" role="status">
       <h3>Preset {{ report.preset + 1 }}:
         {% if status == "drift" %}{{ c.drift }} setting(s) differ from what the app last wrote
-        {%- elif status == "mismatch" %}{{ mismatch_count }} never-confirmed setting(s) differ from the desired value
+        {%- elif status == "mismatch" %}no drift; {{ mismatch_count }} never-confirmed setting(s) differ from the desired value
         {%- elif status == "unverified" %}nothing verified: no setting is confirmed on the device
         {%- else %}no drift found{% endif %}</h3>
       <p>{{ c.ok }} match, {{ c.drift }} drifted, {{ c.unknown }} never confirmed ({{ mismatch_count }} of them differ
@@ -30,8 +30,9 @@
         Checked {{ report.checked_at|replace("T", " ")|truncate(19, true, "") }} UTC ({{ report.source }},
         {{ report.reads }} read(s), {{ report.duration_ms|round|int }} ms).</p>
       {% if status in ("mismatch", "unverified") %}
-        <p class="hint">Settings become confirmed when the app writes them or when you adopt with trust. Push the
-          ones that differ from the sync table.</p>
+        <p class="hint">Never-confirmed settings weren't written by the app, so they aren't drift. They become
+          confirmed when the app writes them, when you adopt with trust, or when you accept the device values below.
+          To overwrite them instead, push them from the sync table.</p>
       {% endif %}
       {% if report.drifted %}
         <form hx-post="{{ mark_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
@@ -39,6 +40,15 @@
           {% for p in drift_paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
           <button type="submit" class="btn-small">Mark drifted settings unknown</button>
           <span class="hint">They then show as unknown in the sync table, ready to push. Nothing is written now.</span>
+        </form>
+      {% endif %}
+      {% if accept_paths %}
+        <form hx-post="{{ accept_url }}" hx-target="#verify-panel" hx-swap="outerHTML">
+          <input type="hidden" name="preset" value="{{ report.preset }}">
+          {% for p in accept_paths %}<input type="hidden" name="path" value="{{ p }}">{% endfor %}
+          <button type="submit" class="btn-small">Accept device values ({{ accept_paths|length }})</button>
+          <span class="hint">The drifted and never-confirmed settings take the values the device reads: they become
+            the desired values and are confirmed. Nothing is written to the device.</span>
         </form>
       {% endif %}
     </div>

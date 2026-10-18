@@ -3,7 +3,8 @@
 `render_config` builds the daemon's TOML config from the ``MINIDSPD_*`` settings, `DaemonSupervisor` writes it to a
 tmpfs (``/run/minidsp``, never the SD card) and keeps ``minidspd --config …`` running: restart on exit with a 1 s → 30 s
 backoff, the daemon's stderr forwarded to our log at warning and above only, SIGTERM then SIGKILL on shutdown.
-`usb_status` answers "can this container see and open the miniDSP?" for ``/api/v1/health``.
+`usb_status` answers "can this container see and open the miniDSP?" for ``/api/v1/health``, and `UsbWatcher` restarts
+the daemon when the miniDSP re-enumerates, which minidspd can't notice by itself inside a container.
 
 Nothing above the daemon client knows about any of this: the app talks to the embedded daemon over HTTP exactly as it
 talks to an external one.
@@ -23,7 +24,7 @@ import tempfile
 import time
 import tomllib
 from collections import OrderedDict, deque
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -92,7 +93,7 @@ def _toml_value(value: Any) -> str:
     if isinstance(value, int | float):
         return repr(value)
     if isinstance(value, str):
-        return json.dumps(value)  # JSON's escapes are a subset of TOML basic-string escapes
+        return _toml_string(value)
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(v) for v in value) + "]"
     if isinstance(value, dict):
@@ -100,8 +101,15 @@ def _toml_value(value: Any) -> str:
     raise EmbeddedConfigError(f"unsupported value in the daemon config: {value!r}")
 
 
+def _toml_string(text: str) -> str:
+    """A TOML basic string. JSON's escapes are a subset of TOML's, but not with ``ensure_ascii``: it writes characters
+    above U+FFFF as surrogate-pair escapes, which TOML rejects. Unescaped, the only character JSON leaves that a TOML
+    basic string forbids is DEL."""
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def _toml_key(key: str) -> str:
-    return key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else json.dumps(key)
+    return key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else _toml_string(key)
 
 
 def _is_table_array(value: Any) -> bool:
@@ -358,6 +366,7 @@ class DaemonSupervisor:
         crash_window_s: float = 300.0,
         crash_limit: int = 5,
         env: Mapping[str, str] | None = None,
+        usb_identity: Callable[[], tuple[tuple[int, int], ...] | None] | None = None,
     ) -> None:
         self.options = options or EmbeddedOptions()
         self.backoff_min_s = backoff_min_s
@@ -367,11 +376,14 @@ class DaemonSupervisor:
         self.crash_window_s = crash_window_s
         self.crash_limit = crash_limit
         self.env = env
+        self.usb_identity = usb_identity
 
         self.restarts = 0
         self.pid: int | None = None
         self.last_exit: int | None = None
-        self.last_error: str | None = None
+        self.last_error: str | None = None  # why the last run ended (or couldn't start)
+        self.listener_error: str | None = None  # the current run's HTTP listener failed; the process keeps running
+        self.usb_at_spawn: tuple[tuple[int, int], ...] | None = None  # `usb_identity` when the current run started
         self.config_path: Path | None = None
         self.started_at: float | None = None  # monotonic start of the current process
 
@@ -381,6 +393,7 @@ class DaemonSupervisor:
         self._task: asyncio.Task[None] | None = None
         self._proc: asyncio.subprocess.Process | None = None
         self._stopping = False
+        self._restart_requested = False
         self._wake = asyncio.Event()
         self._spawned = asyncio.Event()
         self._crashes: deque[float] = deque()
@@ -457,15 +470,30 @@ class DaemonSupervisor:
             with contextlib.suppress(OSError):
                 self.config_path.unlink()
 
+    async def restart(self, reason: str) -> bool:
+        """SIGTERM the running daemon and respawn it right away: no backoff, and it doesn't count as a crash. False if
+        no daemon is running."""
+        proc = self._proc
+        if self._stopping or proc is None or self._phase != RUNNING:
+            return False
+        log.warning("restarting embedded minidspd: %s", reason)
+        self._restart_requested = True
+        await self._terminate(proc)
+        return True
+
     def snapshot(self) -> dict[str, Any]:
         uptime = self.uptime_s
+        state = self.state
+        # A running daemon only has an error while its HTTP listener is down; why an earlier run ended is history
+        # (daemon_last_exit), not a current error.
+        error = self.listener_error if state == RUNNING else self.listener_error or self.last_error
         return {
-            "daemon_process": self.state,
+            "daemon_process": state,
             "daemon_restarts": self.restarts,
             "daemon_pid": self.pid,
             "daemon_uptime_s": round(uptime, 1) if uptime is not None else None,
             "daemon_last_exit": describe_exit(self.last_exit) if self.last_exit is not None else None,
-            "daemon_process_error": self.last_error,
+            "daemon_process_error": error,
         }
 
     # internals --------------------------------------------------------------------------------------------------------
@@ -486,7 +514,7 @@ class DaemonSupervisor:
         # The HTTP listener runs as its own task in minidspd: when it fails (address in use, …) the process keeps
         # running, so record why the app can't reach it.
         if line.startswith("HTTP/TCP listener error"):
-            self.last_error = f"minidspd: {line.strip()}"
+            self.listener_error = f"minidspd: {line.strip()}"
 
     async def _run(self) -> None:
         backoff = self.backoff_min_s
@@ -495,6 +523,10 @@ class DaemonSupervisor:
             await self._run_once()
             if self._stopping:
                 break
+            if self._restart_requested:  # `restart`: respawn now
+                self._restart_requested = False
+                self.restarts += 1
+                continue
             if time.monotonic() - started >= self.stable_after_s:
                 backoff = self.backoff_min_s
                 self._loop_logged = False
@@ -517,7 +549,17 @@ class DaemonSupervisor:
             if not self._stopping:
                 self.restarts += 1
 
+    def _read_usb_identity(self) -> tuple[tuple[int, int], ...] | None:
+        if self.usb_identity is None:
+            return None
+        try:
+            return self.usb_identity()
+        except Exception:
+            log.exception("reading the USB identity failed")
+            return None
+
     async def _run_once(self) -> None:
+        self.usb_at_spawn = self._read_usb_identity()  # before the spawn: what this run's libusb can know about
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.options.binary,
@@ -536,6 +578,7 @@ class DaemonSupervisor:
             self._spawned.set()
             return
         self._spawn_failed = False
+        self.listener_error = None
         self._proc = proc
         self.pid = proc.pid
         self.started_at = time.monotonic()
@@ -554,7 +597,7 @@ class DaemonSupervisor:
         self.pid = None
         self.started_at = None
         self.last_exit = code
-        if not self._stopping:
+        if not self._stopping and not self._restart_requested:
             self.last_error = f"minidspd exited ({describe_exit(code)})"
 
     async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
@@ -694,6 +737,17 @@ def usb_status(
     return UsbStatus(False, "unknown", "no readable miniDSP device node found (sysfs is not available to check)")
 
 
+def usb_identity(
+    sys_root: str | Path = "/sys/bus/usb/devices", vendor: int = MINIDSP_USB_VENDOR
+) -> tuple[tuple[int, int], ...] | None:
+    """``(bus, device number)`` of every plugged-in miniDSP, or None without sysfs. The device number changes when
+    the device is re-enumerated (unplugged or power cycled), not when only minidspd restarts."""
+    root = Path(sys_root)
+    if not root.is_dir():
+        return None
+    return tuple(sorted((bus, num) for bus, num, _ in _sysfs_devices(root, vendor)))
+
+
 class UsbProbe:
     """`usb_status` cached for a few seconds, since health is polled."""
 
@@ -712,6 +766,97 @@ class UsbProbe:
                 self._value = UsbStatus(False, "unknown", f"USB scan failed: {exc}")
             self._at = now
         return self._value
+
+
+class UsbWatcher:
+    """Restarts the embedded minidspd when a miniDSP re-enumerates (re-plug, power cycle).
+
+    minidspd's hidapi enumerates through one long-lived libusb context. That libusb supports hotplug, so it keeps its
+    own device list and only updates it on udev events, which never arrive inside a container (no udevd; the daemon's
+    netlink socket joins no groups). A miniDSP that comes back under a new device number, or is plugged in after the
+    daemon started, is never seen until the daemon restarts.
+
+    Every ``interval_s`` this compares sysfs with the devices present when the current run started. When a new one
+    is still there after ``grace_s`` and the daemon lists fewer ready USB devices than sysfs shows, the daemon is
+    restarted once. The next run starts with the new device number, so the session's reconnect sees it changed and
+    treats it as a possible power cycle."""
+
+    def __init__(
+        self,
+        supervisor: DaemonSupervisor,
+        listed: Callable[[], Awaitable[int | None]],
+        *,
+        identity: Callable[[], tuple[tuple[int, int], ...] | None] = usb_identity,
+        interval_s: float = 5.0,
+        grace_s: float = 10.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.supervisor = supervisor
+        self._listed = listed  # ready USB devices (with a serial) on the daemon, None if it can't be asked
+        self._identity = identity
+        self.interval_s = interval_s
+        self.grace_s = grace_s
+        self._clock = clock
+        self._since: float | None = None
+        self._served: set[tuple[int, int]] = set()  # new devices this run turned out to see after all
+        self._pid: int | None = None
+        self._task: asyncio.Task[None] | None = None
+
+    async def check(self) -> bool:
+        """One step. True if it restarted the daemon."""
+        sup = self.supervisor
+        if sup.pid != self._pid:
+            self._pid, self._served, self._since = sup.pid, set(), None
+        try:
+            current = self._identity()
+        except Exception:
+            log.exception("reading the USB identity failed")
+            current = None
+        spawned = sup.usb_at_spawn
+        if sup.state != RUNNING or spawned is None or not current:
+            self._since = None
+            return False
+        new = set(current) - set(spawned) - self._served
+        if not new:
+            self._since = None
+            return False
+        now = self._clock()
+        if self._since is None:
+            self._since = now
+            return False
+        if now - self._since < self.grace_s:
+            return False
+        self._since = None
+        listed = await self._listed()
+        if listed is None:
+            return False  # the daemon isn't answering: the supervisor and health deal with that
+        if listed >= len(current):
+            self._served |= new
+            return False
+        where = ", ".join(f"{bus:03d}/{num:03d}" for bus, num in sorted(new))
+        return await sup.restart(
+            f"a miniDSP appeared on USB at {where} after it started, and it can't see it (no hotplug events inside a "
+            "container)"
+        )
+
+    def start(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._loop(), name="minidspd-usb-watcher")
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+
+    async def _loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.interval_s)
+            try:
+                await self.check()
+            except Exception:
+                log.exception("USB watcher step failed")
 
 
 # --- health -----------------------------------------------------------------------------------------------------------
@@ -749,6 +894,8 @@ def health_problems(fields: Mapping[str, Any], *, device_connected: bool) -> lis
     problems = []
     if fields.get("daemon_process") == FAILED:
         problems.append(f"embedded minidspd is failing: {fields.get('daemon_process_error') or 'unknown error'}")
+    elif fields.get("daemon_process") == RUNNING and fields.get("daemon_process_error"):
+        problems.append(f"embedded minidspd is running but unreachable: {fields['daemon_process_error']}")
     if not device_connected and not fields.get("daemon_mock") and fields.get("usb_access") not in (None, "ok"):
         problems.append(f"USB: {fields.get('usb_detail')}")
     return problems

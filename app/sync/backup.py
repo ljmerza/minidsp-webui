@@ -61,8 +61,10 @@ from app.sync import fir as fir_svc
 from app.sync import profiles as profiles_svc
 from app.sync.session import (
     BULK_TIMEOUT_S,
+    FORCE_KEY,
     PENDING_KEY,
     WRAP_KEY,
+    WRAP_REQUESTED_KEY,
     DeviceSession,
     MasterValidationError,
     PresetSwitchInProgress,
@@ -487,9 +489,11 @@ def _fir_refs(doc: ConfigDoc) -> set[str]:
 
 
 def fully_synced(entry: PresetEntry, doc: ConfigDoc, profile: DeviceProfile) -> bool:
-    """Whether the backup's shadow says the device held exactly ``doc`` (nothing pending, wrapped or unknown)."""
+    """Whether the backup's shadow says the device held exactly ``doc`` (nothing pending, wrapped, staged for a
+    push-all or unknown)."""
     applied = entry.applied
-    if not applied or entry.unknown_paths or applied.get(PENDING_KEY) or applied.get(WRAP_KEY):
+    reserved = (PENDING_KEY, WRAP_KEY, FORCE_KEY, WRAP_REQUESTED_KEY)
+    if not applied or entry.unknown_paths or any(applied.get(k) for k in reserved):
         return False
     values = device_values(doc, profile)
     return all(path in applied and same_value(path, applied[path], value, profile) for path, value in values.items())
@@ -838,7 +842,7 @@ async def _apply_preset(device: DevicePlan, p: PresetPlan, *, repo: Repo, timeou
         )
         return {**result, "mode": "stored", "revision": revision}
     if trust:
-        adopted = await session.adopt("trust", preset=p.preset, doc=p.doc, trust_all=True)
+        adopted = await session.adopt("trust", preset=p.preset, doc=p.doc, trust_all=True, read_back=False)
         return {**result, "mode": "trusted", "revision": adopted.revision, "writes": adopted.writes}
     if p.changes == 0 and p.stored and not session.writer.state(p.preset).unknown_paths(device.profile):
         return {**result, "mode": "unchanged", "revision": session.revisions.get(p.preset, 0)}
