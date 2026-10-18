@@ -129,6 +129,15 @@ class ChannelMeta:
     name: str | None
     color: str | None
     max_gain_db: float | None
+    unused: bool = False  # "Not in use" in Settings (migration 0002)
+    tactile: bool = False  # "Shakers (tactile)" in Settings (outputs)
+
+
+def _channel_meta(row: sqlite3.Row) -> ChannelMeta:
+    data = dict(row)
+    data["unused"] = bool(data.get("unused") or 0)
+    data["tactile"] = bool(data.get("tactile") or 0)
+    return ChannelMeta(**data)
 
 
 @dataclass(frozen=True)
@@ -595,8 +604,13 @@ class Repo:
         name: str | None = None,
         color: str | None = None,
         max_gain_db: float | None = None,
+        unused: bool | None = None,
+        tactile: bool | None = None,
     ) -> bool:
-        """Replace one channel's metadata. Returns whether the row changed."""
+        """Replace one channel's name, colour and ceiling. Returns whether the row changed.
+
+        ``unused`` / ``tactile`` are flags: None keeps the stored value (False for a new row), so callers that only
+        edit the name or the ceiling never clear them."""
         _check_kind(kind)
         if idx < 0:
             raise ValueError("channel index must be >= 0")
@@ -606,13 +620,17 @@ class Repo:
             raise ValueError(f"color must look like #rrggbb, got {color!r}")
         if max_gain_db is not None and not math.isfinite(max_gain_db):
             raise ValueError("max_gain_db must be finite")
+        flags = [None if flag is None else int(bool(flag)) for flag in (unused, tactile)]
         res = await self.db.execute(
-            "INSERT INTO channel_meta (serial, kind, idx, name, color, max_gain_db) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO channel_meta (serial, kind, idx, name, color, max_gain_db, unused, tactile)"
+            " VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0))"
             " ON CONFLICT (serial, kind, idx) DO UPDATE SET"
-            "  name = excluded.name, color = excluded.color, max_gain_db = excluded.max_gain_db"
+            "  name = excluded.name, color = excluded.color, max_gain_db = excluded.max_gain_db,"
+            "  unused = COALESCE(?, unused), tactile = COALESCE(?, tactile)"
             " WHERE name IS NOT excluded.name OR color IS NOT excluded.color"
-            "  OR max_gain_db IS NOT excluded.max_gain_db",
-            (serial, kind, idx, name, color, max_gain_db),
+            "  OR max_gain_db IS NOT excluded.max_gain_db"
+            "  OR unused IS NOT COALESCE(?, unused) OR tactile IS NOT COALESCE(?, tactile)",
+            (serial, kind, idx, name, color, max_gain_db, *flags, *flags, *flags),
         )
         return res.rowcount > 0
 
@@ -622,7 +640,7 @@ class Repo:
             "SELECT * FROM channel_meta WHERE serial = ? AND kind = ? AND idx = ?",
             (serial, kind, idx),
         )
-        return None if row is None else ChannelMeta(**dict(row))
+        return None if row is None else _channel_meta(row)
 
     async def list_channel_meta(self, serial: int, kind: ChannelKind | None = None) -> list[ChannelMeta]:
         if kind is None:
@@ -636,7 +654,7 @@ class Repo:
                 "SELECT * FROM channel_meta WHERE serial = ? AND kind = ? ORDER BY idx",
                 (serial, kind),
             )
-        return [ChannelMeta(**dict(row)) for row in rows]
+        return [_channel_meta(row) for row in rows]
 
     async def delete_channel_meta(self, serial: int, kind: ChannelKind, idx: int) -> bool:
         _check_kind(kind)

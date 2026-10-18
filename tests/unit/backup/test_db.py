@@ -11,9 +11,12 @@ import pytest
 from app.model.config_doc import default_config_doc
 from app.model.device_profile import M2X4HD
 from app.state import Database, Repo
+from app.state.db import MIGRATIONS_DIR, discover_migrations
 from app.sync import backup as svc
 
 from ..conftest import SERIAL
+
+LATEST_SCHEMA = discover_migrations(MIGRATIONS_DIR)[-1].version
 
 
 def rows(data: bytes, sql: str) -> list[tuple]:
@@ -137,7 +140,7 @@ def test_default_backup_dir():
 async def test_validate_a_good_database(tmp_path):
     data = await make_db(tmp_path / "a.sqlite3")
     info = svc.validate_db_bytes(data)
-    assert info.schema_version == 1 and info.serials == [SERIAL] and info.warnings == []
+    assert info.schema_version == LATEST_SCHEMA and info.serials == [SERIAL] and info.warnings == []
     assert info.counts["preset_state"] == 1 and info.counts["revision"] == 1
     assert info.as_json()["size"] == len(data)
 
@@ -200,7 +203,7 @@ async def test_validate_rejects_bad_files(tmp_path, monkeypatch):
 
     good = await make_db(tmp_path / "good.sqlite3")
     conn = svc._open_bytes(good)
-    conn.execute("INSERT INTO schema_migrations VALUES (2, 'future', 'now')")
+    conn.execute("INSERT INTO schema_migrations VALUES (999, 'future', 'now')")
     conn.commit()
     newer = conn.serialize()
     conn.execute("DELETE FROM schema_migrations")
@@ -209,7 +212,7 @@ async def test_validate_rejects_bad_files(tmp_path, monkeypatch):
     conn.close()
     with pytest.raises(svc.BackupError, match="schema") as info:
         svc.validate_db_bytes(newer)
-    assert "migration 2 (future) is unknown" in info.value.problems[0]
+    assert "migration 999 (future) is unknown" in info.value.problems[0]
     with pytest.raises(svc.BackupError, match="no migration history"):
         svc.validate_db_bytes(empty)
 

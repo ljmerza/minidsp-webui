@@ -54,6 +54,31 @@
            aria-describedby="graph-db-hint"><span class="unit">dB</span></span>
     <p class="hint" id="graph-db-hint">The magnitude scale graphs start with; Fit still scales to the curves.</p>
   </div>
+  <h3>Guidance</h3>
+  <p class="hint">Rules of thumb behind the plain-language summaries and health notes. They are starting guesses, not
+    facts about the device.</p>
+  {%- macro guidance_field(id, name, label, unit, min, max, step, hint) %}
+  <div class="field">
+    <label for="{{ id }}">{{ label }}</label>
+    <span class="num-field"><input type="number" id="{{ id }}" name="{{ name }}" inputmode="decimal" min="{{ min }}"
+           max="{{ max }}" step="{{ step }}" value="{{ '%g'|format(v[name]) }}" aria-describedby="{{ id }}-hint"><span class="unit">{{ unit }}</span></span>
+    <p class="hint" id="{{ id }}-hint">{{ hint }}</p>
+  </div>
+  {%- endmacro %}
+  {{ guidance_field("g-high-total", "guidance_high_total_db", "High total level", "dB", 0, 48, 0.5,
+       "A total level (input + route + output) at or above this gets a headroom caution.") }}
+  {{ guidance_field("g-no-signal", "guidance_no_signal_dbfs", "No-signal floor", "dBFS", -140, -20, 1,
+       "A meter below this reads \"no signal\".") }}
+  {{ guidance_field("g-quiet", "guidance_volume_quiet_db", "Very quiet Volume", "dB", -127, 0, 1,
+       "Volume below this gets a \"very quiet\" note.") }}
+  {{ guidance_field("g-typical-min", "guidance_volume_typical_min_db", "Typical Volume, from", "dB", -127, 0, 1,
+       "The bottom of the usual listening range.") }}
+  {{ guidance_field("g-typical-max", "guidance_volume_typical_max_db", "Typical Volume, to", "dB", -127, 0, 1,
+       "The top of the usual listening range.") }}
+  {{ guidance_field("g-comp-threshold", "guidance_comp_threshold_dbfs", "Compressor: very low threshold", "dBFS", -127, 0, 1,
+       "With the ratio below, a compressor at or below this threshold gets a \"may hold it almost silent\" caution.") }}
+  {{ guidance_field("g-comp-ratio", "guidance_comp_ratio", "Compressor: high ratio", ":1", 1, 100, 0.5,
+       "The ratio that goes with the threshold above.") }}
   <p class="hint">These start from the environment variables; saving here overrides them{% if runtime.persisted %} and is kept across restarts{% endif %}.</p>
   <button type="submit">Save</button>
 </form>

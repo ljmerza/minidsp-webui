@@ -132,6 +132,8 @@ class ChannelEntry(_Strict):
     name: str | None = Field(default=None, max_length=64)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     max_gain_db: float | None = None
+    unused: bool | None = None  # None (a backup from before these flags): keep the current value
+    tactile: bool | None = None
 
 
 class DeviceEntry(_Strict):
@@ -324,7 +326,15 @@ async def build_export(repo: Repo, *, manager: SessionManager | None = None) -> 
                 for state in await repo.list_preset_states(serial)
             ],
             "channels": [
-                {"kind": m.kind, "idx": m.idx, "name": m.name, "color": m.color, "max_gain_db": m.max_gain_db}
+                {
+                    "kind": m.kind,
+                    "idx": m.idx,
+                    "name": m.name,
+                    "color": m.color,
+                    "max_gain_db": m.max_gain_db,
+                    "unused": m.unused,
+                    "tactile": m.tactile,
+                }
                 for m in await repo.list_channel_meta(serial)
             ],
         }
@@ -596,7 +606,11 @@ async def _plan_device(
                 continue
             old = current_meta.get((channel.kind, channel.idx))
             name = (channel.name or "").strip() or None
-            if old is None or (old.name, old.color, old.max_gain_db) != (name, channel.color, ceiling):
+            flags_changed = old is not None and any(
+                new is not None and new != getattr(old, field, False)
+                for field, new in (("unused", channel.unused), ("tactile", channel.tactile))
+            )
+            if old is None or flags_changed or (old.name, old.color, old.max_gain_db) != (name, channel.color, ceiling):
                 device.channels.append(channel)
     plan.devices.append(device)
 
@@ -813,11 +827,24 @@ async def _apply_channels(
         try:
             if device.session is not None:
                 await device.session.set_channel_meta(
-                    c.kind, c.idx, name=c.name, color=c.color, max_gain_db=c.max_gain_db
+                    c.kind,
+                    c.idx,
+                    name=c.name,
+                    color=c.color,
+                    max_gain_db=c.max_gain_db,
+                    unused=c.unused,
+                    tactile=c.tactile,
                 )
             else:
                 await repo.set_channel_meta(
-                    device.serial, c.kind, c.idx, name=c.name, color=c.color, max_gain_db=c.max_gain_db
+                    device.serial,
+                    c.kind,
+                    c.idx,
+                    name=c.name,
+                    color=c.color,
+                    max_gain_db=c.max_gain_db,
+                    unused=c.unused,
+                    tactile=c.tactile,
                 )
             done += 1
         except ValueError as exc:  # DesiredValidationError is a ValueError

@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from starlette.datastructures import FormData
 
 from app.api.deps import require_same_origin
@@ -57,10 +57,27 @@ class RuntimeSettings(BaseModel):
     reapply_on_reconnect: bool
     graph_view: Literal["auto", "sub", "full"] = "auto"
     graph_db_range: float = Field(default=24.0, ge=3.0, le=60.0)
+    # Guidance thresholds (phase 9 design 12.2): rules of thumb behind the summaries and health notes.
+    guidance_high_total_db: float = Field(default=12.0, ge=0.0, le=48.0)
+    guidance_no_signal_dbfs: float = Field(default=-90.0, ge=-140.0, le=-20.0)
+    guidance_volume_quiet_db: float = Field(default=-80.0, ge=-127.0, le=0.0)
+    guidance_volume_typical_min_db: float = Field(default=-40.0, ge=-127.0, le=0.0)
+    guidance_volume_typical_max_db: float = Field(default=-10.0, ge=-127.0, le=0.0)
+    guidance_comp_threshold_dbfs: float = Field(default=-60.0, ge=-127.0, le=0.0)
+    guidance_comp_ratio: float = Field(default=10.0, ge=1.0, le=100.0)
+
+    @model_validator(mode="after")
+    def _check_volume_band(self) -> "RuntimeSettings":
+        if self.guidance_volume_typical_min_db >= self.guidance_volume_typical_max_db:
+            raise ValueError("the typical Volume range must go from a lower to a higher level")
+        return self
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RuntimeSettings":
         return cls.model_construct(**{name: getattr(settings, name) for name in cls.model_fields})
+
+
+GUIDANCE_FIELDS = tuple(name for name in RuntimeSettings.model_fields if name.startswith("guidance_"))
 
 
 def apply_runtime(settings: Settings, values: RuntimeSettings, manager: SessionManager | None = None) -> None:
@@ -108,6 +125,8 @@ def _channel_rows(session: DeviceSession) -> list[dict[str, Any]]:
                     "color": channel_color(session, kind, idx),
                     "default_color": default_color(kind, idx),
                     "max_gain_db": meta.max_gain_db if meta is not None else None,
+                    "unused": bool(getattr(meta, "unused", False)),
+                    "tactile": bool(getattr(meta, "tactile", False)),
                 }
             )
     return rows
@@ -228,10 +247,25 @@ async def _save_channel(session: DeviceSession, kind: str, idx: int, form: FormD
         ceiling = _parse_ceiling(_form_text(form, f"{key}-max_gain_db"), session, label)
     else:
         ceiling = meta.max_gain_db if meta is not None else None
-    current = (meta.name, meta.color, meta.max_gain_db) if meta is not None else (None, None, None)
-    if (name or None, color, ceiling) == current:
+    # The flags' checkboxes are only absent when unticked if the form has them at all (a page loaded before an
+    # upgrade doesn't): then the stored flags are kept.
+    has_flags = form.get("channel_flags") is not None
+    unused = bool(getattr(meta, "unused", False))
+    tactile = bool(getattr(meta, "tactile", False))
+    if has_flags:
+        unused = form.get(f"{key}-unused") is not None
+        if kind == "output":  # only outputs drive shakers
+            tactile = form.get(f"{key}-tactile") is not None
+    current = (
+        (meta.name, meta.color, meta.max_gain_db, bool(meta.unused), bool(meta.tactile))
+        if meta is not None
+        else (None, None, None, False, False)
+    )
+    if (name or None, color, ceiling, unused, tactile) == current:
         return  # unchanged: no database write
-    await session.set_channel_meta(kind, idx, name=name or None, color=color, max_gain_db=ceiling)
+    await session.set_channel_meta(
+        kind, idx, name=name or None, color=color, max_gain_db=ceiling, unused=unused, tactile=tactile
+    )
 
 
 @router.post("/ui/devices/{serial}/channels", response_class=HTMLResponse)
@@ -326,6 +360,7 @@ def _runtime_from_form(form: FormData, current: RuntimeSettings) -> RuntimeSetti
             "reapply_on_reconnect": form.get("reapply_on_reconnect") in ("on", "true", "1"),
             "graph_view": newer("graph_view"),
             "graph_db_range": newer("graph_db_range"),
+            **{name: newer(name) for name in GUIDANCE_FIELDS},
         }
     )
 

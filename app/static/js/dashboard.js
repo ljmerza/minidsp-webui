@@ -79,12 +79,18 @@
         return false;
       },
 
-      // "master" arrives for every volume or mute change too; only a different active preset changes the cards.
+      // "master" arrives for every volume or mute change too; only a different active preset or Mute all (every
+      // card's health badge then says Silent) changes the cards.
       onMaster(event) {
         const data = parseEvent(event);
         const preset = data && data.master ? data.master.preset : null;
+        const mute = data && data.master ? data.master.mute : null;
         const list = this.list();
-        if (typeof preset === 'number' && list && list.dataset.preset !== String(preset)) this.refresh();
+        if (!list) return;
+        const presetChanged = typeof preset === 'number' && list.dataset.preset !== String(preset);
+        const known = list.dataset.masterMute;
+        const muteChanged = typeof mute === 'boolean' && !!known && known !== String(mute);
+        if (presetChanged || muteChanged) this.refresh();
       },
 
       onClick(e) {

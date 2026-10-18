@@ -278,6 +278,26 @@ async def test_channel_meta(repo):
     assert await repo.get_channel_meta(SERIAL, "input", 1) is None
 
 
+async def test_channel_meta_flags(repo):
+    """The Settings flags (migration 0002): None keeps them, so a rename or a ceiling change never clears them."""
+    assert await repo.set_channel_meta(SERIAL, "output", 2, unused=True)
+    meta = await repo.get_channel_meta(SERIAL, "output", 2)
+    assert (meta.unused, meta.tactile) == (True, False)
+    assert await repo.set_channel_meta(SERIAL, "output", 2, unused=True) is False  # unchanged: no write
+    assert await repo.set_channel_meta(SERIAL, "output", 2, name="Rear", max_gain_db=6.0)
+    meta = await repo.get_channel_meta(SERIAL, "output", 2)
+    assert (meta.name, meta.max_gain_db, meta.unused, meta.tactile) == ("Rear", 6.0, True, False)
+    assert await repo.set_channel_meta(SERIAL, "output", 2, name="Rear", max_gain_db=6.0, tactile=True)
+    assert await repo.set_channel_meta(SERIAL, "output", 2, name="Rear", max_gain_db=6.0, unused=False)
+    meta = (await repo.list_channel_meta(SERIAL, "output"))[0]
+    assert (meta.unused, meta.tactile) == (False, True)
+    assert isinstance(meta.unused, bool) and isinstance(meta.tactile, bool)
+    # a new row without flags starts in use and not tactile
+    await repo.set_channel_meta(SERIAL, "input", 0, name="TV")
+    meta = await repo.get_channel_meta(SERIAL, "input", 0)
+    assert (meta.unused, meta.tactile) == (False, False)
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [

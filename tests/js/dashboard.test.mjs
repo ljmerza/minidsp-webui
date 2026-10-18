@@ -334,4 +334,16 @@ describe('outputCards', () => {
     page.box.listeners['htmx:beforeSwap'][0](later);
     assert.equal(later.detail.shouldSwap, true);
   });
+
+  test('re-fetches when Mute all changes, since every health badge then says Silent', () => {
+    const page = mount([makeCard(0)], '0');
+    page.list.dataset.masterMute = 'false';
+    page.master({ master: { volume: -20, mute: false, preset: 0 } });
+    assert.equal(refreshes.length, 0);
+    page.master({ master: { mute: true } });
+    assert.equal(refreshes.length, 1);
+    page.list.dataset.masterMute = ''; // cards not loaded: nothing to compare with
+    page.master({ master: { mute: false } });
+    assert.equal(refreshes.length, 1);
+  });
 });

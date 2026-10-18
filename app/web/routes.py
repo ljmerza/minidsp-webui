@@ -24,6 +24,7 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
+from app.sync.summary import session_summary
 from app.web import devices
 from app.web.nav import build_nav
 from app.web.templating import graph_defaults, templates
@@ -126,6 +127,8 @@ _SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"
 async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | None:
     """Per-output gain/delay/crossover of the active preset plus a worst-of sync badge; None until state is loaded.
 
+    ``summary`` is the output's `OutputSummary` (its plain-language sentence and health badge).
+
     ``ceiling`` and ``gain_min`` bound the gain nudge buttons; ``never_synced`` (gain or mute never confirmed on the
     device) makes un-muting ask first, as on the output page.
     """
@@ -141,6 +144,7 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
         return None
     doc = session.desired(preset)
     sync = session.sync_status(preset)
+    summary = session_summary(session, preset)  # the plain-language sentence and badge (phase 9 design 6)
     cards = []
     for i, out in enumerate(doc.outputs):
         prefix = f"outputs.{i}."
@@ -158,6 +162,7 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
                 "crossover": "on" if any(not g.bypass for g in out.crossover) else "bypassed",
                 "sync": worst,
                 "sync_icon": _SYNC_ICON[worst],
+                "summary": summary.outputs[i] if summary is not None and i < len(summary.outputs) else None,
             }
         )
     return cards
@@ -194,6 +199,7 @@ async def dashboard_outputs_context(
         "output_links": [child.path if child.enabled else None for child in outputs_nav],
         "output_state": cards,
         "outputs_preset": preset,
+        "outputs_master_mute": master.mute if cards is not None and master is not None else None,  # badges say Silent
         "outputs_edit_url": None if preset is None else _url(request, f"/ui/devices/{serial}/presets/{preset}/edit"),
         "outputs_url": _url(request, "/ui/dashboard/outputs", serial=serial),
     }

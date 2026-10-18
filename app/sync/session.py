@@ -1318,8 +1318,12 @@ class DeviceSession:
         name: str | None = None,
         color: str | None = None,
         max_gain_db: float | None = None,
+        unused: bool | None = None,
+        tactile: bool | None = None,
     ) -> ChannelMeta:
-        """Name/colour/gain ceiling of one channel. The ceiling must lie inside the profile's gain range."""
+        """Name/colour/gain ceiling of one channel. The ceiling must lie inside the profile's gain range.
+
+        ``unused`` / ``tactile`` (the Settings flags) are kept as they are when None."""
         await self.ensure_loaded()
         count = {"input": self.profile.n_inputs, "output": self.profile.n_outputs}.get(kind)
         if count is None or not 0 <= index < count:
@@ -1349,7 +1353,14 @@ class DeviceSession:
         if self.repo is not None:
             try:
                 await self.repo.set_channel_meta(
-                    self.serial, kind, index, name=name, color=color, max_gain_db=max_gain_db
+                    self.serial,
+                    kind,
+                    index,
+                    name=name,
+                    color=color,
+                    max_gain_db=max_gain_db,
+                    unused=unused,
+                    tactile=tactile,
                 )
             except ValueError as exc:
                 raise DesiredValidationError(str(exc)) from None
@@ -1357,7 +1368,16 @@ class DeviceSession:
             assert stored is not None
             meta = stored
         else:
-            meta = ChannelMeta(self.serial, kind, index, (name or "").strip() or None, color, max_gain_db)
+            meta = ChannelMeta(
+                self.serial,
+                kind,
+                index,
+                (name or "").strip() or None,
+                color,
+                max_gain_db,
+                unused=(old.unused if old is not None else False) if unused is None else bool(unused),
+                tactile=(old.tactile if old is not None else False) if tactile is None else bool(tactile),
+            )
         self.channel_meta[(kind, index)] = meta
         return meta
 

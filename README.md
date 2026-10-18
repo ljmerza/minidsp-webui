@@ -328,6 +328,18 @@ there take precedence over the environment.
 | `GRAPH_VIEW` † | `auto` | Frequency range graphs open in: `sub` (5–300 Hz), `full` (10 Hz–20 kHz) or `auto` (each page's own). A range picked on a page is remembered by the browser and wins |
 | `GRAPH_DB_RANGE` † | `24` | Default magnitude scale, ± this many dB (3 to 60); the Fit button still auto-scales |
 
+#### Guidance
+
+Rules of thumb behind the plain-language summaries and health notes, not device facts.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GUIDANCE_HIGH_TOTAL_DB` † | `12` | A total level (input + route + output) at or above this gets a headroom caution |
+| `GUIDANCE_NO_SIGNAL_DBFS` † | `-90` | Meters below this read "no signal" |
+| `GUIDANCE_VOLUME_QUIET_DB` † | `-80` | Volume below this gets a "very quiet" note |
+| `GUIDANCE_VOLUME_TYPICAL_MIN_DB` / `_MAX_DB` † | `-40` / `-10` | The usual listening range of Volume |
+| `GUIDANCE_COMP_THRESHOLD_DBFS` / `GUIDANCE_COMP_RATIO` † | `-60` / `10` | A compressor at or below this threshold with at least this ratio gets a "may hold it almost silent" caution |
+
 #### MQTT / Home Assistant
 
 | Variable | Default | Description |

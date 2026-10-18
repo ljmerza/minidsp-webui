@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
 from app import __version__
+from app.sync.summary import session_summary
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -93,3 +94,5 @@ templates.env.filters["num"] = fmt_num
 templates.env.filters["db"] = fmt_db
 templates.env.filters["duration"] = fmt_duration
 templates.env.filters["meter_pct"] = lambda db: f"{meter_fraction(db) * 100:.2f}%"
+# The plain-language summary of a preset (app/sync/summary.py): ``preset_summary(session, preset=None)``.
+templates.env.globals["preset_summary"] = session_summary
