@@ -839,6 +839,9 @@
       parts: stored('parts', 'false') === 'true',
       inputs: cfg.defaultInputs || '0',
       warnings: [],
+      reading: '', // the one-line text equivalent (app/web/graph_reading.py)
+      hasSum: false,
+      showSum: true, // off by default when a plotted output is Shakers (tactile), until the user picks
       error: null,
       loading: false,
       empty: false,
@@ -852,6 +855,7 @@
             mode: this.mode,
             unwrap: this.unwrap,
             height: cfg.height || 280,
+            label: cfg.label,
           });
           this.load();
         });
@@ -884,14 +888,17 @@
         ctl.traces = res.data.traces || [];
         this.empty = ctl.traces.length === 0;
         this.warnings = res.data.warnings || [];
+        this.reading = res.data.reading || '';
+        this.hasSum = ctl.traces.some((t) => t.kind === 'sum');
+        const sum = remember(`${cfg.key}.sum`);
+        this.showSum = sum === null ? !(res.data.tactile || []).length : sum === 'true';
         this.draw();
       },
 
       draw() {
         if (!ctl.plot) return;
-        ctl.plot.setTraces(
-          ctl.traces.map((t) => ({ ...t, width: t.kind === 'part' ? 1.2 : undefined, visible: t.kind !== 'part' || this.parts })),
-        );
+        const visible = (t) => (t.kind === 'part' ? this.parts : t.kind === 'sum' ? this.showSum : true);
+        ctl.plot.setTraces(ctl.traces.map((t) => ({ ...t, width: t.kind === 'part' ? 1.2 : undefined, visible: visible(t) })));
       },
 
       onEvent(topic, e) {
@@ -918,6 +925,10 @@
       },
       setParts() {
         remember(`${cfg.key}.parts`, this.parts);
+        this.draw();
+      },
+      setSum() {
+        remember(`${cfg.key}.sum`, this.showSum);
         this.draw();
       },
       setView(view) {

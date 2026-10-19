@@ -5,7 +5,8 @@
 {%- set cfg = {
   "url": root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/response",
   "key": "response", "view": "sub" if bass else "full", "preset": preset, "inputs": true, "refresh": ["desired"],
-  "bass": bass, "viewKey": "response.view.outputs." ~ channel.index
+  "bass": bass, "viewKey": "response.view.outputs." ~ channel.index,
+  "label": channel.name ~ " calculated response"
 } -%}
 <div class="response-view" x-data='responseView({{ cfg|tojson }})' hx-trigger="sse:desired">
   <div class="card-head">
@@ -27,6 +28,7 @@
     <span class="muted" x-show="loading" x-cloak>Updating&hellip;</span>
   </div>
   {{ fx.graph_toolbar() }}
+  <p class="graph-reading" x-show="reading" x-text="reading" x-cloak></p>
   <div class="graph-box" x-ref="graph" aria-label="{{ channel.name }} calculated response"></div>
   {{ fx.warnings() }}
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>

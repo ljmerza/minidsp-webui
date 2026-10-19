@@ -180,6 +180,9 @@
       pairA: pair[0] === null ? '' : String(pair[0]),
       pairB: pair[1] === null ? '' : String(pair[1]),
       warnings: [],
+      reading: '', // the one-line text equivalent (app/web/graph_reading.py)
+      hasSum: false,
+      showSum: true, // off by default when a shown output is Shakers (tactile), until the user picks
       regions: [],
       integrationOn: false,
       integrationNote: '',
@@ -192,12 +195,19 @@
         for (const topic of ['desired', 'sync']) this.$el.addEventListener(`sse:${topic}`, (e) => this.onEvent(e));
         this.$nextTick(() => {
           const graph = window.mdsp.graph;
-          ctl.plot = graph.create(this.$refs.graph, { view: this.view, mode: this.mode, unwrap: this.unwrap, height: 300 });
+          ctl.plot = graph.create(this.$refs.graph, {
+            view: this.view,
+            mode: this.mode,
+            unwrap: this.unwrap,
+            height: 300,
+            label: 'Combined response',
+          });
           ctl.iplot = createIntegrationPlot(this.$refs.integration, {
             view: cfg.integrationRange,
             mode: 'phase',
             height: 220,
             readout: false,
+            label: 'Phase difference',
             onCursor: (readout) => {
               const idx = readout ? graph.nearestIndex(ctl.integ ? ctl.integ.freqs : [], readout.freq) : null;
               this.cursor = cursorText(ctl.integ, idx);
@@ -245,12 +255,20 @@
         ctl.traces = data.traces || [];
         this.empty = ctl.traces.length === 0;
         this.warnings = data.warnings || [];
+        this.reading = data.reading || '';
+        this.hasSum = ctl.traces.some((t) => t.kind === 'sum');
+        const sum = remember('sum');
+        this.showSum = sum === null ? !(data.tactile || []).length : sum === 'true';
         this.drawMain();
         this.showIntegration(data.integration);
       },
 
       drawMain() {
-        if (ctl.plot) ctl.plot.setTraces(ctl.traces);
+        if (ctl.plot) ctl.plot.setTraces(ctl.traces.map((t) => (t.kind === 'sum' ? { ...t, visible: this.showSum } : t)));
+      },
+      setSum() {
+        remember('sum', this.showSum);
+        this.drawMain();
       },
 
       showIntegration(integ) {

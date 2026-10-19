@@ -34,12 +34,22 @@
   </div>
 {%- endmacro %}
 
+{#- Real warnings stay in view; rounding notes fold into one grey line that switches to the stronger wording at
+    1 dB or more (graph.js classifyNotes, design §12.3). Needs graph.js and the component's `warnings`. -#}
 {% macro warnings() -%}
-  <ul class="graph-warnings" x-show="warnings.length" x-cloak>
-    <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
-  </ul>
-  <p class="hint" x-show="warnings.some((w) => w.includes('rounding note'))" x-cloak>What is a rounding
-    note?{{ help("rounding") }}</p>
+  <div class="graph-notes" x-show="warnings.length" x-cloak>
+    <ul class="graph-warnings" x-show="mdsp.graph.classifyNotes(warnings).others.length">
+      <template x-for="w in mdsp.graph.classifyNotes(warnings).others" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
+    </ul>
+    <div class="graph-rounding" x-show="mdsp.graph.classifyNotes(warnings).notes.length"
+         :class="{ 'is-strong': mdsp.graph.classifyNotes(warnings).strong }">
+      <details>
+        <summary><span aria-hidden="true" x-show="mdsp.graph.classifyNotes(warnings).strong">&#9888;</span>
+          <span x-text="mdsp.graph.classifyNotes(warnings).summary"></span></summary>
+        <ul><template x-for="n in mdsp.graph.classifyNotes(warnings).notes" :key="n.label + n.db"><li x-text="n.text"></li></template></ul>
+      </details>{{ help("rounding") }}
+    </div>
+  </div>
 {%- endmacro %}
 
 {#- Grouped, with the hint in the group label (phase 9 P07): a gentle cut is Peaking, not Notch. -#}

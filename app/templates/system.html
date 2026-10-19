@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "components/peq_editor.html" as fx with context %}
 {#- System page (docs 05 §6): overlay of the selected un-muted outputs + their electrical sum, and the integration
     panel (phase difference of a pair over 20–100 Hz). Data comes from /ui/devices/{serial}/presets/{p}/system. -#}
 
@@ -85,12 +86,13 @@
         <button type="button" class="btn-small" @click="resetY()">Reset</button>
       </span>
     </div>
+    <p class="graph-reading" x-show="reading" x-text="reading" x-cloak></p>
+    <div class="response-options" x-show="hasSum" x-cloak>
+      <label class="check"><input type="checkbox" x-model="showSum" @change="setSum()"> Show the sum</label>
+      <span class="muted">The sum adds outputs as if they played from one spot.{{ help("calc-response") }}</span>
+    </div>
     <div class="graph-box" x-ref="graph" aria-label="Calculated response of the selected outputs and their sum"></div>
-    <ul class="graph-warnings" x-show="warnings.length" x-cloak>
-      <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
-    </ul>
-    <p class="hint" x-show="warnings.some((w) => w.includes('rounding note'))" x-cloak>What is a rounding
-      note?{{ help("rounding") }}</p>
+    {{ fx.warnings() }}
     <p class="field-error" x-show="error" x-text="error" x-cloak></p>
     <p class="hint" x-show="empty" x-cloak>No output is selected (muted outputs can't be).</p>
     <p class="hint"><strong>Sum</strong>: the calculated sum of the selected outputs' full chains (routing, input and
@@ -116,7 +118,7 @@
     </div>
     <div class="graph-box" x-ref="integration" x-show="integrationOn"
          aria-label="Phase difference of the two outputs; shaded where it exceeds {{ threshold|int }} degrees"></div>
-    <p class="integration-cursor" x-show="integrationOn" x-text="cursor || 'Hover the graph for values'"></p>
+    <p class="integration-cursor" x-show="integrationOn" x-text="cursor || 'Tap or click the graph for values'"></p>
     <p class="hint" x-show="integrationNote" x-text="integrationNote" x-cloak></p>
     <template x-if="integrationOn">
       <div>
