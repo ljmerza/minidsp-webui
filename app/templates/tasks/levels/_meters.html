@@ -1,0 +1,16 @@
+{#- Set levels: live meters for one side (static/js/task_levels.js "levelWatch"). Decorative bars (aria-hidden) with
+    the target zone shaded and the CLIP mark; the peak so far is text. Meters are never live regions (design §16.5).
+    ``show_zone``: inputs show the −12 to −3 dBFS target zone. -#}
+<ul class="lv-meters">
+  <template x-for="(name, i) in names" :key="i">
+    <li class="lv-row" x-show="!skip[i]">
+      <span class="lv-name" x-text="name"></span>
+      <span class="lv-bar" aria-hidden="true">
+        {%- if show_zone %}<span class="lv-zone" style="left: {{ zone.left }}%; width: {{ zone.width }}%"></span>{% endif %}
+        <span class="lv-fill" :class="{ 'is-hot': clips[i] > 0 }" :style="`width: ${width(i)}`"></span>
+        <span class="lv-clipmark" style="left: {{ zone.clip }}%"></span>
+      </span>
+      <span class="lv-peak"><span x-text="peakText(i)">&mdash;</span><template x-if="clips[i] > 0"><strong class="lv-clips" x-text="` · CLIP ×${clips[i]}`"></strong></template></span>
+    </li>
+  </template>
+</ul>

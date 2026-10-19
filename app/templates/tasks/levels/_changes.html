@@ -1,0 +1,15 @@
+{#- Set levels: what this run changed so far (each fix applies at once), with Undo all (field by field; what changed
+    elsewhere since is left alone). -#}
+{%- if changes %}
+<section class="task-changes-box" aria-labelledby="lv-changes-{{ mode }}">
+  <h3 id="lv-changes-{{ mode }}" class="task-group-title">Changes so far</h3>
+  <ul class="task-result">{% for c in changes %}<li>{{ c }}</li>{% endfor %}</ul>
+  {%- if s.params.undo %}
+  {%- call t.form("post", "task-undo-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="{{ s.number }}">
+    <button type="submit" name="op" value="undo" class="task-undo">Undo all</button>
+  {%- endcall %}
+  {%- endif %}
+</section>
+{%- endif %}

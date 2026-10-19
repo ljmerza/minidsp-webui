@@ -1,0 +1,37 @@
+{#- Set levels step 2 (design §14.6): play something loud you know. The input meters, large, with the target zone
+    shaded; it waits for signal and says so after 15 s of none. The peaks seen go to step 3. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p class="task-question">Play something loud you know well (a film scene or a song), with the player at its usual level.</p>
+{%- if source_choices %}
+{%- call t.form("post", "task-live-form task-source-form") %}
+  {{ t.hidden(s.params) }}
+  <input type="hidden" name="step" value="2">
+  <label class="task-field">Source{{ help("source") }}
+    <select name="source">
+      {%- for choice in source_choices %}<option value="{{ choice }}"{% if choice == source %} selected{% endif %}>{{ choice }}</option>{% endfor %}
+    </select></label>
+  <button type="submit" name="op" value="source" class="task-live">Use this source</button>
+  <span class="task-applies-now">Applies now</span>
+{%- endcall %}
+{%- endif %}
+<div class="lv-watch" x-data='levelWatch({{ watch|tojson }})'>
+  <p class="hint">The shaded zone is the target for the loudest moments: −12 to −3 dBFS{{ help("dbfs") }}.
+    The line at the right end is CLIP{{ help("clip") }}.</p>
+  {%- set show_zone = true %}
+  {% include "tasks/levels/_meters.html" %}
+  <p class="task-wait" role="status">
+    <span x-show="signal" x-cloak><span aria-hidden="true">&#10003;</span> Signal found. Let it play for a few seconds, then press Next.</span>
+    <span x-show="!signal && !noSignal">Waiting for signal&hellip;</span>
+    <span x-show="noSignal" x-cloak>No signal: check Source and that the player isn't paused.
+      {%- if diagnose_href %} <a href="{{ diagnose_href }}">Something wrong?</a>{% endif %}</span>
+  </p>
+  {%- call t.form(main=true) %}
+    {{ t.hidden(s.params, skip=("pk_i", "cl_i")) }}
+    <input type="hidden" name="pk_i" :value="pk">
+    <input type="hidden" name="cl_i" :value="cl">
+  {%- endcall %}
+</div>
+{% include "tasks/levels/_changes.html" %}
+{{ t.nav(back=1, next=3) }}

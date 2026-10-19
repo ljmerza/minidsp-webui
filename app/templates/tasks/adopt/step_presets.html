@@ -1,0 +1,17 @@
+{#- Set up this device step 3 (design §14.7): which presets. Only the playing one can be read from the device. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("presets",)) }}
+  <input type="hidden" name="presets" value="">
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Which presets?</legend>
+    {%- for r in rows %}
+    <label class="task-choice"><input type="checkbox" name="p_{{ r.n }}" value="1"{% if r.checked %} checked{% endif %}
+      {%- if r.missing %} disabled aria-describedby="adopt-missing-{{ r.n }}-{{ mode }}"{% endif %}>
+      <span>{{ r.label }}{% if r.missing %} <span class="task-why" id="adopt-missing-{{ r.n }}-{{ mode }}">Not in the backup file.</span>{% endif %}</span></label>
+    {%- endfor %}
+  </fieldset>
+  <p class="hint">Only the playing preset can be read from the device; the others stay Unknown unless you import them.</p>
+{%- endcall %}
+{{ t.nav(back=2, next=4) }}

@@ -1,0 +1,17 @@
+{#- Set up this device step 6 (design §14.7): what is known now, the automatic Check device, and Open Home. -#}
+{{ t.heading() }}
+{{ t.message(error, error=true) }}
+{%- if lines %}
+<div class="task-done-card" role="status">
+  {%- for line in lines %}<p><span aria-hidden="true">&#10003;</span> {{ line }}</p>{% endfor %}
+  {%- if check %}<p>{{ check }}</p>{% endif %}
+</div>
+<p class="hint">Device &amp; sync shows every setting and can use the device's values where they differ.
+  <a href="{{ device_href }}">Open Device &amp; sync</a></p>
+{%- elif adoption %}
+<p>Set up on preset {{ (adoption.preset or 0) + 1 }}.</p>
+{%- endif %}
+<div class="task-nav">
+  <span></span>
+  <a class="btn-link btn-primary task-next" href="{{ home_href }}">Open Home</a>
+</div>

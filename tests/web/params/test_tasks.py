@@ -36,7 +36,8 @@ async def test_task_pages_and_links_light_up(ctx):
     assert 'href="/tasks/diagnose"' in page.text and 'href="/tasks/louder"' in page.text
     assert "Guided tasks" in page.text
     home = (await ctx.http.get("/")).text
-    assert 'data-tasks="diagnose louder"' in home  # the dialog on every page
+    served = re.search(r'data-tasks="([^"]*)"', home)  # the dialog on every page
+    assert served and {"diagnose", "louder", "set-levels", "profiles", "adopt"} <= set(served.group(1).split())
     assert 'href="/tasks/diagnose"' in home  # the Help me… menu and Home's Guided tasks
     assert (await ctx.http.get("/tasks/eq-cut")).status_code == 404  # not built yet: its links keep their fallback
     assert (await ctx.http.get("/ui/tasks/nope")).status_code == 404

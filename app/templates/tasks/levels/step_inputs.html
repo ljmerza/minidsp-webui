@@ -1,0 +1,30 @@
+{#- Set levels step 3 (design §14.6): each input's loudest moment against the target zone. A clipping input is fixed
+    at the player; lowering the input here is offered as a second choice (applies now). -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<ul class="task-checks">
+  {%- for r in readings %}
+  <li class="task-check is-{{ 'ok' if r.status in ('ok', 'quiet') else 'fail' if r.status == 'hot' else 'unknown' if r.status in ('close', 'unknown') else 'pending' }}" data-reading="i{{ r.index }}">
+    <span class="task-check-glyph" aria-hidden="true">{{ r.glyph }}</span>
+    <span class="visually-hidden">{{ r.word }}: </span>
+    <span class="task-check-text">{{ r.text }}</span>
+    {%- if r.detail %}<p class="task-check-detail">{{ r.detail }}</p>{% endif %}
+    {%- for fx in r.fixes %}
+    {%- call t.form("post", "task-live-form") %}
+      {{ t.hidden(s.params) }}
+      <input type="hidden" name="step" value="3">
+      <input type="hidden" name="input" value="{{ r.index }}">
+      <button type="submit" name="op" value="lower_in" class="task-live">{{ fx.label }}</button>
+      <span class="task-applies-now">Applies now</span>
+    {%- endcall %}
+    {%- endfor %}
+  </li>
+  {%- endfor %}
+</ul>
+{%- set q = dict(s.params, step=2)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+<p><a class="btn-link btn-small task-again" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+      hx-target="closest [data-task-host]" hx-swap="innerHTML">Measure again</a></p>
+{% include "tasks/levels/_changes.html" %}
+{%- call t.form(main=true) %}{{ t.hidden(s.params) }}{%- endcall %}
+{{ t.nav(back=2, next=4) }}

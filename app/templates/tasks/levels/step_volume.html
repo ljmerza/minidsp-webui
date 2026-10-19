@@ -1,0 +1,36 @@
+{#- Set levels step 6 (design §14.6): the everyday volume, in small steps that apply at once, with the typical band
+    shown; Remember this as my usual level stores it. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p class="task-question">Raise it until a normal scene is comfortable.</p>
+<p class="lv-volume">Volume{{ help("volume") }}: <strong>{{ volume_text }}</strong>
+  {%- if usual_text %} <span class="muted">· your usual level {{ usual_text }}</span>{% endif %}</p>
+<div class="lv-band" aria-hidden="true">
+  <span class="lv-band-zone" style="left: {{ band.left }}%; width: {{ band.width }}%"></span>
+  {%- if usual_at is not none %}<span class="lv-band-usual" style="left: {{ usual_at }}%"></span>{% endif %}
+  {%- if at is not none %}<span class="lv-band-at" style="left: {{ at }}%"></span>{% endif %}
+</div>
+<p class="hint">Most listening sits between {{ band_text }} (the shaded band); it depends on your source and amplifier.</p>
+<div class="lv-steps">
+  {%- for st in vol_steps %}
+  {%- call t.form("post", "task-live-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="6">
+    <input type="hidden" name="delta" value="{{ '%g'|format(st.delta) }}">
+    {%- if confirm_needed is not none and (confirm_needed|float) == st.delta %}
+    <label class="task-confirm"><input type="checkbox" name="confirm" value="1" required> I confirm raising the Volume by {{ '%g'|format(st.delta) }} dB.</label>
+    {%- endif %}
+    <button type="submit" name="op" value="vol" class="task-live"{% if not st.ok %} disabled{% endif %}>{{ st.label }}<span class="visually-hidden"> Volume</span></button>
+  {%- endcall %}
+  {%- endfor %}
+  <span class="task-applies-now">Each step applies now</span>
+</div>
+{%- call t.form("post", "task-live-form") %}
+  {{ t.hidden(s.params, skip=("usual",)) }}
+  <input type="hidden" name="step" value="6">
+  <button type="submit" name="op" value="usual" class="task-more"{% if volume is none %} disabled{% endif %}>Remember this as my usual level</button>
+{%- endcall %}
+{% include "tasks/levels/_changes.html" %}
+{%- call t.form(main=true) %}{{ t.hidden(s.params) }}{%- endcall %}
+{{ t.nav(back=5, next=7) }}

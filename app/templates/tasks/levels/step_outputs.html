@@ -1,0 +1,52 @@
+{#- Set levels step 4 (design §14.6): watch the outputs for 30 s, then each one's peak, CLIP count, total and headroom.
+    A clipping output gets three fixes; each applies now and the watch starts again. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+{%- if phase == "watch" %}
+<div class="lv-watch" x-data='levelWatch({{ watch|tojson }})'>
+  <p class="task-question">Keep it playing. Watching the outputs for {{ watch.secs }} seconds:
+    <strong><span x-text="left">{{ watch.secs }}</span> s left</strong>.</p>
+  {%- set show_zone = false %}
+  {% include "tasks/levels/_meters.html" %}
+  {%- call t.form(main=true) %}
+    {{ t.hidden(s.params, skip=("pk_o", "cl_o", "phase")) }}
+    <input type="hidden" name="phase" value="result">
+    <input type="hidden" name="pk_o" :value="pk">
+    <input type="hidden" name="cl_o" :value="cl">
+    <button type="submit" name="step" value="4" class="task-more" data-watch-done>See the results now</button>
+  {%- endcall %}
+</div>
+{%- else %}
+<ul class="task-checks">
+  {%- for r in results %}
+  <li class="task-check is-{{ 'ok' if r.status == 'ok' else 'fail' if r.status == 'hot' else 'unknown' if r.status == 'unknown' else 'pending' }}" data-reading="o{{ r.index }}">
+    <span class="task-check-glyph" aria-hidden="true">{{ r.glyph }}</span>
+    <span class="visually-hidden">{{ r.word }}: </span>
+    <span class="task-check-text">{{ r.text }}</span>
+    {%- if r.detail %}<p class="task-check-detail">{{ r.detail }}</p>{% endif %}
+    {%- if r.fixes %}
+    <div class="task-fix-list">
+      {%- for fx in r.fixes %}
+      {%- call t.form("post", "task-fix") %}
+        {{ t.hidden(s.params) }}
+        <input type="hidden" name="step" value="4">
+        <input type="hidden" name="output" value="{{ r.index }}">
+        <input type="hidden" name="fix" value="{{ fx.id }}">
+        {%- if fx.preview %}<p class="task-fix-preview">{{ fx.preview }}</p>{% endif %}
+        <button type="submit" name="op" value="fix" class="task-live">{{ fx.label }}</button>
+        <span class="task-applies-now">Applies now</span>
+      {%- endcall %}
+      {%- endfor %}
+    </div>
+    {%- endif %}
+  </li>
+  {%- endfor %}
+</ul>
+{%- set q = dict(s.params, step=4, phase="watch", pk_o="", cl_o="")|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+<p><a class="btn-link btn-small task-again" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+      hx-target="closest [data-task-host]" hx-swap="innerHTML">Watch again</a></p>
+{%- call t.form(main=true) %}{{ t.hidden(s.params, skip=("phase",)) }}{%- endcall %}
+{%- endif %}
+{% include "tasks/levels/_changes.html" %}
+{{ t.nav(back=3, next=5) }}

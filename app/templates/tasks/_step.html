@@ -17,7 +17,7 @@
     {%- endif %}
   </div>
   <ol class="task-progress" aria-hidden="true">
-    {%- for name in w.steps %}
+    {%- for name in steps %}
     <li class="{{ 'is-done' if loop.index < s.number else 'is-current' if loop.index == s.number else '' }}">
       <span class="task-dot">{{ "●" if loop.index <= s.number else "○" }}</span> {{ name }}</li>
     {%- endfor %}
