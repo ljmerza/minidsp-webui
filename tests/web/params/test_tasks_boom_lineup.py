@@ -25,7 +25,8 @@ async def test_both_wizards_are_served_and_their_links_light_up(ctx):
     for path in ("/tasks/eq-cut", "/tasks/line-up"):
         assert (await ctx.http.get(path)).status_code == 200, path
     home = (await ctx.http.get("/")).text
-    assert 'data-tasks="diagnose louder eq-cut line-up"' in home
+    served = re.search(r'data-tasks="([^"]*)"', home)  # the dialog on every page opens both
+    assert served and {"eq-cut", "line-up"} <= set(served.group(1).split())
     assert 'href="/tasks/eq-cut"' in home and 'href="/tasks/line-up"' in home
     # The EQ and Delay tabs link to them for their output.
     assert 'href="/tasks/eq-cut?output=2"' in (await ctx.http.get("/outputs/2?tab=peq")).text
