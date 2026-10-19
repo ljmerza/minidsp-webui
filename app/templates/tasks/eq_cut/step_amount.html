@@ -1,0 +1,45 @@
+{#- Fix a boom step 3 (design §14.2): Cut or Boost and how many dB (a magnitude: no minus sign), the width with the
+    range each one touches, and the before/after preview with its reading. Changing a choice redraws the preview in
+    place (hx-select picks it out of this same step). -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  <p class="task-question">{{ o.name }} at {{ '%g'|format(a.freq) }} Hz</p>
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("kind", "amount", "width")) }}
+  <div class="eqcut-live" hx-get="{{ fragment_url }}" hx-trigger="change" hx-include="closest form"
+       hx-vals='{"step": "3", "mode": "dialog"}' hx-target="find .eqcut-preview" hx-select=".eqcut-preview-body"
+       hx-swap="innerHTML" hx-sync="this:replace">
+    <fieldset class="task-segmented">
+      <legend>Cut or boost?{{ help("cut-boost") }}</legend>
+      <label><input type="radio" name="kind" value="cut"{% if a.kind == "cut" %} checked{% endif %}> Cut</label>
+      <label><input type="radio" name="kind" value="boost"{% if a.kind == "boost" %} checked{% endif %}> Boost</label>
+    </fieldset>
+    <div class="eqcut-amount" x-data="{ set(v) { const f = $refs.amount; f.value = Math.min({{ max_db }}, Math.max(0.5, Math.round(v * 2) / 2)); f.dispatchEvent(new Event('change', { bubbles: true })); }, by(d) { this.set((parseFloat($refs.amount.value) || 0) + d); } }">
+      <span class="eqcut-amount-label" id="eqcut-amount-label-{{ mode }}">How many dB?</span>
+      <div class="eqcut-stepper">
+        <button type="button" class="eqcut-step" @click="by(-1)" aria-label="1 dB less">&minus;</button>
+        <input type="number" name="amount" x-ref="amount" inputmode="decimal" min="0.5" max="{{ max_db }}" step="0.5"
+               value="{{ '%g'|format(a.amount) }}" aria-labelledby="eqcut-amount-label-{{ mode }}"
+               aria-describedby="eqcut-amount-hint-{{ mode }}">
+        <button type="button" class="eqcut-step" @click="by(1)" aria-label="1 dB more">+</button>
+        <span class="unit">dB</span>
+      </div>
+      <div class="eqcut-quick" role="group" aria-label="Quick picks">
+        {%- for q in quick %}
+        <button type="button" class="eqcut-pick" @click="set({{ q }})">{{ '%g'|format(q) }} dB</button>
+        {%- endfor %}
+      </div>
+      <p class="hint" id="eqcut-amount-hint-{{ mode }}">0.5 to {{ '%g'|format(max_db) }} dB. Small cuts (3 to 6 dB)
+        usually sound better than big boosts.</p>
+    </div>
+    <fieldset class="task-choices eqcut-widths">
+      <legend>Width{{ help("q") }}</legend>
+      {%- for w in widths %}
+      <label class="task-choice"><input type="radio" name="width" value="{{ w.id }}"{% if w.id == a.width %} checked{% endif %}>
+        <span>{{ w.text }}</span></label>
+      {%- endfor %}
+    </fieldset>
+    {%- include "tasks/eq_cut/_preview.html" %}
+  </div>
+{%- endcall %}
+{{ t.nav(back=2, next=4) }}

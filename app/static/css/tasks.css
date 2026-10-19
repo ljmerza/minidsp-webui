@@ -97,6 +97,43 @@ a.btn-link.btn-primary { background: var(--accent); border-color: var(--accent);
 .task-done-card { padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 0.8rem; }
 .task-done-card p { margin: 0.2rem 0; }
 
+/* Fix a boom (design §14.2): Cut/Boost with a magnitude, −/+ steppers and quick picks, widths, the preview graph. */
+.eqcut-amount { margin: 0 0 0.8rem; }
+.eqcut-amount-label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+.eqcut-stepper { display: flex; align-items: center; gap: 0.4rem; }
+.eqcut-stepper input[type="number"] { width: 5.5rem; min-height: 2.75rem; text-align: center; }
+.eqcut-step { min-width: 2.75rem; min-height: 2.75rem; font-size: 1.2rem; }
+.eqcut-quick { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.eqcut-pick { min-height: 2.75rem; min-width: 3.5rem; }
+.eqcut-preview { margin: 0 0 0.6rem; }
+.eqcut-legend { margin: 0 0 0.3rem; font-size: 0.85rem; color: var(--text-muted); }
+.eqcut-key { display: inline-block; width: 1.4rem; height: 0; vertical-align: middle; border-top: 2px solid var(--text-muted); }
+.eqcut-key-new { border-top: 2px dashed var(--accent); }
+.eqcut-plot { position: relative; height: 180px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.eqcut-graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+.eqcut-grid { stroke: var(--border); stroke-width: 1; }
+.eqcut-zero { stroke: var(--text-muted); }
+.eqcut-mark { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 2 3; }
+.eqcut-now { fill: none; stroke: var(--text-muted); stroke-width: 2; }
+.eqcut-new { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.eqcut-tick { position: absolute; font-size: 0.7rem; line-height: 1; color: var(--text-muted); pointer-events: none; white-space: nowrap; }
+.eqcut-tick-y { left: 0; transform: translateY(-50%); text-align: right; padding-right: 0.3rem; box-sizing: border-box; }
+.eqcut-tick-x { bottom: 0.3rem; transform: translateX(-50%); }
+.eqcut-reading { margin: 0.4rem 0 0; }
+.eqcut-widths legend { font-weight: 600; padding: 0; margin-bottom: 0.2rem; }
+
+/* Line up shakers (design §14.5) */
+.lineup-legend { font-weight: 600; }
+.lineup-pick { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+.lineup-pick select { min-width: min(16rem, 100%); }
+.lineup-dist { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.lineup-dist input[type="number"] { width: 6rem; min-height: 2.75rem; }
+.lineup-now { font-size: 1.1rem; margin: 0.6rem 0 0.2rem; }
+.lineup-tune { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.4rem 0; }
+.lineup-tune .task-form { display: inline; }
+.lineup-nudge { min-height: 3rem; min-width: 6rem; font-size: 1.05rem; }
+.lineup-polarity { min-height: 2.75rem; }
+
 /* /tasks and /tasks/<id> */
 .task-page-title { margin-bottom: 0.2rem; }
 .task-page-back { margin: 0 0 0.8rem; }

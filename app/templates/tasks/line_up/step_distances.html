@@ -1,0 +1,33 @@
+{#- Line up step 2 (design §14.5): the distances from the seat. The second one starts empty (friction P13); the unit
+    choice is remembered in this browser. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("seat", "felt_dist", "heard_dist", "unit", "target")) }}
+  <div x-data="{ unit: '{{ a.unit }}' }"
+       x-init="{% if not a.unit_given %}const u = localStorage.getItem('mdsp.distanceUnit'); if (u === 'm' || u === 'ft') unit = u;{% endif %} $watch('unit', (v) => localStorage.setItem('mdsp.distanceUnit', v))">
+    <fieldset class="task-segmented">
+      <legend>Measure in</legend>
+      <label><input type="radio" name="unit" value="m" x-model="unit"{% if a.unit == "m" %} checked{% endif %}> metres</label>
+      <label><input type="radio" name="unit" value="ft" x-model="unit"{% if a.unit == "ft" %} checked{% endif %}> feet</label>
+    </fieldset>
+    <fieldset class="task-choices">
+      <legend class="lineup-legend">{{ felt_name }}</legend>
+      <label class="task-choice"><input type="radio" name="seat" value="1"{% if a.seat %} checked{% endif %}>
+        <span>In or under my seat</span></label>
+      <div class="task-choice task-choice-with">
+        <label><input type="radio" name="seat" value="0"{% if not a.seat %} checked{% endif %}> At a distance:</label>
+        <label class="lineup-dist"><span class="visually-hidden">{{ felt_name }} distance from my seat</span>
+          <input type="number" name="felt_dist" inputmode="decimal" min="0" step="any" value="{{ felt_dist }}">
+          <span class="unit" x-text="unit">{{ a.unit }}</span> from my seat</label>
+      </div>
+    </fieldset>
+    <label class="task-field lineup-heard"><span class="lineup-legend">{{ heard_name }}</span>
+      <input type="number" name="heard_dist" inputmode="decimal" min="0" step="any" value="{{ heard_dist }}" required
+             aria-describedby="lineup-heard-hint-{{ mode }}"{% if error %} aria-invalid="true"{% endif %}>
+      <span class="unit" x-text="unit">{{ a.unit }}</span> from my seat</label>
+    <p class="hint" id="lineup-heard-hint-{{ mode }}">Measure from your head to {{ possessive(heard_name) }} speaker
+      (the cone, not the cable).</p>
+  </div>
+{%- endcall %}
+{{ t.nav(back=1, next=3) }}

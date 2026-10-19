@@ -1,0 +1,23 @@
+{#- Line up step 1 (design §14.5): the output felt in the seat and the one heard from across the room. Defaults come
+    from the Shakers (tactile) flag, then from the names and the bands. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("felt", "heard", "target")) }}
+  <label class="task-field lineup-pick">Felt in my seat
+    <select name="felt">
+      {%- for r in rows %}
+      <option value="{{ r.n }}"{% if r.n == felt %} selected{% endif %}>{{ r.name }}{% if r.note %} ({{ r.note }}){% endif %}</option>
+      {%- endfor %}
+    </select></label>
+  <label class="task-field lineup-pick">Heard from across the room
+    <select name="heard">
+      {%- for r in rows %}
+      <option value="{{ r.n }}"{% if r.n == heard %} selected{% endif %}>{{ r.name }}{% if r.note %} ({{ r.note }}){% endif %}</option>
+      {%- endfor %}
+    </select></label>
+  <p class="hint">Shakers in your seat are felt straight away, but the sub's sound needs time to cross the room. A
+    delay{{ help("delay") }} makes the shakers wait for it, so the hit and the boom arrive together.</p>
+{%- endcall %}
+{{ t.nav(next=2) }}

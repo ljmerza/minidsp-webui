@@ -1,0 +1,13 @@
+{#- Fix a boom step 2 (design §14.2): the frequency in Hz. It starts empty unless a link brought one. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  <p class="task-question">{{ o.name }}{% if has %}: {{ has }} already{% endif %}</p>
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("freq",)) }}
+  <label class="task-field">Frequency of the boom
+    <input type="number" name="freq" inputmode="decimal" min="5" max="20000" step="any" value="{{ freq }}" required
+           aria-describedby="eqcut-freq-hint-{{ mode }}"{% if error %} aria-invalid="true"{% endif %}> Hz</label>
+  <p class="hint" id="eqcut-freq-hint-{{ mode }}">Booms are usually between 30 and 120 Hz. If you measured it (for
+    example with REW), use the peak's frequency. Not sure? Try 40 Hz and listen; you can undo it.</p>
+{%- endcall %}
+{{ t.nav(back=1, next=3) }}
