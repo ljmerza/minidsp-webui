@@ -156,6 +156,7 @@ a.btn-link.btn-primary { background: var(--accent); border-color: var(--accent);
   .task-titlebar { margin: 0 -0.8rem 0.6rem; padding-left: 0.8rem; }
   .task-dialog .task-nav { margin-left: -0.8rem; margin-right: -0.8rem; padding: 0.6rem 0.8rem calc(0.6rem + env(safe-area-inset-bottom, 0px)); }
   .task-nav button, .task-nav a.btn-link { flex: 1 1 8rem; }
+  .task-nav > span:empty { display: none; } /* no Back: the lone button spans the bar instead of being inset by the gap */
 }
 @media (prefers-contrast: more) {
   .flow-block.is-wizard-target { outline-width: 4px; }
