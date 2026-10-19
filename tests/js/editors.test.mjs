@@ -436,3 +436,131 @@ describe('widthHint', () => {
     for (const [f, q] of [[null, 4], [40, 0], [40, ''], ['', 4], [-40, 4]]) assert.equal(widthHint(f, q), '');
   });
 });
+
+describe('width range per band (phase 9 design §8.2, §8.3)', () => {
+  const { widthRange, rangeText, widthHint } = window.mdsp.filters;
+
+  test('rangeText is the hint without the sentence, and Nyquist caps the upper edge', () => {
+    assert.equal(rangeText(40, 4), '35–45 Hz');
+    assert.equal(rangeText(0, 4), '');
+    const [, hi] = widthRange(20000, 0.5, 48000);
+    assert.equal(hi, 48000);
+    assert.equal(rangeText(20000, 0.5, 48000), '8280–48000 Hz');
+    assert.equal(widthHint(40, 4, 48000), 'Width (Q 4) at 40 Hz: affects about 35–45 Hz');
+  });
+
+  test('each peaking, notch or band-pass band shows its range; shelves and pass filters do not', async () => {
+    const ed = await peqEditor([
+      bandView(0, { design: { type: 'peaking', freq: 40, q: 4, gain_db: -4 }, bypass: false }),
+      bandView(1, { design: { type: 'notch', freq: 60, q: 8 }, bypass: false }),
+      bandView(2, { design: { type: 'bandpass', freq: 1000, q: 2 }, bypass: false }),
+      bandView(3, { design: { type: 'lowshelf', freq: 40, q: 0.71, gain_db: 3 }, bypass: false }),
+      bandView(4, { design: { type: 'hp2', freq: 20, q: 0.71 }, bypass: false }),
+    ]);
+    assert.deepEqual(ed.bands.map((b) => ed.qRange(b)), ['about 35–45 Hz', 'about 56–64 Hz', 'about 781–1280 Hz', '', '']);
+    ed.bands[0].form.q = 8; // typing: follows at once
+    assert.equal(ed.qRange(ed.bands[0]), 'about 38–43 Hz');
+    ed.select(1);
+    assert.equal(ed.widthHint(), 'Width (Q 8) at 60 Hz: affects about 56–64 Hz');
+    ed.select(3); // a shelf: the hint falls back to the first band with a range
+    assert.equal(ed.widthHint(), 'Width (Q 8) at 40 Hz: affects about 38–43 Hz');
+  });
+});
+
+describe('steppers (phase 9 design §8.3, §16 phone rule 4)', () => {
+  const { stepFreq, stepQ, stepMagnitude } = window.mdsp.filters;
+
+  test('frequency moves 1/6 octave, and back again', () => {
+    assert.equal(stepFreq(40, 1), 44.9);
+    assert.equal(stepFreq(44.9, -1), 40);
+    assert.equal(stepFreq(1000, 1), 1122);
+    let f = 40;
+    for (let k = 0; k < 6; k += 1) f = stepFreq(f, 1);
+    assert.ok(Math.abs(f - 80) <= 0.2, `six steps are an octave: ${f}`);
+  });
+
+  test('Q walks a ladder of round values, joining it from any value', () => {
+    assert.equal(stepQ(4, 1), 4.8);
+    assert.equal(stepQ(4, -1), 3.4);
+    assert.equal(stepQ(0.71, 1), 0.8);
+    assert.equal(stepQ(4.3, 1), 4.8);
+    assert.equal(stepQ(4.3, -1), 4);
+    assert.equal(stepQ(30, 1), 30);
+    assert.equal(stepQ(0.1, -1), 0.1);
+    for (const q of [1.4, 4, 8]) assert.equal(stepQ(stepQ(q, 1), -1), q, `${q} is on the ladder`);
+  });
+
+  test('the magnitude moves 0.5 dB on a 0.5 dB grid and never below 0', () => {
+    assert.equal(stepMagnitude(4, 1), 4.5);
+    assert.equal(stepMagnitude(4, -1), 3.5);
+    assert.equal(stepMagnitude(4.3, 1), 4.5);
+    assert.equal(stepMagnitude(4.3, -1), 4);
+    assert.equal(stepMagnitude(0, -1), 0);
+    assert.equal(stepMagnitude(0.2, -1), 0);
+  });
+
+  async function stepEditor(bands) {
+    const ed = factories.peqEditor({ side: 'outputs', channel: 0, preset: 0, name: 'Out 1', fs: 96000, stateUrl: '/s', bandUrl: '/b/{band}', bankUrl: '/bank', stepDelayMs: 5 });
+    const loading = ed.load();
+    await settle();
+    await answer(calls.pop(), 200, { sync: {}, bands });
+    await loading;
+    return ed;
+  }
+  const pause = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+  const CUT4 = { type: 'peaking', freq: 40, q: 4, gain_db: -4 };
+
+  test('quick presses preview at once and are sent once, like a typed value', async () => {
+    const ed = await stepEditor([bandView(0, { design: CUT4, bypass: false })]);
+    const band = ed.bands[0];
+    ed.step(band, 'q', 1);
+    ed.step(band, 'q', 1);
+    ed.step(band, 'freq', 1);
+    assert.deepEqual([band.form.q, band.form.freq, band.dirty], [5.6, 44.9, true]);
+    assert.ok(band.preview, 'the curve previews the step');
+    assert.equal(posts().length, 0);
+    await pause();
+    assert.equal(posts().length, 1);
+    assert.deepEqual(posts()[0].body.design, { type: 'peaking', freq: 44.9, q: 5.6, gain_db: -4 });
+    assert.equal(ed.bands[0].dirty, false);
+  });
+
+  test('gain steps move the magnitude and keep Cut or Boost: a cut never becomes a boost', async () => {
+    const ed = await stepEditor([bandView(0, { design: { ...CUT4, gain_db: -0.5 }, bypass: false }), bandView(1, { design: { ...CUT4, gain_db: 1 }, bypass: false })]);
+    const [cut, boost] = ed.bands;
+    ed.step(cut, 'gain', -1);
+    assert.deepEqual([cut.form.gain_db, cut.form.cut, cut.form.mag], [0, true, '0']);
+    assert.equal(ed.canStep(cut, 'gain', -1), false);
+    ed.step(cut, 'gain', -1); // ignored at 0
+    ed.step(cut, 'gain', 1);
+    assert.deepEqual([cut.form.gain_db, cut.form.cut, cut.form.mag], [-0.5, true, '0.5']);
+    ed.step(boost, 'gain', 1);
+    assert.deepEqual([boost.form.gain_db, boost.form.cut, boost.form.mag], [1.5, false, '1.5']);
+    ed.step(boost, 'gain', -1);
+    ed.step(boost, 'gain', -1);
+    ed.step(boost, 'gain', -1);
+    assert.deepEqual([boost.form.gain_db, boost.form.cut], [0, false]); // Boost stays chosen at 0
+    await pause();
+    const sent = Object.fromEntries(posts().map((c) => [c.url, c.body.design.gain_db]));
+    assert.deepEqual(sent, { '/b/0': -0.5, '/b/1': 0 });
+  });
+
+  test('steps stop at the field limits and on fields the type does not use', async () => {
+    const ed = await stepEditor([
+      bandView(0, { design: { type: 'peaking', freq: 43000, q: 30, gain_db: 20 }, bypass: false }),
+      bandView(1, { design: { type: 'peaking', freq: 5, q: 0.1, gain_db: -30 }, bypass: false }),
+      bandView(2, { design: { type: 'hp1', freq: 20 }, bypass: false }),
+      { ...bandView(3, { design: CUT4, bypass: false }), external: true },
+    ]);
+    const [high, low, hp1, locked] = ed.bands;
+    assert.deepEqual(['freq', 'q', 'gain'].map((f) => ed.canStep(high, f, 1)), [false, false, false]);
+    assert.deepEqual(['freq', 'q', 'gain'].map((f) => ed.canStep(high, f, -1)), [true, true, true]);
+    assert.deepEqual(['freq', 'q', 'gain'].map((f) => ed.canStep(low, f, -1)), [false, false, true]); // a 30 dB cut can shrink
+    assert.deepEqual(['freq', 'q', 'gain'].map((f) => ed.canStep(low, f, 1)), [true, true, false]);
+    assert.deepEqual(['freq', 'q', 'gain'].map((f) => ed.canStep(hp1, f, 1)), [true, false, false]);
+    assert.equal(ed.canStep(locked, 'freq', 1), false);
+    ed.bands[0].form.freq = 22000;
+    ed.step(ed.bands[0], 'freq', 1); // 22000 · 2^(1/6) is past 24 kHz: clamped
+    assert.equal(ed.bands[0].form.freq, 24000);
+  });
+});
