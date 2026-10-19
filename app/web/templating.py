@@ -6,8 +6,13 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
+from markupsafe import Markup
 
 from app import __version__
+from app.sync.status import status_view
+from app.sync.summary import session_summary
+from app.web.glossary import help_button
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -88,8 +93,19 @@ def _request_globals(request: Request) -> dict[str, Any]:
     }
 
 
+@pass_context
+def _help(context: Any, term_id: str, key: str | None = None) -> Markup:
+    """``{{ help("q") }}``: the "?" toggletip for a glossary term (app/web/glossary.py); ``key`` inside Alpine x-for."""
+    return help_button(term_id, context.get("root", "") or "", key)
+
+
 templates = Jinja2Templates(directory=TEMPLATE_DIR, context_processors=[_request_globals])
+templates.env.globals["help"] = _help
 templates.env.filters["num"] = fmt_num
 templates.env.filters["db"] = fmt_db
 templates.env.filters["duration"] = fmt_duration
 templates.env.filters["meter_pct"] = lambda db: f"{meter_fraction(db) * 100:.2f}%"
+# The plain-language summary of a preset (app/sync/summary.py): ``preset_summary(session, preset=None)``.
+templates.env.globals["preset_summary"] = session_summary
+# What the device holds of a preset, by the one status model (app/sync/status.py): ``sync_view(session, preset=None)``.
+templates.env.globals["sync_view"] = status_view

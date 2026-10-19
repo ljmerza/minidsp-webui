@@ -7,12 +7,12 @@
 } -%}
 <div class="response-view" x-data='responseView({{ cfg|tojson }})' hx-trigger="sse:desired">
   <div class="card-head">
-    <h2>Response</h2>
+    <h2>Calculated response{{ help("calc-response") }}</h2>
     <span class="seg" role="group" aria-label="Plot">
       <button type="button" class="btn-small" :class="{ 'is-current': mode === 'magnitude' }" @click="setMode('magnitude')">Magnitude</button>
       <button type="button" class="btn-small" :class="{ 'is-current': mode === 'phase' }" @click="setMode('phase')">Phase</button>
       <button type="button" class="btn-small" :class="{ 'is-current': mode === 'group_delay' }" @click="setMode('group_delay')">Group delay</button>
-    </span>
+    </span>{{ help("mag-phase") }}
   </div>
   <div class="response-options">
     <label class="check"><input type="checkbox" x-model="parts" @change="setParts()"> Show contributions</label>
@@ -25,10 +25,10 @@
     <span class="muted" x-show="loading" x-cloak>Updating&hellip;</span>
   </div>
   {{ fx.graph_toolbar() }}
-  <div class="graph-box" x-ref="graph" aria-label="{{ channel.name }} response"></div>
+  <div class="graph-box" x-ref="graph" aria-label="{{ channel.name }} calculated response"></div>
   {{ fx.warnings() }}
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
-  <p class="hint">Electrical response of the whole chain: routing and input PEQ, output PEQ, crossover, FIR, polarity, delay
-    and gain. Drivers, amplifiers and the room are not included. Contributions are drawn dashed.</p>
+  <p class="hint">Calculated response of the whole chain: routing and input EQ, output EQ, band filters, FIR, polarity,
+    delay and level. Speakers, shakers, amplifiers and the room are not included. Contributions are drawn dashed.</p>
 </div>
 {{ fx.assets() }}

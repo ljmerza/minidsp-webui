@@ -1,4 +1,5 @@
-{#- Channel names, colours and per-output gain ceilings. Rendered with ``c``. -#}
+{#- Channel names, colours and per-output level limits ("gain ceiling" in the code and API). Rendered with ``c``.
+    On phones the table becomes one card per channel (static/css/shell.css), labelled from ``data-label``. -#}
 <form id="settings-channels" class="settings-form" hx-post="{{ c.channels_url }}" hx-target="this" hx-swap="outerHTML">
   {% if c.errors %}
     <div class="form-errors" role="alert"><ul>{% for e in c.errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
@@ -9,22 +10,22 @@
     <table class="data-table settings-table">
       <thead>
         <tr><th scope="col">Channel</th><th scope="col">Name</th><th scope="col">Colour</th>
-            <th scope="col">Gain ceiling</th></tr>
+            <th scope="col">Level limit{{ help("level-limit") }}</th></tr>
       </thead>
       <tbody>
         {% for r in c.rows %}
           <tr>
             <th scope="row">{{ r.default_name }}</th>
-            <td><input type="text" name="{{ r.key }}-name" value="{{ r.name }}" maxlength="32" autocomplete="off"
+            <td data-label="Name"><input type="text" name="{{ r.key }}-name" value="{{ r.name }}" maxlength="32" autocomplete="off"
                        placeholder="{{ r.default_name }}" aria-label="{{ r.default_name }} name"></td>
-            <td><input type="color" name="{{ r.key }}-color" value="{{ r.color }}" aria-label="{{ r.default_name }} colour"></td>
-            <td>
+            <td data-label="Colour"><input type="color" name="{{ r.key }}-color" value="{{ r.color }}" aria-label="{{ r.default_name }} colour"></td>
+            <td data-label="Level limit"{% if r.kind != "output" %} class="no-limit"{% endif %}>
               {% if r.kind == "output" %}
                 <span class="num-field">
                   <input type="number" name="{{ r.key }}-max_gain_db" inputmode="decimal" step="0.5"
                          min="{{ c.gain_min }}" max="{{ c.gain_max }}" placeholder="{{ '%+g'|format(c.gain_max) }}"
                          value="{{ r.max_gain_db if r.max_gain_db is not none else '' }}"
-                         aria-label="{{ r.default_name }} gain ceiling in dB">
+                         aria-label="{{ r.default_name }} level limit in dB">
                   <span class="unit">dB</span>
                 </span>
               {% else %}<span class="muted">&mdash;</span>{% endif %}
@@ -34,7 +35,29 @@
       </tbody>
     </table>
   </div>
-  <p class="hint">Names and colours are used on every page and graph. A ceiling caps the output's gain and every
-    route into it; leave it empty for the device range ({{ c.gain_min|db }} to {{ c.gain_max|db(signed=true) }}).</p>
+  <fieldset class="channel-flags">
+    <legend>How each channel is used</legend>
+    <input type="hidden" name="channel_flags" value="1">
+    <ul class="channel-flag-list">
+      {% for r in c.rows %}
+        <li>
+          <span class="channel-flag-name">{{ r.name or r.default_name }}{% if r.name %} <span class="muted">({{ r.default_name }})</span>{% endif %}</span>
+          <label class="check"><input type="checkbox" name="{{ r.key }}-unused"{% if r.unused %} checked{% endif %}
+                 aria-label="{{ r.name or r.default_name }}: Not in use" aria-describedby="flag-unused-hint"> Not in use</label>
+          {% if r.kind == "output" %}
+            <label class="check"><input type="checkbox" name="{{ r.key }}-tactile"{% if r.tactile %} checked{% endif %}
+                   aria-label="{{ r.name or r.default_name }}: Shakers (tactile)" aria-describedby="flag-tactile-hint"> Shakers (tactile)</label>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="hint terms-line">Not in use{{ help("not-in-use") }} &middot; Shakers (tactile){{ help("tactile") }}</p>
+    <p class="hint" id="flag-unused-hint"><strong>Not in use:</strong> the app stops pointing out this channel's notes
+      (for example "muted, but In 1 is sent to it"), and a muted output reads "Not in use".</p>
+    <p class="hint" id="flag-tactile-hint"><strong>Shakers (tactile):</strong> this output drives shakers or bass
+      transducers you feel rather than hear.</p>
+  </fieldset>
+  <p class="hint">Names and colours are used on every page and graph. A level limit caps the output's level and every
+    route level into it; leave it empty for the device range ({{ c.gain_min|db }} to {{ c.gain_max|db(signed=true) }}).</p>
   <button type="submit">Save channels</button>
 </form>

@@ -78,6 +78,12 @@ class PresetState:
     last_error: str | None = None
     published: dict[str, SyncStatus] = field(default_factory=dict)
     published_key: tuple | None = None
+    # Per path, the `DeviceWriter.writes_sent` count of the write that last sent it: a device check taken at an earlier
+    # count is out of date for that path (app/sync/status.py).
+    sent_seq: dict[str, int] = field(default_factory=dict)
+    # The size of the current batch of pending writes (the most seen since the preset last had none), for "Sending n
+    # of N".
+    batch_total: int = 0
     _values_for: ConfigDoc | None = field(default=None, repr=False)
     _values: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -528,10 +534,14 @@ class DeviceWriter:
         getattr(log, "warning" if level == "warning" else "info")(message)
 
     def _publish(self, preset: int) -> None:
-        if self.bus is None or preset not in self.presets:
+        if preset not in self.presets:
             return
         state = self.presets[preset]
         status = self.status(preset)
+        pending = sum(1 for s in status.values() if s == SyncStatus.PENDING)
+        state.batch_total = max(state.batch_total, pending) if pending else 0
+        if self.bus is None:
+            return
         changes = {p: s.value for p, s in status.items() if state.published.get(p) != s}
         removed = [p for p in state.published if p not in status]
         state.published = status
@@ -645,6 +655,7 @@ class DeviceWriter:
         values = state.values(self.profile)
         state.applied.update(payload.values)
         for path, sent in payload.values.items():
+            state.sent_seq[path] = self.writes_sent
             state.attempts.pop(path, None)
             state.failed.pop(path, None)
             state.retry_at.pop(path, None)

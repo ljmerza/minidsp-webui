@@ -1,5 +1,5 @@
 {#- Inline channel rename (header strip of the input/output pages). Saved on change; keeps colour and ceiling. -#}
-<form class="channel-name" hx-post="{{ channel.name_url }}" hx-trigger="change, submit" hx-swap="outerHTML"
+<form class="channel-name" id="channel-name" hx-post="{{ channel.name_url }}" hx-trigger="change, submit" hx-swap="outerHTML"
       hx-target="this">
   <label>
     <span class="param-label">Name</span>

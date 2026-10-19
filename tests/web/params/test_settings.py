@@ -62,7 +62,7 @@ async def test_bad_channel_values_are_422(ctx):
     form = _channels_form(**{"output-2-max_gain_db": "30", "input-1-name": "x" * 40})
     response = await ctx.http.post(f"{UI}/channels", data=form, headers=HX)
     assert response.status_code == 422
-    assert "gain ceiling must be within" in response.text and "at most 32 characters" in response.text
+    assert "level limit must be within" in response.text and "at most 32 characters" in response.text
     response = await ctx.http.post(f"{UI}/channels", data=_channels_form(**{"output-0-max_gain_db": "abc"}), headers=HX)
     assert response.status_code == 422
 
@@ -96,6 +96,13 @@ async def test_runtime_settings_apply_now_and_persist(ctx):
         "reapply_on_reconnect": True,
         "graph_view": "auto",
         "graph_db_range": 24.0,
+        "guidance_high_total_db": 12.0,  # the guidance thresholds aren't in this form either
+        "guidance_no_signal_dbfs": -90.0,
+        "guidance_volume_quiet_db": -80.0,
+        "guidance_volume_typical_min_db": -40.0,
+        "guidance_volume_typical_max_db": -10.0,
+        "guidance_comp_threshold_dbfs": -60.0,
+        "guidance_comp_ratio": 10.0,
     }
     # the session uses the new threshold at once
     response = await ctx.edit(0, {"outputs.0.gain_db": 4.0})
@@ -137,6 +144,58 @@ async def test_default_graph_range_is_saved_and_reaches_the_pages(ctx):
         form = {"gain_step_confirm_db": "6", "write_coalesce_ms": "50", **bad}
         assert (await ctx.http.post("/ui/settings/runtime", data=form, headers=HX)).status_code == 422, bad
     assert ctx.settings.graph_view == "full" and ctx.settings.graph_db_range == 36.0
+
+
+async def test_channel_flags_are_saved_and_kept(ctx):
+    html = (await ctx.http.get("/settings")).text
+    assert 'name="channel_flags"' in html and 'name="output-2-unused"' in html and 'name="output-0-tactile"' in html
+    assert 'name="input-1-unused"' in html and 'name="input-0-tactile"' not in html  # only outputs drive shakers
+
+    form = _channels_form(**{"channel_flags": "1", "output-2-unused": "on", "output-0-tactile": "on"})
+    response = await ctx.http.post(f"{UI}/channels", data=form, headers=HX)
+    assert response.status_code == 200, response.text
+    assert re.search(r'name="output-2-unused"[^>]*checked', response.text)
+    out2 = await ctx.repo.get_channel_meta(ctx.session.serial, "output", 2)
+    out0 = await ctx.repo.get_channel_meta(ctx.session.serial, "output", 0)
+    assert (out2.unused, out2.tactile, out0.unused, out0.tactile) == (True, False, False, True)
+    assert ctx.session.channel_meta[("output", 2)].unused is True
+
+    # a rename (page header) and a form from before the flags existed keep them
+    await ctx.http.post(f"{UI}/channels/output/2/name", data={"name": "Rear"}, headers=HX)
+    await ctx.http.post(f"{UI}/channels", data=_channels_form(**{"output-2-name": "Rear"}), headers=HX)
+    out2 = await ctx.repo.get_channel_meta(ctx.session.serial, "output", 2)
+    assert (out2.name, out2.unused) == ("Rear", True)
+
+    # unticking clears them
+    form = _channels_form(**{"channel_flags": "1", "output-2-name": "Rear"})
+    assert (await ctx.http.post(f"{UI}/channels", data=form, headers=HX)).status_code == 200
+    out2 = await ctx.repo.get_channel_meta(ctx.session.serial, "output", 2)
+    out0 = await ctx.repo.get_channel_meta(ctx.session.serial, "output", 0)
+    assert (out2.unused, out0.tactile) == (False, False)
+
+
+async def test_guidance_thresholds_are_saved(ctx):
+    html = (await ctx.http.get("/settings")).text
+    assert re.search(r'name="guidance_high_total_db"[^>]*value="12"', html, re.S)
+    assert re.search(r'name="guidance_no_signal_dbfs"[^>]*value="-90"', html, re.S)
+
+    form = {"gain_step_confirm_db": "6", "write_coalesce_ms": "50", "guidance_high_total_db": "9"}
+    response = await ctx.http.post("/ui/settings/runtime", data=form, headers=HX)
+    assert response.status_code == 200, response.text
+    assert ctx.settings.guidance_high_total_db == 9.0
+    assert (await ctx.repo.get_setting(RUNTIME_KEY))["guidance_high_total_db"] == 9.0
+    fresh = make_settings()
+    assert await apply_stored_runtime_settings(ctx.repo, fresh)
+    assert fresh.guidance_high_total_db == 9.0
+
+    for bad in (
+        {"guidance_high_total_db": "-1"},
+        {"guidance_volume_typical_min_db": "-5", "guidance_volume_typical_max_db": "-20"},
+        {"guidance_comp_ratio": "0.5"},
+    ):
+        form = {"gain_step_confirm_db": "6", "write_coalesce_ms": "50", **bad}
+        assert (await ctx.http.post("/ui/settings/runtime", data=form, headers=HX)).status_code == 422, bad
+    assert ctx.settings.guidance_high_total_db == 9.0
 
 
 async def test_runtime_settings_validation(ctx):

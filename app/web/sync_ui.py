@@ -1,10 +1,14 @@
-"""Device page additions (docs 05 §8): the sync table with a per-row push, push-all, the adopt wizard and the event
-log. These are HTMX partials loaded into the Device page; the page itself is served by `app.web.routes`.
+"""Device page additions (docs 05 §8, phase 9 design §11): the status overview, the settings table grouped by
+channel with a per-row send, push-all, the adopt wizard and the event log. These are HTMX partials loaded into the
+Device & sync page; the page itself is served by `app.web.routes`. Statuses come from the one status model
+(`app.sync.status`).
 """
 
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping
+from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -12,6 +16,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from starlette.datastructures import FormData, UploadFile
 
 from app.api.deps import require_same_origin
+from app.dsp.recognize import describe_filter, recognize_biquad
 from app.formats.cli_script import ParsedScript
 from app.model.config_doc import default_config_doc
 from app.model.payload import device_values
@@ -25,7 +30,10 @@ from app.sync.session import (
     MasterValidationError,
     StateUnavailable,
     factory_defaults_summary,
+    undo_unit,
 )
+from app.sync.status import CHANGED, CSS, GLYPHS, ORDER, SENT, UNKNOWN, StatusView, status_view, word
+from app.sync.verify import last_report, memory_map_for, zero_filter
 from app.web.adopt_sample import ADOPT_SAMPLE
 from app.web.params import syncbar_context
 from app.web.ui_common import (
@@ -214,64 +222,209 @@ def push_confirmation(session: DeviceSession, preset: int, path: str) -> str | N
     return None
 
 
-def sync_rows(session: DeviceSession, preset: int, *, show_all: bool) -> list[dict[str, Any]]:
-    statuses = session.sync_status(preset)
+_BIQUAD_KEYS = ("b0", "b1", "b2", "a1", "a2")
+_PLAIN_FILTER = {"Pass-through": "flat", "Raw": "custom filter"}
+
+
+@lru_cache(maxsize=1024)
+def _describe_biquad(coeffs: tuple[float, ...]) -> str:
+    try:
+        text = describe_filter(recognize_biquad(coeffs))
+    except ValueError:
+        return "custom filter"
+    text = _PLAIN_FILTER.get(text, text)
+    return text.replace("PEQ ", "Peaking ", 1).replace(" -", " −").replace("+-", "−")
+
+
+def plain_value(session: DeviceSession, path: str, value: Any, *, known: bool = True) -> str:
+    """A setting's value in words, for the Device & sync table: "−4.00 dB", "on", "bypassed", "Peaking 40 Hz Q 4
+    −4.0 dB", "flat", "all zeros". Raw coefficients only appear in Technical details (`format_value`)."""
+    if not known:
+        return "—"
+    if path.endswith(".bypass") and isinstance(value, bool):
+        return "bypassed" if value else "in use"
+    if isinstance(value, dict) and set(value) == set(_BIQUAD_KEYS):
+        coeffs = tuple(float(value[k]) for k in _BIQUAD_KEYS)
+        if not all(math.isfinite(c) for c in coeffs):
+            return "custom filter"
+        if all(c == 0 for c in coeffs):
+            return "all zeros"
+        return _describe_biquad(coeffs)
+    return format_value(session, path, value)
+
+
+def _channel_key(path: str) -> tuple[str, int] | None:
+    """The channel a path is listed under (a route belongs to its input, as `describe_path` names it)."""
+    parts = path.split(".")
+    if len(parts) < 2 or parts[0] not in ("inputs", "outputs") or not parts[1].isdigit():
+        return None
+    return ("input" if parts[0] == "inputs" else "output"), int(parts[1])
+
+
+def _report_items(session: DeviceSession, preset: int) -> dict[str, Any]:
+    report = last_report(session.serial)
+    if report is None or report.preset != preset:
+        return {}
+    return {i.path: i for i in report.items}
+
+
+def sync_rows(
+    session: DeviceSession, preset: int, *, show_all: bool, view: StatusView | None = None
+) -> list[dict[str, Any]]:
+    """One row per device path of the preset (only those that aren't simply sent, unless ``show_all``), with its
+    status from the one status model (app/sync/status.py) and its values in words; ``tech`` holds the raw ones."""
+    view = view if view is not None else status_view(session, preset)
     state = session.writer.state(preset)
     values = state.values(session.profile)
-    failed = state.failed
+    statuses = view.states if view is not None else {}
+    reasons = view.reasons if view is not None else dict(state.failed)
+    items = _report_items(session, preset)
     rows = []
     for path, value in values.items():
-        status = statuses.get(path, "unknown")
-        if not show_all and status == "synced":
+        status = statuses.get(path, UNKNOWN)
+        if not show_all and status == SENT:
             continue
         known = path in state.applied
+        item = items.get(path)
+        # What the device reported: shown for a changed setting, and for an unknown one that differs from the app.
+        reading = item is not None and item.actual is not None
+        show_device = reading and (status == CHANGED or (status == UNKNOWN and item.matches_desired is False))
+        device = plain_value(session, path, item.actual) if show_device else None
+        if show_device and zero_filter(item):
+            device = "all zeros (looks like a read error)"
         rows.append(
             {
                 "path": path,
                 "label": describe_path(session, path),
                 "status": status,
-                "desired": format_value(session, path, value),
-                "applied": format_value(session, path, state.applied.get(path), known=known),
-                "reason": failed.get(path),
+                "css": CSS[status],
+                "glyph": GLYPHS[status],
+                "word": word(status, preset),
+                "desired": plain_value(session, path, value),
+                "applied": plain_value(session, path, state.applied.get(path), known=known),
+                "device": device,
+                "tech": {
+                    "app": format_value(session, path, value),
+                    "applied": format_value(session, path, state.applied.get(path), known=known),
+                    "device": format_value(session, path, item.actual) if reading else None,
+                },
+                "reason": reasons.get(path),
                 "confirm": push_confirmation(session, preset, path),
+                "channel": _channel_key(path),
             }
         )
     return rows
 
 
+def _state_list(counts: Mapping[str, int], preset: int) -> list[dict[str, Any]]:
+    """The non-sent statuses of a channel, worst first: ``[{"state": "changed", "glyph": "≠", "text": "2 changed on
+    device"}, …]``."""
+    out = []
+    for state in ORDER:
+        n = counts.get(state, 0)
+        if state == SENT or not n:
+            continue
+        text = {
+            "failed": f"{n} failed",
+            "changed": f"{n} changed on device",
+            "sending": f"{n} sending",
+            "waiting": f"{n} waiting for preset {preset + 1}",
+            "unknown": f"{n} unknown",
+        }[state]
+        out.append({"state": state, "css": CSS[state], "glyph": GLYPHS[state], "text": text})
+    return out
+
+
+def sync_groups(
+    session: DeviceSession, preset: int, rows: list[dict[str, Any]], view: StatusView | None
+) -> list[dict[str, Any]]:
+    """The table's rows grouped by channel (outputs first, then inputs), each with its status counts and, when the last
+    check found changes on it, the paths for its "Use the device's values" and "Forget these values" buttons."""
+    profile = session.profile
+    keys = [("output", n) for n in range(profile.n_outputs)] + [("input", i) for i in range(profile.n_inputs)]
+    counts: dict[tuple[str, int], dict[str, int]] = {k: {} for k in keys}
+    for path, state in (view.states if view is not None else {}).items():
+        key = _channel_key(path)
+        if key in counts:
+            counts[key][state] = counts[key].get(state, 0) + 1
+    report = last_report(session.serial)
+    acceptable = {i.path for i in report.acceptable} if report is not None and report.preset == preset else set()
+    groups = []
+    for kind, index in keys:
+        mine = [r for r in rows if r["channel"] == (kind, index)]
+        changed = [r["path"] for r in mine if r["status"] == CHANGED]
+        use = [p for p in changed if p in acceptable]
+        states = _state_list(counts[(kind, index)], preset)
+        groups.append(
+            {
+                "id": f"sync-{kind}-{index}",
+                "kind": kind,
+                "index": index,
+                "name": channel_label(session, kind, index),
+                "rows": mine,
+                "states": states,
+                "problems": bool(states),
+                "changed": changed,
+                "use": use,
+                "use_count": len(dict.fromkeys(undo_unit(p) for p in use)),
+            }
+        )
+    return groups
+
+
 def sync_table_context(request: Request, session: DeviceSession, preset: int, show: str) -> dict[str, Any]:
     show_all = show == "all"
     serial = session.serial
+    view = status_view(session, preset)
+    rows = sync_rows(session, preset, show_all=show_all, view=view)
+    report = last_report(serial)
     return {
         "serial": serial,
         "preset": preset,
         "show": "all" if show_all else "unsynced",
-        "rows": sync_rows(session, preset, show_all=show_all),
+        "rows": rows,
+        "groups": sync_groups(session, preset, rows, view),
+        "view": view,
         "counts": session.sync_summary(preset)["counts"],
+        "problem_count": view.problems if view is not None else len(rows),
+        "total": view.total if view is not None else len(rows),
+        "checked": report is not None and report.preset == preset,
         "table_url": url(request, f"/ui/devices/{serial}/sync-table", preset=preset, show="all" if show_all else None),
         "all_url": url(request, f"/ui/devices/{serial}/sync-table", preset=preset, show="all"),
         "unsynced_url": url(request, f"/ui/devices/{serial}/sync-table", preset=preset),
         "push_path_url": url(
             request, f"/ui/devices/{serial}/presets/{preset}/paths/push", show="all" if show_all else None
         ),
+        "confirm_url": url(request, f"/ui/devices/{serial}/verify/accept/confirm"),
+        "mark_url": url(request, f"/ui/devices/{serial}/verify/mark-unknown"),
+    }
+
+
+def sync_panel_context(request: Request, session: DeviceSession, preset: int) -> dict[str, Any]:
+    """The Device & sync status: the overview (`params.syncbar_context` plus the status view) and the action row. The
+    table (`sync_table_context`) and the last check (`app.api.v1.verify`) load on their own."""
+    bar = syncbar_context(request, session, preset, DEVICE_PAGE)
+    serial = session.serial
+    return {
+        "bar": bar,
+        "view": status_view(session, preset),
+        "message": None,
+        "verify_url": url(request, f"/ui/devices/{serial}/verify"),
+        "check_supported": memory_map_for(session.profile.product_name) is not None,
     }
 
 
 @router.get("/ui/devices/{serial}/sync-panel", response_class=HTMLResponse)
 async def sync_panel(request: Request, serial: int, preset: int | None = None) -> Response:
-    """Sync bar (status, push-all, retry) and sync table for the Device page. ``preset`` is 1-based."""
+    """The Device & sync status overview and its action row (Check device, Send all, Set up this device). ``preset``
+    is 1-based."""
     session = await _session(request, serial)
     if isinstance(session, Response):
         return session
     p = resolve_preset(session, preset)
     if p is None:
         return PlainTextResponse(f"Unknown preset {preset}", status_code=404)
-    ctx = {
-        "bar": syncbar_context(request, session, p, DEVICE_PAGE),
-        "message": None,
-        "t": sync_table_context(request, session, p, "unsynced"),
-    }
-    return render(request, "partials/sync_panel.html", ctx)
+    return render(request, "partials/sync_panel.html", sync_panel_context(request, session, p))
 
 
 @router.get("/ui/devices/{serial}/sync-table", response_class=HTMLResponse)
@@ -518,6 +671,7 @@ __all__ = [
     "describe_path",
     "format_value",
     "humanize_paths",
+    "plain_value",
     "raise_label",
     "raise_rows",
     "router",

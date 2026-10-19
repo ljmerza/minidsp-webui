@@ -1,5 +1,5 @@
-{#- Output page, PEQ tab: the shared PEQ editor (docs 05 §5) for this output's bands. -#}
+{#- Output page, EQ (PEQ) tab: the shared PEQ editor (docs 05 §5) for this output's bands. -#}
 {% import "components/peq_editor.html" as fx with context %}
-<h2>PEQ <span class="muted">{{ session.profile.peq_per_output }} bands</span></h2>
+<h2>EQ <span class="muted">{{ session.profile.peq_per_output }} bands</span>{{ help("eq") }}</h2>
 {{ fx.editor("outputs", channel.index, channel.color, channel.name, view="full") }}
 {{ fx.assets() }}

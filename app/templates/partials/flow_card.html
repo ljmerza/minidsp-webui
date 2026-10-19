@@ -1,0 +1,24 @@
+{#- The signal-flow diagram card (phase 9 design §5). Include it inside a levelMeters component (static/js/meters.js):
+    its meters and CLIP chips bind to that component's level / peak / clip / stale, so a CLIP reset here resets the
+    page's other meters too. Needs the context of app/web/flow.py flow_context(); the page loads static/css/flow.css
+    and static/js/flow.js. The box re-fetches partials/flow.html on SSE "desired" / "sync" / "verify" events, and flow.js also
+    re-fetches it when the playing preset or Mute all changes. -#}
+<section class="card flow-card" aria-labelledby="flow-title"
+         x-data='flowDiagram({{ {"floor": flow_floor|default(-90.0)}|tojson }})' hx-trigger="sse:master">
+  <div class="card-head flow-head">
+    <h2 id="flow-title">How sound flows{{ help("routing") }}</h2>
+    <span class="flow-legend">Blocks are the settings on each output; a dashed block is off or at its default</span>
+    <button type="button" class="btn-small flow-details-btn" @click="details = !details"
+            aria-expanded="false" :aria-expanded="details.toString()">
+      <span x-text="details ? 'Hide details' : 'Details'">Details</span>
+      <span aria-hidden="true" x-text="details ? '▴' : '▸'">&#9656;</span>
+    </button>
+  </div>
+  <div class="flow-box" data-flow-box hx-get="{{ flow_url }}"
+       hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh" hx-swap="innerHTML">
+    {% include "partials/flow.html" %}
+  </div>
+  {#- A clip latch is announced once ("Shakers clipped"); the meters themselves are never live regions. -#}
+  <span class="visually-hidden" role="status" x-text="clipMessage"></span>
+  <span hidden x-effect="announceClips(clip)"></span>
+</section>

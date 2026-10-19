@@ -21,12 +21,15 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "axe-playwright-python>=0.1.8",
     "httpx>=0.28",
     "hypothesis>=6.115",
     "jsonschema>=4.23",
+    "playwright>=1.64.0",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
+    "pytest-playwright>=0.10.0",
     "respx>=0.21",
     "ruff>=0.8",
 ]
@@ -47,7 +50,8 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not e2e'"
 markers = [
     "integration: needs docker (mock minidspd / mosquitto); run with -m integration",
+    "e2e: browser tests (Playwright) against the app with minidspd's mock; run with -m e2e (tests/e2e/conftest.py)",
 ]

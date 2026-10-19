@@ -99,7 +99,9 @@
     }
     e.preventDefault();
     const { fmtNum, fmtDb } = window.mdsp;
-    if (window.confirm(`${verb} the master volume by ${fmtNum(Math.abs(next - ref))} dB, to ${fmtDb(next)}?`)) {
+    // Plain wording (phase 9 design §1, kept by the user's decision): say where the Volume goes, from and to.
+    const change = `${fmtNum(Math.abs(next - ref))} dB ${verb === 'Raise' ? 'louder' : 'quieter'}`;
+    if (window.confirm(`${verb === 'Raise' ? 'Raise' : 'Drop'} the volume from ${fmtNum(ref)} to ${fmtDb(next)}? That's ${change}.`)) {
       state.lastSent = next;
       state.confirmed = el;
       e.detail.issueRequest(true);

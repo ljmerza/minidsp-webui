@@ -409,6 +409,6 @@ describe('crossoverEditor', () => {
     await settle();
     await answer(posts()[0], 422, { error: 'invalid', detail: 'nope', group: groupView(0) });
     assert.equal(ed.groups[0].form.freq, 80);
-    assert.deepEqual(toasts, ['Group 1: nope']);
+    assert.deepEqual(toasts, ['Filter 1: nope']);
   });
 });

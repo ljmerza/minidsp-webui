@@ -12,3 +12,5 @@ htmlcov/
 .devdata/
 *.sqlite3
 .env
+# pytest-playwright artifacts (screenshots, traces)
+test-results/

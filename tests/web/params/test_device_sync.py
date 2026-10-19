@@ -23,7 +23,8 @@ async def test_device_page_loads_the_new_sections(ctx):
     assert f'hx-get="/ui/devices/{SERIAL}/sync-panel?preset=2"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/events"' in html
-    assert f'sse-connect="/api/v1/events?topics=master%2Cdevice%2Csync%2Clog%2Cverify&amp;serial={SERIAL}"' in html
+    topics = "master%2Cdevice%2Csync%2Clog%2Cverify%2Clevels"  # levels: the header's CLIP light (phase 9 §3.1)
+    assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
     assert 'id="sync"' in html and 'id="adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/verify"' in html and 'id="verify"' in html
 
@@ -36,17 +37,19 @@ async def test_device_page_uses_one_feed_that_keeps_the_header_sync_badge_curren
     body_feed = re.search(r'<body[^>]*sse-connect="([^"]+)"', html).group(1)
     assert "sync" in body_feed.split("topics=", 1)[1].split("&", 1)[0].split("%2C")
     header = html.split('id="app-header"', 1)[1].split("</header>", 1)[0]
-    assert 'hx-trigger="sse:sync delay:500ms, mdsp-sync-changed from:body delay:500ms"' in header
+    assert "sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body" in header
 
 
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):
     html = (await ctx.http.get(f"{UI}/sync-panel")).text
-    assert 'id="syncbar"' in html and 'id="sync-table"' in html
+    assert 'id="sync-overview"' in html and "216 unknown" in html
+    html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
+    assert 'id="sync-table"' in html
     assert "outputs.0.gain_db" in html and "Out 1 output level" in html
     assert "sync-unknown" in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0})).text
-    assert "Every setting of preset 1 is synced" in html
+    assert "Every setting of preset 1 is sent" in html
     html = (await ctx.http.get(f"{UI}/sync-table", params={"preset": 0, "show": "all"})).text
     assert "outputs.3.delay_ms" in html and "sync-synced" in html and 'aria-pressed="true"' in html
 
@@ -80,7 +83,7 @@ async def test_trust_adopt_from_the_sample_writes_nothing(ctx):
     form = {"preset": "0", "source": "script", "script": ADOPT_SAMPLE, "mode": "trust"}
     response = await ctx.http.post(f"{UI}/adopt", data=form, headers=HX)
     assert response.status_code == 200, response.text
-    assert "Adopted preset 1 (trust)" in response.text and "0 write(s)" in response.text
+    assert "Set up preset 1 (Remember)" in response.text and "0 write(s)" in response.text
     assert json.loads(response.headers["HX-Trigger"]) == {"mdsp-sync-changed": {"preset": 0}}
     await ctx.settle()
     assert ctx.fake.configs == []
@@ -98,7 +101,7 @@ async def test_trust_all_and_unknown_modes(ctx):
     assert set(ctx.session.sync_status(1).values()) == {"synced"}
     form = {"preset": "2", "source": "defaults", "mode": "unknown"}
     response = await ctx.http.post(f"{UI}/adopt", data=form, headers=HX)
-    assert response.status_code == 200 and "Adopted preset 3 (unknown)" in response.text
+    assert response.status_code == 200 and "Set up preset 3 (Don&#39;t know yet)" in response.text
     assert set(ctx.session.sync_status(2).values()) == {"unknown"}
     assert ctx.fake.configs == []
 
@@ -107,11 +110,11 @@ async def test_push_adopt_needs_the_confirm_box(ctx):
     form = {"preset": "0", "source": "defaults", "mode": "push"}
     response = await ctx.http.post(f"{UI}/adopt", data=form, headers=HX)
     assert response.status_code == 409
-    assert "Nothing was adopted" in response.text and 'value="push"' in response.text
+    assert "Nothing was set up" in response.text and 'value="push"' in response.text
     assert ctx.fake.configs == []
     response = await ctx.http.post(f"{UI}/adopt", data={**form, "confirm": "on"}, headers=HX)
     assert response.status_code == 200, response.text
-    assert "Adopted preset 1 (push)" in response.text
+    assert "Set up preset 1 (Overwrite)" in response.text
     assert ctx.fake.configs and all(o.get("mute") is True for o in ctx.fake.configs[0]["outputs"])
 
 
@@ -123,11 +126,11 @@ async def test_trusting_the_defaults_needs_the_confirm_box(ctx):
     )
     form = {"preset": "0", "source": "defaults", "mode": "trust"}
     response = await ctx.http.post(f"{UI}/adopt", data=form, headers=HX)
-    assert response.status_code == 409 and "Nothing was adopted" in response.text
+    assert response.status_code == 409 and "Nothing was set up" in response.text
     assert ctx.session.needs_adoption
     response = await ctx.http.post(f"{UI}/adopt", data={**form, "confirm_defaults": "on"}, headers=HX)
     assert response.status_code == 200, response.text
-    assert "Adopted preset 1 (trust)" in response.text and not ctx.session.needs_adoption
+    assert "Set up preset 1 (Remember)" in response.text and not ctx.session.needs_adoption
     assert ctx.fake.configs == []
 
 
@@ -167,10 +170,10 @@ async def test_adopt_preview(ctx):
 
 async def test_adopt_wizard_shows_the_sample_and_status(ctx):
     html = (await ctx.http.get(f"{UI}/adopt")).text
-    assert "Not adopted yet" in html and "Use the sample" in html
+    assert "Not set up yet" in html and "Use the sample" in html
     assert "crossover 0 0 set -- 6.828594198269291e-06" in html
     await ctx.session.adopt(AdoptMode.UNKNOWN, preset=0)
-    assert "Adopted with <strong>unknown</strong>" in (await ctx.http.get(f"{UI}/adopt")).text
+    assert "Set up with <strong>Don&#39;t know yet</strong>" in (await ctx.http.get(f"{UI}/adopt")).text
 
 
 async def test_event_log_filters_other_devices(ctx):

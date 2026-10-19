@@ -18,7 +18,7 @@ def _attr(html: str, element_id: str) -> str:
 
 
 async def test_dashboard_renders_header_meters_and_cards(http):
-    response = await http.get("/")
+    response = await http.get("/meters")  # Meters & graph: the dashboard that was "/" until Home (phase 9 design §12.3)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     html = response.text
@@ -49,19 +49,19 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     assert html.count('class="clip-led"') == 6
     assert html.count('<span aria-hidden="true">CLIP</span>') == 6
     assert "&ndash;" not in html.split('id="levels-title"')[1].split("</section>")[0]
-    assert "A grey CLIP box turns red" in html
+    assert "A grey CLIP box" in html and "turns red when its" in html
     assert html.count('class="output-card"') == 4
 
     # output cards: re-fetched on sync / desired events; dashboard.js handles preset switches and the quick controls
     box = re.search(r"<div[^>]*data-output-cards[^>]*>", html, re.S).group(0)
     assert f'hx-get="/ui/dashboard/outputs?serial={SERIAL}"' in box
-    assert 'hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh"' in box
+    assert 'hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh"' in box
     assert 'x-data="outputCards" hx-trigger="sse:master"' in html
     assert "/static/js/dashboard.js" in html
     assert 'data-action="mute"' not in html  # no preset state loaded: no quick controls
 
     # live feed + vendored assets only
-    topics = "levels%2Cmaster%2Cdevice%2Csync%2Cdesired"
+    topics = "levels%2Cmaster%2Cdevice%2Csync%2Cdesired%2Cverify"
     assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
     assert f'hx-get="/ui/header?serial={SERIAL}"' in html
     for src in re.findall(r'<script[^>]*src="([^"]+)"', html):
@@ -84,7 +84,7 @@ async def test_dashboard_without_device_when_daemon_is_down():
     assert "minidspd unreachable" in html and 'role="alert"' in html
     assert 'id="master-volume"' not in html and 'id="preset-1"' not in html
     assert 'data-serial=""' in html
-    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync%2Cdesired"' in html
+    assert 'sse-connect="/api/v1/events?topics=levels%2Cmaster%2Cdevice%2Csync%2Cdesired%2Cverify"' in html
 
 
 async def test_unsupported_device_names_are_listed_and_escaped():
@@ -159,8 +159,8 @@ async def test_device_page(http):
     assert "2 in, 4 out" in html and "96 kHz" in html and "79.8 ms" in html
     assert "−127.0 dB to 0.0 dB" in html
     assert 'hx-trigger="sse:device"' in html
-    # the device page doesn't ask for levels, so the daemon can drop them; sync/log/verify share the one feed
-    topics = "master%2Cdevice%2Csync%2Clog%2Cverify"
+    # sync/log/verify share the one feed; levels drive the header's CLIP light, which shows on every page (phase 9 §3.1)
+    topics = "master%2Cdevice%2Csync%2Clog%2Cverify%2Clevels"
     assert f'sse-connect="/api/v1/events?topics={topics}&amp;serial={SERIAL}"' in html
     assert html.count("sse-connect=") == 1
 
@@ -208,19 +208,19 @@ async def test_dashboard_outputs_fragment(http):
 
 async def test_graph_defaults_reach_every_page(manager):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=make_app(manager)), base_url="http://t") as http:
-        html = (await http.get("/")).text
+        html = (await http.get("/meters")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view=""' in body and 'data-graph-db="24"' in body  # "auto": each page keeps its own view
-    assert '"view": "sub"' in html and "5–300 Hz, active preset" in html
+    assert '"view": "sub"' in html and "5–300 Hz, playing preset" in html
 
     settings = Settings(_env_file=None, minidspd_url="http://daemon.invalid:5380", graph_view="full", graph_db_range=30)
     app = make_app(manager, settings)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as http:
-        html = (await http.get("/")).text
+        html = (await http.get("/meters")).text
         device = (await http.get("/device")).text
     body = re.search(r"<body[^>]*>", html, re.S).group(0)
     assert 'data-graph-view="full"' in body and 'data-graph-db="30"' in body
-    assert '"view": "full"' in html and "10 Hz–20 kHz, active preset" in html
+    assert '"view": "full"' in html and "10 Hz–20 kHz, playing preset" in html
     assert 'data-graph-view="full"' in device
 
 
@@ -231,7 +231,7 @@ async def test_device_page_without_device():
     assert "No device" in html and "connecting" in html
 
 
-@pytest.mark.parametrize("path", ["/", "/device"])
+@pytest.mark.parametrize("path", ["/", "/meters", "/inputs", "/outputs", "/device"])
 async def test_unknown_serial_is_404(http, path):
     response = await http.get(path, params={"serial": 1})
     assert response.status_code == 404
@@ -250,9 +250,12 @@ async def test_nav_links_only_served_pages(http):
     html = (await http.get("/device")).text
     nav = html.split('id="sidenav"', 1)[1].split("</nav>", 1)[0]
     assert '<a href="/"' in nav
-    assert '<a href="/device" aria-current="page">Device</a>' in nav
-    for label in ("Routing", "System", "Profiles", "Settings", "Out 1", "In 2"):
-        assert re.search(rf'<span class="nav-disabled"[^>]*>{label}</span>', nav), label
+    assert '<a href="/device" aria-current="page">Device &amp; sync</a>' in nav
+    assert '<a href="/help">Glossary</a>' in nav  # served by the same router as /device
+    for label in ("Routing", "Combined response", "Profiles", "Settings", "Out 1", "In 2"):
+        assert re.search(
+            rf'<span class="nav-disabled"[^>]*>{label}( <span class="muted">\(not available\)</span>)?</span>', nav
+        ), label
 
 
 async def test_root_path_prefixes_urls(manager):

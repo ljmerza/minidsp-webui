@@ -175,10 +175,11 @@
   <h3>Export</h3>
   {% if backup.db_available %}
   <div class="drawer-actions">
-    <a class="btn-link" href="{{ backup.export_url }}" download
-       title="Every preset, channel names, profiles, FIR files and settings as JSON">Download JSON backup</a>
-    <a class="btn-link" href="{{ backup.db_url }}" download title="A copy of the whole database, history included">Download database</a>
+    <a class="btn-link" href="{{ backup.export_url }}" download>Download JSON backup</a>
+    <a class="btn-link" href="{{ backup.db_url }}" download>Download database</a>
   </div>
+  <p class="hint">The JSON backup holds every preset, channel names, profiles, FIR files and settings. The database
+    download is a copy of the whole database, history included.</p>
   {% else %}
   <p class="muted">The state database isn't available, so there is nothing to export.</p>
   {% endif %}

@@ -1,0 +1,62 @@
+name: Browser tests
+
+# Playwright (tests/e2e) against the app in embedded mode with minidspd's mock 2x4HD: no hardware, no docker.
+# Separate from ci.yml / build-and-push.yml, which use the reusable misc-actions workflows.
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright (mock device)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Install Chromium for Playwright
+        run: uv run playwright install --with-deps chromium
+
+      - name: Cache minidspd
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/minidsp-webui
+          key: minidspd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile') }}
+
+      - name: Fetch minidspd (pinned like the image)
+        run: |
+          sudo apt-get install -y --no-install-recommends libusb-1.0-0
+          scripts/fetch-minidspd.sh
+
+      - name: Browser tests
+        env:
+          MDW_E2E_REQUIRED: "1"  # a missing minidspd fails instead of skipping
+        run: uv run pytest -m e2e tests/e2e -rfEs --screenshot only-on-failure --tracing retain-on-failure
+
+      - name: Upload screenshots and traces of failures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

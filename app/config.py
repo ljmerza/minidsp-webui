@@ -55,6 +55,19 @@ class Settings(BaseSettings):
     graph_view: Literal["auto", "sub", "full"] = "auto"
     graph_db_range: float = Field(default=24.0, ge=3.0, le=60.0)
 
+    # Guidance thresholds for the plain-language summaries and health notes (phase 9 design sections 6.3, 7, 12.2).
+    # Rules of thumb, not device facts: a total level (input + route + output) at or above GUIDANCE_HIGH_TOTAL_DB is a
+    # headroom caution; meters below GUIDANCE_NO_SIGNAL_DBFS read "no signal"; Volume below GUIDANCE_VOLUME_QUIET_DB
+    # is "very quiet"; GUIDANCE_VOLUME_TYPICAL_*_DB is the usual listening band; a compressor at or below
+    # GUIDANCE_COMP_THRESHOLD_DBFS with a ratio of GUIDANCE_COMP_RATIO or more may hold its output almost silent.
+    guidance_high_total_db: float = Field(default=12.0, ge=0.0, le=48.0)
+    guidance_no_signal_dbfs: float = Field(default=-90.0, ge=-140.0, le=-20.0)
+    guidance_volume_quiet_db: float = Field(default=-80.0, ge=-127.0, le=0.0)
+    guidance_volume_typical_min_db: float = Field(default=-40.0, ge=-127.0, le=0.0)
+    guidance_volume_typical_max_db: float = Field(default=-10.0, ge=-127.0, le=0.0)
+    guidance_comp_threshold_dbfs: float = Field(default=-60.0, ge=-127.0, le=0.0)
+    guidance_comp_ratio: float = Field(default=10.0, ge=1.0, le=100.0)
+
     # Experimental: FIR on models whose profile doesn't claim it (unverified on the 2x4HD; loading taps mutes it)
     fir_experimental: bool = False
 
@@ -83,6 +96,15 @@ class Settings(BaseSettings):
     def _check_gain_range(self) -> "Settings":
         if self.gain_min_db >= self.gain_max_db:
             raise ValueError(f"GAIN_MIN_DB ({self.gain_min_db}) must be below GAIN_MAX_DB ({self.gain_max_db})")
+        return self
+
+    @model_validator(mode="after")
+    def _check_volume_band(self) -> "Settings":
+        if self.guidance_volume_typical_min_db >= self.guidance_volume_typical_max_db:
+            raise ValueError(
+                f"GUIDANCE_VOLUME_TYPICAL_MIN_DB ({self.guidance_volume_typical_min_db}) must be below "
+                f"GUIDANCE_VOLUME_TYPICAL_MAX_DB ({self.guidance_volume_typical_max_db})"
+            )
         return self
 
     @model_validator(mode="after")

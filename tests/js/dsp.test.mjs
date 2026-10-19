@@ -181,7 +181,7 @@ describe('crossovers', () => {
     assert.ok(dsp.filterResponse(lp).float32_deviation_db < 0.1);
     const r = dsp.filterResponse([...lp, ...hp]);
     assert.ok(r.float32_deviation_db > 0.1 && r.float32_deviation_db < 0.3, r.float32_deviation_db);
-    assert.match(r.warnings[0], /float32 coefficient rounding moves the response by up to 0\.\d\d dB/);
+    assert.match(r.warnings[0], /rounding note: .*float32.* moves the response by up to 0\.\d\d dB/);
   });
 
   test('float32 deviation is judged on the full band, not just the plotted grid (same as the server)', () => {

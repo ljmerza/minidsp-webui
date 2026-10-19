@@ -22,8 +22,9 @@ def _script_order(html: str) -> list[str]:
 
 async def test_output_tabs_light_up_with_their_templates(ctx):
     html = (await ctx.http.get("/outputs/2")).text
-    for label in ("Crossover", "PEQ", "Compressor", "Response"):
-        assert re.search(rf'<a class="tab"[^>]*tab={label.lower()}[^>]*>{label}</a>', html), label
+    tabs = {"crossover": "Band (crossover)", "peq": "EQ", "compressor": "Compressor (limiter)", "response": "Response"}
+    for key, label in tabs.items():
+        assert re.search(rf'<a class="tab"[^>]*tab={key}[^>]*>{re.escape(label)}</a>', html), label
     assert "is-disabled" not in html.split('<nav class="tabs"')[1].split("</nav>")[0]
 
 
@@ -82,7 +83,7 @@ async def test_input_page_has_the_peq_editor(ctx):
 
 
 async def test_dashboard_response_widget(ctx):
-    html = (await ctx.http.get("/")).text
+    html = (await ctx.http.get("/meters")).text
     cfg = _component(html, "responseView")
     assert cfg["url"] == f"/ui/devices/{SERIAL}/response"
     assert cfg["view"] == "sub" and cfg["preset"] is None

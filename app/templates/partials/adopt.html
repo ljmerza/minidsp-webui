@@ -1,14 +1,16 @@
-{#- Adopt wizard (docs 03 §8). Rendered by /ui/devices/{serial}/adopt and replaced by its own form posts. -#}
+{#- Set up this device ("adopt" in the code and API, docs 03 §8). Rendered by /ui/devices/{serial}/adopt and replaced by
+    its own form posts. Modes on screen: trust = Remember, push = Overwrite the device, unknown = Don't know yet. -#}
+{%- set mode_words = {"trust": "Remember", "push": "Overwrite", "unknown": "Don't know yet"} -%}
 {%- set f_mode = form.mode -%}
 {%- set f_source = form.source -%}
 {%- set f_preset = form.preset -%}
 <div id="adopt-wizard" class="adopt">
   {% if result %}
     <div class="adopt-result{% if result.flush_ok == false %} is-warn{% endif %}" role="status">
-      <h3>Adopted preset {{ result.preset + 1 }} ({{ result.mode }})</h3>
-      <p>{{ result.known }} setting(s) known{% if result.read_back %} ({{ result.read_back }} read from the device){% endif %}, {{ result.unknown }} unknown. {{ result.writes }} write(s) sent to the device{% if result.mode != "push" %} (nothing is written by "{{ result.mode }}"){% endif %}.</p>
-      {% if result.read_error %}<p class="field-error">The preset couldn't be read back ({{ result.read_error }}), so it was trusted without reading it.</p>{% endif %}
-      {% if result.flush_ok == false %}<p class="field-error">The push didn't complete{% if result.flush_error %}: {{ result.flush_error }}{% endif %}. See the sync table; the affected outputs stay muted until it does.</p>{% endif %}
+      <h3>Set up preset {{ result.preset + 1 }} ({{ mode_words.get(result.mode, result.mode) }})</h3>
+      <p>{{ result.known }} setting(s) known{% if result.read_back %} ({{ result.read_back }} read from the device){% endif %}, {{ result.unknown }} unknown. {{ result.writes }} write(s) sent to the device{% if result.mode != "push" %} (nothing is written by "{{ mode_words.get(result.mode, result.mode) }}"){% endif %}.</p>
+      {% if result.read_error %}<p class="field-error">The preset couldn't be read back ({{ result.read_error }}), so it was remembered without reading it.</p>{% endif %}
+      {% if result.flush_ok == false %}<p class="field-error">Overwriting the device didn't complete{% if result.flush_error %}: {{ result.flush_error }}{% endif %}. See the status table; the affected outputs stay muted until it does.</p>{% endif %}
       {% if result.warnings %}
         <details><summary>{{ result.warnings|length }} ignored line(s)</summary>
           <ul class="issues">{% for w in result.warnings %}<li>line {{ w.line }}: {{ w.message }} <code>{{ w.text }}</code></li>{% endfor %}</ul>
@@ -19,16 +21,16 @@
 
   {% if errors %}
     <div class="form-errors" role="alert">
-      <p>Nothing was adopted:</p>
+      <p>Nothing was set up:</p>
       <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
     </div>
   {% endif %}
 
   <p class="adopt-status">
     {% if needs_adoption %}
-      <strong>Not adopted yet.</strong> The app starts with no knowledge of what the device holds. Tell it here.
+      <strong>Not set up yet.</strong> The app starts with no knowledge of what the device holds. Tell it here.
     {% else %}
-      Adopted with <strong>{{ adoption.mode }}</strong> on preset {{ (adoption.preset or 0) + 1 }}{% if adoption.script %} from a command script{% endif %}{% if adoption.at %} ({{ adoption.at|replace("T", " ")|truncate(19, true, "") }} UTC){% endif %}. You can run it again, for example for another preset.
+      Set up with <strong>{{ mode_words.get(adoption.mode, adoption.mode) }}</strong> on preset {{ (adoption.preset or 0) + 1 }}{% if adoption.script %} from a command script{% endif %}{% if adoption.at %} ({{ adoption.at|replace("T", " ")|truncate(19, true, "") }} UTC){% endif %}. You can run it again, for example for another preset.
     {% endif %}
   </p>
 
@@ -37,10 +39,10 @@
         x-data='{ mode: {{ f_mode|tojson }}, source: {{ f_source|tojson }} }'>
     <fieldset>
       <legend>1. Preset</legend>
-      <label>Adopt
+      <label>Set up
         <select name="preset">
           {% for p in presets %}
-            <option value="{{ p }}"{% if p == f_preset %} selected{% endif %}>Preset {{ p + 1 }}{% if p == active_preset %} (active){% endif %}</option>
+            <option value="{{ p }}"{% if p == f_preset %} selected{% endif %}>Preset {{ p + 1 }}{% if p == active_preset %} (playing){% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -51,7 +53,7 @@
       <label class="radio"><input type="radio" name="source" value="script" x-model="source"{% if f_source == "script" %} checked{% endif %}>
         A <code>minidsp -f</code> command script (what you ran to set the device up)</label>
       <label class="radio"><input type="radio" name="source" value="defaults" x-model="source"{% if f_source == "defaults" %} checked{% endif %}>
-        The defaults: unity gains, all filters flat and bypassed. With push, outputs without a name in Settings start muted</label>
+        The defaults: unity levels, all filters flat and off. With Overwrite, outputs without a name in Settings start muted</label>
 
       <div class="script-entry" x-show="source === 'script'">
         <label for="adopt-script" class="param-label">Script</label>
@@ -83,20 +85,20 @@
     <fieldset>
       <legend>3. What the device holds</legend>
       <label class="radio"><input type="radio" name="mode" value="trust" x-model="mode"{% if f_mode == "trust" %} checked{% endif %}>
-        <strong>Trust</strong>: this is exactly what's on the device. Nothing is written. On the active preset the
-        readable settings (gains, mutes, delays, polarity, filter coefficients, compressor thresholds) are read from
-        the device instead; the rest comes from here.</label>
+        <strong>Remember (trust)</strong>: this is exactly what's on the device. Nothing is written. On the playing
+        preset the readable settings (levels, mutes, delays, polarity, filter coefficients, compressor thresholds) are
+        read from the device instead; the rest comes from here.</label>
       <label class="radio sub" x-show="mode === 'trust' && source === 'script'">
         <input type="checkbox" name="trust_all"{% if form.trust_all %} checked{% endif %}>
-        Also trust the defaults for everything the script doesn't set (otherwise those stay unknown)</label>
+        Also remember the defaults for everything the script doesn't set (otherwise those stay unknown)</label>
       <div class="radio sub confirm-defaults" x-show="mode === 'trust' && source === 'defaults'">
-        <p class="field-error">Trusting the defaults tells the app, without checking, that the settings it can't
+        <p class="field-error">Remembering the defaults tells the app, without checking, that the settings it can't
           read back (bypass flags, routing, compressor ratio and timing) are flat; on an inactive preset, which can't
           be read at all, it claims that for every setting. That is rarely true for a device that was set up before:
           import the command script you used instead. If it's wrong, later edits (un-bypassing a filter, for example)
           act on whatever the device really holds.</p>
         <details open>
-          <summary>What will be trusted on the chosen preset</summary>
+          <summary>What will be remembered on the chosen preset</summary>
           <ul class="issues">{% for line in defaults_summary %}<li>{{ line }}</li>{% endfor %}</ul>
         </details>
         <label class="confirm"><input type="checkbox" name="confirm_defaults"
@@ -104,14 +106,14 @@
           My device really is at factory defaults.</label>
       </div>
       <label class="radio"><input type="radio" name="mode" value="push" x-model="mode"{% if f_mode == "push" %} checked{% endif %}>
-        <strong>Push</strong>: write all of it to the device{% if mute_wrap %}, with the outputs muted while it runs{% endif %}.</label>
+        <strong>Overwrite the device (push)</strong>: send all of it to the device{% if mute_wrap %}, with the outputs muted while it runs{% endif %}.</label>
       <label class="radio sub confirm" x-show="mode === 'push'">
         <input type="checkbox" name="confirm">
         I understand this overwrites every setting of the chosen preset on the device.</label>
       <label class="radio"><input type="radio" name="mode" value="unknown" x-model="mode"{% if f_mode == "unknown" %} checked{% endif %}>
-        <strong>Unknown</strong>: the device state is unknown; each setting is written the first time you change it. Nothing is written now.</label>
+        <strong>Don't know yet (unknown)</strong>: the app assumes nothing; each setting is sent the first time you change it. Nothing is written now.</label>
     </fieldset>
 
-    <button type="submit" hx-disabled-elt="this">Adopt<span class="htmx-indicator spinner" aria-hidden="true"></span></button>
+    <button type="submit" hx-disabled-elt="this">Set up<span class="htmx-indicator spinner" aria-hidden="true"></span></button>
   </form>
 </div>

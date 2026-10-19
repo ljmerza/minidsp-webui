@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{#- Home (phase 9 design §4): the health line, how sound flows, one card per output, the meter strip, Presets &
+    profiles and the guided tasks. Context from app/web/home.py. Every live part sits inside one levelMeters component
+    (static/js/meters.js), so the diagram, the cards and the strip show the same meters and CLIP lights. -#}
+
+{% block head %}
+<script src="{{ root }}/static/js/start.js?v={{ asset_version }}" data-start-page data-meters="{{ meters_page }}"></script>
+<link rel="stylesheet" href="{{ root }}/static/css/flow.css?v={{ asset_version }}">
+<link rel="stylesheet" href="{{ root }}/static/css/home.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+<h1 class="visually-hidden">Home</h1>
+
+{% if session is none %}
+  <section class="card empty-state">
+    <h2>No device</h2>
+    <p>{{ conn_label }}. This page fills in as soon as minidspd reports a supported device.</p>
+  </section>
+{% else %}
+<div class="home" data-home
+     x-data='levelMeters({{ {"inputs": input_names, "outputs": output_names, "initial": initial_levels}|tojson }})'
+     hx-trigger="sse:levels">
+
+  {#- 1. The health line: the playing preset's problems and cautions with their fixes; notes folded. -#}
+  <section class="card home-health-card" aria-labelledby="home-health-title" data-fix-scope>
+    <h2 id="home-health-title" class="visually-hidden" tabindex="-1">Is anything wrong?</h2>
+    <div class="home-health-box" hx-get="{{ health_url }}"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, sse:master throttle:1000ms, mdsp-sync-changed from:body, refresh"
+         hx-swap="innerHTML">
+      {% include "partials/home_health.html" %}
+    </div>
+  </section>
+
+  {#- 2. How sound flows (design §5). Its Level blocks scroll to the cards below (#home-out1 …). -#}
+  {% include "partials/flow_card.html" %}
+
+  {#- 3. One card per output (§4.3); outputs marked Not in use fold into one line. -#}
+  <section class="card home-outputs" aria-labelledby="home-outputs-title" x-data="outputCards" hx-trigger="sse:master">
+    <div class="card-head">
+      <h2 id="home-outputs-title">Outputs</h2>
+      <a class="home-more" href="{{ root }}/outputs">All outputs <span aria-hidden="true">&rsaquo;</span></a>
+    </div>
+    <div class="home-cards-box" data-output-cards hx-get="{{ cards_url }}"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh" hx-swap="innerHTML">
+      {% include "partials/home_cards.html" %}
+    </div>
+  </section>
+
+  {#- 4. Every meter and CLIP light in one thin strip. -#}
+  {% include "partials/home_strip.html" %}
+
+  <div class="home-pair">
+    {#- 5. Presets & profiles. -#}
+    <section class="card home-presets" aria-labelledby="home-presets-title">
+      <h2 id="home-presets-title">Presets &amp; profiles{{ help("device-preset") }}</h2>
+      <div class="home-presets-box" hx-get="{{ presets_url }}"
+           hx-trigger="sse:sync delay:500ms, sse:desired delay:500ms, sse:master throttle:1000ms, refresh" hx-swap="innerHTML">
+        {% include "partials/home_presets.html" %}
+      </div>
+    </section>
+
+    {#- 6. Guided tasks. -#}
+    <section class="card home-tasks" aria-labelledby="home-tasks-title">
+      <h2 id="home-tasks-title">Guided tasks</h2>
+      <ul class="home-task-list">
+        {% for t in guided %}
+          <li><a class="btn-link home-task" href="{{ t.href }}" data-task="{{ t.id }}">{{ t.label }}</a>
+            {%- if t.hint %} <span class="home-task-hint">{{ t.hint }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/dashboard.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/flow.js?v={{ asset_version }}"></script>
+{% endblock %}

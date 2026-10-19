@@ -1,0 +1,52 @@
+{#- Home's health line (phase 9 design §4.1): the problems pill's list (app/web/shell.py problems_view), laid out on the
+    page. Problems and cautions show with their fixes; info notes are folded. An inline fix ("Route In 1 → Sub") is a
+    data-shell-fix button, so static/js/shell.js sends it and offers Undo exactly as in the header. Re-fetched from
+    /ui/home/health. -#}
+{%- from "partials/fix_macros.html" import action_fix -%}
+{%- macro home_fix(fx) -%}
+  {%- if fx.action -%}
+    {{ action_fix(fx, "btn-small home-fix", health_fix_url, health.preset) }}
+  {%- elif fx.values and health_fix_url -%}
+    <button type="button" class="btn-small home-fix" data-shell-fix data-url="{{ health_fix_url }}"
+            data-preset="{{ health.preset }}" data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}'
+            data-done="{{ fx.done }}">{{ fx.label }}</button>
+  {%- elif fx.href -%}
+    <a class="btn-link btn-small home-fix" href="{{ fx.href }}">{{ fx.label }}</a>
+  {%- endif -%}
+{%- endmacro -%}
+{% if health is none %}
+  <p class="home-health-none"><span aria-hidden="true">?</span> Waiting for the device's settings&hellip;</p>
+{% else %}
+  {% if health.items %}
+    <ul class="home-health-list">
+      {% for item in health.items %}
+        <li class="home-health-item health-{{ item.level }}" data-health-item="{{ item.level }}">
+          <span class="home-health-text"><span class="home-health-glyph" aria-hidden="true">{{ item.glyph }}</span>
+            <span class="visually-hidden">{{ "Problem" if item.level == "problem" else "Caution" }}: </span>{{ item.text }}</span>
+          {%- if item.fixes %}<span class="home-health-fixes">{% for fx in item.fixes %}{{ home_fix(fx) }}{% endfor %}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% elif health_first_run %}
+    <p class="home-health-none" data-health-first-run><span aria-hidden="true">?</span> Nothing to check yet: the app
+      doesn't know what your miniDSP holds until you set up this device.</p>
+  {% else %}
+    <p class="home-health-ok" data-health-ok><span aria-hidden="true">&#10003;</span> Everything the app can check looks fine.</p>
+  {% endif %}
+  <div class="home-health-foot">
+    {% if health.notes %}
+      <details class="home-notes">
+        <summary><span aria-hidden="true">&#9432;</span> {{ health.notes|length }} note{{ "s" if health.notes|length != 1 }} (not problems)</summary>
+        <ul class="home-health-list">
+          {% for item in health.notes %}
+            <li class="home-health-item health-info">
+              <span class="home-health-text"><span class="home-health-glyph" aria-hidden="true">{{ item.glyph }}</span> {{ item.text }}</span>
+              {%- if item.fixes %}<span class="home-health-fixes">{% for fx in item.fixes %}{{ home_fix(fx) }}{% endfor %}</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+    {% if diagnose_href %}<a class="btn-link btn-small home-diagnose" href="{{ diagnose_href }}">Something wrong?</a>{% endif %}
+  </div>
+{% endif %}

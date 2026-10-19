@@ -1,0 +1,44 @@
+{#- Home's Presets & profiles (phase 9 design §4.1): which device preset plays and which saved profile it matches,
+    what waits for the other presets, and the saved profiles. A profile button opens the load wizard (until it exists,
+    the profile's row on the Profiles page); it never loads in one tap. Re-fetched from /ui/home/presets.
+    Context: app/web/home.py presets_context(). -#}
+{% if playing is none %}
+  <p class="hint">Waiting for the device&hellip;</p>
+{% else %}
+  <p class="home-playing">
+    <span aria-hidden="true">&#9654;</span> Device preset {{ playing + 1 }} is playing.
+    {%- if same_as %} Same as {% for name in same_as %}&ldquo;{{ name }}&rdquo;{% if not loop.last %}, {% endif %}{% endfor %}.{{ help("same-as") }}{% endif %}
+  </p>
+  {% if waiting %}
+    <ul class="home-waiting-list">
+      {% for w in waiting %}
+        <li>
+          <span><span aria-hidden="true">&#9208;</span> Preset {{ w.preset + 1 }}: {{ w.count }} change{{ "s" if w.count != 1 }} waiting{{ help("waiting") if loop.first }}</span>
+          <span class="home-waiting-actions">
+            <a class="btn-link btn-small" href="{{ w.href }}">What's waiting?</a>
+            {% if preset_url %}
+            <button type="button" class="btn-small" hx-post="{{ preset_url }}" hx-vals='{"preset": {{ w.preset }}}'
+                    hx-target="#app-header" hx-swap="innerHTML"
+                    hx-confirm="Switch to preset {{ w.preset + 1 }}? Audio may drop out for a few seconds while the device reloads.">
+              Switch to preset {{ w.preset + 1 }}&hellip;
+            </button>
+            {% endif %}
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <h3 class="home-sub">Profiles <span class="muted">(saved in this app)</span>{{ help("profile") }}</h3>
+  {% if saved_error %}
+    <p class="hint">Profiles aren't available: {{ saved_error }}</p>
+  {% else %}
+    <ul class="home-profile-list">
+      {% for p in saved %}
+        <li><a class="btn-link home-profile" href="{{ p.href }}" data-profile="{{ p.id }}">{{ p.name }}&hellip;<span class="visually-hidden"> (load)</span></a></li>
+      {% endfor %}
+      <li><a class="btn-link home-profile-save" href="{{ save_href }}">+ Save current as&hellip;</a></li>
+    </ul>
+    {% if not saved %}<p class="hint">No saved profiles yet.</p>{% endif %}
+    {% if saved_more %}<p class="hint"><a href="{{ profiles_href }}">{{ saved_more }} more on the Profiles page</a></p>{% endif %}
+  {% endif %}
+{% endif %}

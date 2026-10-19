@@ -197,7 +197,7 @@ async def test_load_preview_and_apply(ctx):
     assert response.status_code == 200
     data = response.json()
     assert data["changes"] == 1
-    assert "Load “Games” into preset 2?" in data["question"]
+    assert "Store “Games” in preset 2?" in data["question"]
     assert "1 setting change:\n• Out 1 output level: +0.00 dB → −2.00 dB" in data["question"]
     assert "Preset 2 isn't playing: it waits and is sent when you switch to preset 2." in data["question"]
     assert "outputs." not in data["question"]
@@ -210,7 +210,7 @@ async def test_load_preview_and_apply(ctx):
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert "Staged until preset 2 is active" in data["message"]
+    assert "Waiting until preset 2 plays" in data["message"]
     assert ctx.session.desired(1).outputs[0].gain_db == -2.0
 
     response = await ctx.http.post(url, json={"preset": 1, "preview": True}, headers=HX)
@@ -464,7 +464,7 @@ async def test_page_without_device_still_manages_profiles(ctx):
     html = response.text
     assert "Movies" in html
     assert "Save current preset as a profile" not in html  # nothing to save from
-    assert "Load &amp; switch" not in html
+    assert "Store and play now</button>" not in html
     history = await ctx.http.get("/profiles", params={"tab": "history"})
     assert "No device" in history.text
     diff = await ctx.http.get(f"{UI}/diff", params={"a": f"profile:{pid}", "b": "preset:0"})

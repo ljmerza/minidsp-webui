@@ -1,0 +1,65 @@
+{#- Device & sync status overview (phase 9 design §11.1): which preset is shown, its one headline from the status model
+    (app/sync/status.py) and what to do about it. Rendered with ``bar`` (params.syncbar_context), ``view`` (a
+    StatusView) and ``message``; it reloads itself through the sync bar URL (page=/device) on sync, master and verify
+    events. Its buttons replace #sync-overview-box, which stays put while this element reloads. -#}
+{%- set v = view -%}
+<div class="sync-overview" id="sync-overview" hx-get="{{ bar.syncbar_url }}"
+     hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:master throttle:750ms, sse:verify delay:300ms, mdsp-sync-changed from:body"
+     hx-target="this" hx-swap="outerHTML">
+  {% if bar.tabs|length > 1 %}
+  <nav class="preset-tabs sync-presets" aria-label="Preset to show">
+    <span class="hdr-label">Preset</span>{{ help("device-preset") }}
+    {% for t in bar.tabs %}
+      {%- set cls = "preset-tab" ~ (" is-selected" if t.selected else "") ~ (" is-active" if t.active else "") -%}
+      {%- set desc = "Preset " ~ (t.index + 1) ~ (" (playing)" if t.active else "") ~ (", " ~ t.staged ~ " change" ~ ("s" if t.staged != 1 else "") ~ " waiting" if t.staged else "") -%}
+      <a class="{{ cls }}" href="{{ bar.preset_link(t.index) }}" aria-label="{{ desc }}"
+         {%- if t.selected %} aria-current="page"{% endif %}>
+        {{- t.index + 1 -}}
+        {%- if t.active %}<span class="preset-live" aria-hidden="true">&#9654;</span>{% endif -%}
+        {%- if t.staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
+      </a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  {% if v is not none %}
+    <p class="sync-headline sync-{{ v.css }}" data-sync-state="{{ v.state }}">
+      <span class="sync-glyph" aria-hidden="true">{{ v.glyph }}</span>
+      <span class="sync-headline-text">{{ v.text }}{% if v.state == "sent" %} <span class="muted">(preset {{ v.preset + 1 }})</span>{% endif %}</span>
+    </p>
+    {% if v.state == "changed" %}
+      <p class="hint">The last check found settings on the device that differ from what the app sent. Choose which to
+        keep below: send the app's value, or use the device's.</p>
+    {% elif v.state == "failed" %}
+      <p class="hint">Your values are kept. Retry sends them again.{% if v.error %} <span class="sync-error">Last error: {{ v.error }}</span>{% endif %}</p>
+    {% elif v.state == "unknown" %}
+      <p class="hint">The app doesn't know what the device holds for these: it hasn't sent or read them. Each one is sent
+        the next time you change it, or now with Send all.</p>
+    {% endif %}
+  {% endif %}
+
+  {% if not bar.is_active %}
+    <p class="sync-note">
+      <span aria-hidden="true">&#9208;</span> Preset {{ bar.preset + 1 }} isn't playing{% if bar.active_preset is not none %} (preset {{ bar.active_preset + 1 }} is){% endif %}.
+      Its changes wait and are sent when it plays.
+    </p>
+  {% endif %}
+
+  {%- set c = bar.counts -%}
+  {% if c.failed or bar.summary.error or (not bar.is_active and bar.active_preset is not none) %}
+  <div class="sync-overview-actions">
+    {% if c.failed or bar.summary.error %}
+      <button type="button" class="btn-small" hx-post="{{ bar.retry_url }}" hx-target="#sync-overview-box" hx-swap="innerHTML"
+              hx-disabled-elt="this">Retry now</button>
+    {% endif %}
+    {% if not bar.is_active and bar.active_preset is not none %}
+      <button type="button" class="btn-small" hx-post="{{ bar.activate_url }}" hx-target="#sync-overview-box" hx-swap="innerHTML"
+              hx-disabled-elt="this"
+              hx-confirm="Switch the device to preset {{ bar.preset + 1 }} and send its waiting changes? Audio may drop out for a few seconds while the device reloads.">
+        Switch to preset {{ bar.preset + 1 }} now&hellip;<span class="htmx-indicator spinner" aria-hidden="true"></span>
+      </button>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if message %}<p class="syncbar-msg" role="status">{{ message }}</p>{% endif %}
+</div>

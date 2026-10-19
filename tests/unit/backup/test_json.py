@@ -12,6 +12,7 @@ from app.model.config_doc import ConfigDoc, default_config_doc, set_path
 from app.model.device_profile import M2X4HD
 from app.model.payload import device_values
 from app.state import Database, Repo
+from app.state.db import MIGRATIONS_DIR, discover_migrations
 from app.sync import backup as svc
 from app.sync import profiles as profiles_svc
 from app.sync.fir import FIR_SETTING_KEY
@@ -20,6 +21,8 @@ from app.web.settings_ui import RUNTIME_KEY
 
 from ..conftest import SERIAL
 from ..session.conftest import settle
+
+LATEST_SCHEMA = discover_migrations(MIGRATIONS_DIR)[-1].version
 
 OTHER = 922222
 
@@ -64,7 +67,8 @@ async def test_export_round_trips_through_parse(repo):
     data = await svc.build_export(repo)
     text = json.dumps(data)  # JSON-serializable as is
     backup = svc.parse_backup(text)
-    assert backup.format == svc.FORMAT and backup.version == svc.EXPORT_VERSION and backup.db_schema_version == 1
+    assert backup.format == svc.FORMAT and backup.version == svc.EXPORT_VERSION
+    assert backup.db_schema_version == LATEST_SCHEMA
     (device,) = backup.devices
     assert device.serial == SERIAL and device.product_name == "2x4HD" and device.fw == "1.75"
     assert [p.preset for p in device.presets] == [0, 2]
@@ -76,6 +80,33 @@ async def test_export_round_trips_through_parse(repo):
     (blob,) = backup.fir_blobs
     assert blob.id == stored["blob"].id and list(blob.decode()) == [1.0, 0.5, 0.25]
     assert backup.settings[RUNTIME_KEY] == {"gain_step_confirm_db": 8.0}
+
+
+async def test_channel_flags_round_trip(repo, other_repo, settings):
+    """The Settings flags (migration 0002) are exported and imported; a backup from before them keeps the current
+    flags instead of clearing them."""
+    await seed(repo)
+    await repo.set_channel_meta(SERIAL, "output", 1, name="Shakers", color="#ff0000", max_gain_db=6.0, tactile=True)
+    await repo.set_channel_meta(SERIAL, "output", 3, unused=True)
+    data = await svc.build_export(repo)
+    channels = {(c["kind"], c["idx"]): c for c in data["devices"][0]["channels"]}
+    assert (channels[("output", 1)]["tactile"], channels[("output", 3)]["unused"]) == (True, True)
+
+    plan = await svc.plan_import(svc.parse_backup(data), repo=other_repo, manager=None, settings=settings)
+    assert plan.ok, plan.problems
+    await svc.apply_import(plan, repo=other_repo, manager=None, settings=settings)
+    out1 = await other_repo.get_channel_meta(SERIAL, "output", 1)
+    out3 = await other_repo.get_channel_meta(SERIAL, "output", 3)
+    assert (out1.name, out1.tactile, out1.unused, out3.unused) == ("Shakers", True, False, True)
+
+    old = copy.deepcopy(data)
+    for channel in old["devices"][0]["channels"]:
+        del channel["unused"], channel["tactile"]
+        channel["name"] = "Renamed" if channel["idx"] == 1 else channel["name"]
+    plan = await svc.plan_import(svc.parse_backup(old), repo=other_repo, manager=None, settings=settings)
+    await svc.apply_import(plan, repo=other_repo, manager=None, settings=settings)
+    out1 = await other_repo.get_channel_meta(SERIAL, "output", 1)
+    assert (out1.name, out1.tactile) == ("Renamed", True)
 
 
 async def test_export_includes_state_rows_without_a_device_row(repo):

@@ -7,10 +7,16 @@
 // mute was never confirmed on the device asks first, as on the output page. Per output at most one request is in
 // flight and only the newest values wait, so values never arrive out of order. A refused change re-fetches the cards,
 // which puts the stored values back. Mute acts at once and leaves an Undo toast (phase9 design §4.3, P20).
+//
+// Home and /outputs use the same component for their cards (partials/home_card.html) with one more control: the big
+// −/+ around "Level, total" (design §4.3). `levelStep` is the rule, mirrored from app/web/home.py level_step: + raises
+// the output level up to its limit, then every enabled route into the output (routes share the output's limit);
+// − only lowers the output level. Holding a button repeats it. The card's total, breakdown and at-limit notes update
+// at once; the re-fetch after the change lands brings the server's wording back.
 (() => {
   'use strict';
 
-  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
+  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?', changed: '≠', waiting: '⏸' };
 
   const mdsp = () => window.mdsp || {};
   const toast = (message, level, options) => mdsp().toast && mdsp().toast(message, level, options);
@@ -32,6 +38,91 @@
     return Number.isFinite(next) && next !== current ? next : null;
   }
 
+  const MINUS = '\u2212';
+  const STEP_DB = 0.5;
+  const EPS = 1e-9;
+  const HOLD_DELAY_MS = 450;
+  const HOLD_EVERY_MS = 150;
+
+  // Half-up on the 0.1 dB grid, as home.py's _r1 (Math.round rounds halves up).
+  const grid = (value) => Math.floor(value * 10 + 0.5) / 10;
+
+  // One press of a card's − (direction < 0) or + (direction > 0). `state`: { index, output, ceiling, gainMin,
+  // routes: [{ input, route }] }. Returns { values: {path: dB}, target: 'output' | 'routes' | 'none' }; no values
+  // means the press can't change anything (the button is disabled).
+  function levelStep(state, direction, step = STEP_DB) {
+    const { index, output, ceiling, gainMin } = state;
+    const routes = state.routes || [];
+    if (direction < 0) {
+      if (output > gainMin + EPS) {
+        return { values: { [`outputs.${index}.gain_db`]: Math.max(gainMin, grid(output - step)) }, target: 'output' };
+      }
+      return { values: {}, target: 'none' };
+    }
+    if (output < ceiling - EPS) {
+      return { values: { [`outputs.${index}.gain_db`]: Math.min(ceiling, grid(output + step)) }, target: 'output' };
+    }
+    const values = {};
+    for (const r of routes) {
+      if (r.route < ceiling - EPS) values[`inputs.${r.input}.routing.${index}.gain_db`] = Math.min(ceiling, grid(r.route + step));
+    }
+    return Object.keys(values).length ? { values, target: 'routes' } : { values: {}, target: 'none' };
+  }
+
+  // Number words as app/sync/summary.py: signed() "+4", "−2.5", "0"; signed1() "+16.0".
+  function clean(value, digits) {
+    const v = Number(value.toFixed(digits));
+    return v === 0 ? 0 : v;
+  }
+  function signed(value, digits = 2) {
+    const v = clean(value, digits);
+    if (v > 0) return `+${v}`;
+    if (v < 0) return `${MINUS}${-v}`;
+    return '0';
+  }
+  function signed1(value) {
+    const v = clean(value, 1);
+    if (v > 0) return `+${v.toFixed(1)}`;
+    if (v < 0) return `${MINUS}${(-v).toFixed(1)}`;
+    return '0.0';
+  }
+
+  // "Level, total" and its breakdown, as summary.py _total: { text: "+16.0 dB", breakdown: "route +4 + output +12" }.
+  // `state.routes`: [{ name, in, route }].
+  function totalView(state) {
+    const output = state.output;
+    const routes = state.routes || [];
+    if (!routes.length) return { text: `${signed1(output)} dB`, breakdown: `output ${signed(output)}` };
+    const totals = routes.map((r) => r.in + r.route + output);
+    const lo = Math.min(...totals);
+    const hi = Math.max(...totals);
+    const text = clean(hi - lo, 2) === 0 ? `${signed1(hi)} dB` : `${signed(lo, 1)} to ${signed(hi, 1)} dB`;
+    const chain = (r, labelled) => {
+      const level = clean(r.in, 2) ? `level ${signed(r.in)} + ` : '';
+      const body = `${level}route ${signed(r.route)} + output ${signed(output)}`;
+      if (labelled) return `${r.name}: ${body}`;
+      return level ? `${r.name} ${body}` : body;
+    };
+    const breakdown = routes.length === 1 ? chain(routes[0], false) : routes.map((r) => chain(r, true)).join(' · ');
+    return { text, breakdown };
+  }
+
+  function cardState(card) {
+    let routes = [];
+    try {
+      routes = JSON.parse(card.dataset.routes || '[]');
+    } catch {
+      routes = [];
+    }
+    return {
+      index: Number(card.dataset.output),
+      output: Number(card.dataset.gain),
+      ceiling: Number(card.dataset.ceiling),
+      gainMin: Number(card.dataset.gainMin),
+      routes,
+    };
+  }
+
   function focusKey(el) {
     const card = el && el.closest && el.closest('[data-output]');
     if (!card || !el.dataset || !el.dataset.action) return null;
@@ -41,17 +132,49 @@
   function outputCards() {
     const queues = new Map(); // "<edit url>|<output>" -> { inflight, queued: values | null }
     let focus = null; // the quick control that had focus before a re-fetch replaced it
+    let hold = null; // { button, timer, repeated } while a −/+ is held down
+    let deferred = false; // a re-fetch was skipped while an Adjust ▾ menu was open
+    let writes = 0; // changes sent so far
+    let fetchedAfter = null; // `writes` when the cards' newest re-fetch went out
 
     return {
+      showUnused: false, // Home: the cards folded into the "Not in use" line are shown
+
       init() {
         this.$el.addEventListener('click', (e) => this.onClick(e));
         this.$el.addEventListener('sse:master', (e) => this.onMaster(e.detail));
+        this.$el.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+        for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) {
+          this.$el.addEventListener(type, () => this.stopHold(), true);
+        }
+        // An open Adjust ▾ menu holds re-fetches back (they would close it); closing it catches up.
+        this.$el.addEventListener(
+          'toggle',
+          (e) => {
+            if (e.target.dataset && 'adjust' in e.target.dataset && !e.target.open && deferred) {
+              deferred = false;
+              this.refresh();
+            }
+          },
+          true,
+        );
         const box = this.box();
         if (!box) return;
+        box.addEventListener('htmx:beforeRequest', (e) => {
+          if (e.target === box) fetchedAfter = writes;
+        });
         box.addEventListener('htmx:beforeSwap', (e) => {
           // A re-fetch landing while a change is on its way would flash the old value; the drain re-fetches anyway.
-          if (this.busy()) e.detail.shouldSwap = false;
-          else focus = box.contains(document.activeElement) ? focusKey(document.activeElement) : null;
+          if (this.busy() || hold) e.detail.shouldSwap = false;
+          else if (fetchedAfter !== null && fetchedAfter < writes) {
+            // Asked for before the newest change went out, so it shows the old values (and an Undo would then find
+            // nothing to undo). The drain's own re-fetch was dropped while this one was in flight: fetch again.
+            e.detail.shouldSwap = false;
+            setTimeout(() => this.refresh(), 0);
+          } else if (Array.from(box.querySelectorAll('[data-adjust]')).some((menu) => menu.open)) {
+            e.detail.shouldSwap = false;
+            deferred = true;
+          } else focus = box.contains(document.activeElement) ? focusKey(document.activeElement) : null;
         });
         box.addEventListener('htmx:afterSwap', () => {
           if (!focus) return;
@@ -79,12 +202,18 @@
         return false;
       },
 
-      // "master" arrives for every volume or mute change too; only a different active preset changes the cards.
+      // "master" arrives for every volume or mute change too; only a different active preset or Mute all (every
+      // card's health badge then says Silent) changes the cards.
       onMaster(event) {
         const data = parseEvent(event);
         const preset = data && data.master ? data.master.preset : null;
+        const mute = data && data.master ? data.master.mute : null;
         const list = this.list();
-        if (typeof preset === 'number' && list && list.dataset.preset !== String(preset)) this.refresh();
+        if (!list) return;
+        const presetChanged = typeof preset === 'number' && list.dataset.preset !== String(preset);
+        const known = list.dataset.masterMute;
+        const muteChanged = typeof mute === 'boolean' && !!known && known !== String(mute);
+        if (presetChanged || muteChanged) this.refresh();
       },
 
       onClick(e) {
@@ -97,6 +226,9 @@
         if (button.dataset.action === 'mute') {
           const mute = card.dataset.mute !== 'true';
           if (this.setMute(card, mute)) this.muteToast(o, card.dataset.name || `Out ${o + 1}`, mute);
+        } else if (button.dataset.action === 'level') {
+          if (hold && hold.repeated) return; // the held button already stepped; this is its release
+          this.levelPress(card, Number(button.dataset.step));
         } else if (button.dataset.action === 'nudge') {
           const gain = nudgedGain(
             Number(card.dataset.gain),
@@ -108,6 +240,85 @@
           this.show(card, { gain });
           this.enqueue(list.dataset.editUrl, o, { [`outputs.${o}.gain_db`]: gain });
         }
+      },
+
+      // One press of a card's −/+ (design §4.3): the rule picks the output level or the routes; nothing happens when
+      // it can't change anything. False when nothing was sent.
+      levelPress(card, step) {
+        const list = this.list();
+        if (!list || !list.dataset.editUrl) return false;
+        const state = cardState(card);
+        const plan = levelStep(state, step, Math.abs(step) || STEP_DB);
+        if (!Object.keys(plan.values).length) return false;
+        for (const [path, value] of Object.entries(plan.values)) {
+          if (path.startsWith('outputs.')) state.output = value;
+          const route = /^inputs\.(\d+)\.routing\./.exec(path);
+          if (route) {
+            const r = state.routes.find((x) => x.input === Number(route[1]));
+            if (r) r.route = value;
+          }
+        }
+        card.dataset.gain = String(state.output);
+        card.dataset.routes = JSON.stringify(state.routes);
+        this.showLevel(card, state);
+        this.show(card, {});
+        this.enqueue(list.dataset.editUrl, state.index, plan.values);
+        return true;
+      },
+
+      // The card's total, breakdown, button states and at-limit notes for its current values.
+      showLevel(card, state) {
+        const view = totalView(state);
+        const text = card.querySelector('[data-total-text]');
+        if (text) text.textContent = view.text;
+        const breakdown = card.querySelector('[data-breakdown]');
+        if (breakdown) breakdown.textContent = view.breakdown;
+        const plus = levelStep(state, 1);
+        const minus = levelStep(state, -1);
+        for (const b of card.querySelectorAll('[data-action="level"]')) {
+          const plan = Number(b.dataset.step) > 0 ? plus : minus;
+          b.disabled = !Object.keys(plan.values).length;
+        }
+        const show = {
+          routes: plus.target === 'routes',
+          max: plus.target === 'none',
+          min: minus.target === 'none',
+        };
+        for (const note of card.querySelectorAll('[data-note]')) note.hidden = !show[note.dataset.note];
+      },
+
+      // Holding −/+ repeats it (after a short pause, then every 150 ms) until released.
+      onPointerDown(e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        const button = e.target.closest && e.target.closest('[data-action="level"]');
+        if (!button || button.disabled || !this.$el.contains(button)) return;
+        this.stopHold();
+        const card = button.closest('[data-output]');
+        if (!card) return;
+        const current = { button, timer: null, repeated: false };
+        hold = current;
+        current.timer = setTimeout(function repeat() {
+          if (hold !== current || button.disabled || !button.isConnected) return;
+          current.repeated = true;
+          this.levelPress(card, Number(button.dataset.step));
+          current.timer = setTimeout(repeat.bind(this), HOLD_EVERY_MS);
+        }.bind(this), HOLD_DELAY_MS);
+      },
+
+      stopHold() {
+        if (!hold) return;
+        clearTimeout(hold.timer);
+        const ended = hold;
+        if (!ended.repeated) {
+          hold = null;
+          return;
+        }
+        // The click that follows the release of a repeated hold must not step once more; re-fetches skipped during
+        // the hold catch up once it is over.
+        setTimeout(() => {
+          if (hold === ended) hold = null;
+          if (!this.busy()) this.refresh();
+        }, 0);
       },
 
       // Mute or un-mute one card's output (un-muting a never-synced output asks first). False when cancelled.
@@ -153,7 +364,7 @@
 
       confirmUnmute(card) {
         const name = card.dataset.name || 'This output';
-        const why = 'has never been synced, so its gain on the device is unknown';
+        const why = 'has never been sent, so its level on the device is unknown';
         return window.confirm(`${name} ${why}. Un-mute it anyway?`);
       },
 
@@ -177,11 +388,11 @@
         }
         const badge = card.querySelector('[data-sync-badge]');
         if (badge) {
-          badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown)\b/, 'sync-pending');
+          badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown|changed|waiting)\b/, 'sync-pending');
           const icon = badge.querySelector('.sync-icon');
           const label = badge.querySelector('.sync-text');
           if (icon) icon.textContent = ICON.pending;
-          if (label) label.textContent = 'pending';
+          if (label) label.textContent = 'sending';
         }
       },
 
@@ -214,6 +425,7 @@
       async send(url, values, confirm = false) {
         let response;
         let data = null;
+        writes += 1;
         try {
           response = await fetch(url, {
             method: 'POST',
@@ -238,7 +450,7 @@
     };
   }
 
-  window.mdsp = Object.assign(window.mdsp || {}, { dashboard: { outputCards, nudgedGain } });
+  window.mdsp = Object.assign(window.mdsp || {}, { dashboard: { outputCards, nudgedGain, levelStep, totalView } });
 
   document.addEventListener('alpine:init', () => {
     window.Alpine.data('outputCards', outputCards);

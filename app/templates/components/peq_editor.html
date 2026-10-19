@@ -1,9 +1,9 @@
 {#- Filter UI building blocks (docs 05 §4-5). Import with context:
       {% import "components/peq_editor.html" as fx with context %}
     - fx.assets(crossover=false): uPlot, dsp.js, graph.js and the editors' scripts (once per page, before Alpine).
-    - fx.editor(side, index, color, name, view): the PEQ editor of one input or output bank.
+    - fx.editor(side, index, color, name, view): the EQ (PEQ) editor of one input or output bank.
     - fx.graph_toolbar(): view / fit buttons shared by the editors (uses the component's view, setView, autoFit, resetY).
-    - fx.warnings(): the graph's warnings list (float32 rounding, FIR plotted flat, muted output).
+    - fx.warnings(): the graph's warnings list (rounding notes, FIR plotted flat, muted output).
     The components load their state from app/web/filters.py and talk to it as JSON. -#}
 
 {% macro assets(crossover=false) -%}
@@ -28,8 +28,8 @@
     </span>
     {% endif %}
     <span class="seg" role="group" aria-label="Vertical scale">
-      <button type="button" class="btn-small" @click="autoFit()" title="Fit the vertical scale to the curves">Auto-fit</button>
-      <button type="button" class="btn-small" @click="resetY()" title="Back to the default scale">Reset</button>
+      <button type="button" class="btn-small" @click="autoFit()">Auto-fit</button>
+      <button type="button" class="btn-small" @click="resetY()">Reset</button>
     </span>
   </div>
 {%- endmacro %}
@@ -38,6 +38,8 @@
   <ul class="graph-warnings" x-show="warnings.length" x-cloak>
     <template x-for="w in warnings" :key="w"><li><span aria-hidden="true">&#9888;</span> <span x-text="w"></span></li></template>
   </ul>
+  <p class="hint" x-show="warnings.some((w) => w.includes('rounding note'))" x-cloak>What is a rounding
+    note?{{ help("rounding") }}</p>
 {%- endmacro %}
 
 {#- Grouped, with the hint in the group label (phase 9 P07): a gentle cut is Peaking, not Notch. -#}
@@ -74,22 +76,23 @@
 <div class="peq-editor" data-peq-editor="{{ side }}.{{ index }}" x-data='peqEditor({{ cfg|tojson }})'
      hx-trigger="sse:sync, sse:desired">
   {{ graph_toolbar() }}
-  <div class="graph-box peq-graph" x-ref="graph" aria-label="{{ name }} PEQ response; drag a band's handle to change it"></div>
+  <div class="graph-box peq-graph" x-ref="graph" aria-label="{{ name }} EQ response; drag a band's handle to change it"></div>
   {{ warnings() }}
   <p class="hint">Drag a handle: sideways = frequency, up/down = gain. Mouse wheel over a handle or pinch = Q.
     Hold Shift for fine steps. The curve is a preview until the server confirms the change.</p>
   <p class="hint">Choosing a type for an unused band turns it on. For a boom, pick Peaking, then Cut and how many dB;
-    you never need a minus sign. Notch removes a very thin slice.</p>
+    you never need a minus sign. Notch removes a very thin slice. Specialist types{{ help("peq-specialist") }} are
+    for measured setups.</p>
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
 
   <div class="table-scroll">
     <table class="data-table peq-table">
-      <caption class="visually-hidden">{{ name }} PEQ bands</caption>
+      <caption class="visually-hidden">{{ name }} EQ bands</caption>
       <thead>
         <tr>
-          <th scope="col">#</th><th scope="col">On</th><th scope="col">Type</th>
-          <th scope="col">Freq <span class="unit">Hz</span></th><th scope="col">Q</th>
-          <th scope="col">Cut / Boost</th><th scope="col"><span class="unit">dB</span></th>
+          <th scope="col">#</th><th scope="col">On</th><th scope="col">Type{{ help("peq-type") }}</th>
+          <th scope="col">Freq <span class="unit">Hz</span></th><th scope="col">Width (Q){{ help("q") }}</th>
+          <th scope="col">Cut / Boost{{ help("cut-boost") }}</th><th scope="col"><span class="unit">dB</span></th>
           <th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
@@ -99,12 +102,15 @@
             <th scope="row">
               <span class="band-swatch" :style="`background: ${color(band.index)}`" aria-hidden="true"></span>
               <span x-text="band.index + 1"></span>
-              <span x-show="band.external" class="lock" title="Managed by another tool (read-only)" aria-label="read-only">&#128274;</span>
+              <span x-show="band.external" class="lock" role="img" aria-label="Managed by another tool (read-only)">&#128274;</span>
             </th>
             <td>
-              <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
-                     :disabled="band.external || band.design.type === 'passthrough'"
-                     :aria-label="`Band ${band.index + 1} on`">
+              {#- The label is the 44 px touch target around the checkbox (phase 9 design §16). -#}
+              <label class="band-on-hit">
+                <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
+                       :disabled="band.external || band.design.type === 'passthrough'"
+                       :aria-label="`Band ${band.index + 1} on`">
+              </label>
             </td>
             <td>
               <select x-model="band.form.type" @change="onTypeChange(band)" :disabled="band.external"
@@ -132,12 +138,12 @@
                        x-model="band.form.mag" @input="onGainInput(band)" @change="commitGain(band)"
                        :disabled="band.external || !uses(band, 'gain')"
                        :aria-label="`Band ${band.index + 1}: dB to ${band.form.cut ? 'cut' : 'boost'}`"></td>
-            <td class="source"><span x-text="sourceText(band)" :title="band.label"></span></td>
+            <td class="source"><span x-text="sourceText(band)"></span></td>
             <td class="band-status">
               <span class="band-off" x-show="isOff(band)">off</span>
-              <span class="sync-badge is-compact" x-show="!isOff(band)" :class="`sync-${status(band)}`" :title="statusTitle(band)">
+              <span class="sync-badge is-compact" x-show="!isOff(band)" :class="`sync-${status(band)}`">
                 <span class="sync-icon" aria-hidden="true" x-text="statusIcon(band)"></span>
-                <span class="sync-text visually-hidden" x-text="status(band)"></span>
+                <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending', changed: 'changed on device' })[status(band)] || status(band)"></span>
               </span>
             </td>
             <td class="row-actions">
@@ -164,7 +170,7 @@
                   </fieldset>
                 </template>
                 <fieldset class="helper">
-                  <legend>Raw coefficients (device convention, a1/a2 negated)</legend>
+                  <legend>Raw coefficients (device convention, a1/a2 negated){{ help("raw", key="band.index") }}</legend>
                   <div class="raw-grid">
                     <template x-for="k in ['b0', 'b1', 'b2', 'a1', 'a2']" :key="k">
                       <label><span x-text="k"></span>

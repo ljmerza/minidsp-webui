@@ -119,7 +119,7 @@ async def test_edit_to_inactive_preset_is_staged_until_it_is_active(ctx):
     await asyncio.sleep(0.1)
     assert ctx.fake.configs == []
     bar = (await ctx.http.get(f"{UI}/presets/1/syncbar", params={"page": "/outputs/1"})).text
-    assert "Switch &amp; apply now" in bar and "staged" in bar
+    assert "Switch to preset 2 now" in bar and "waiting for preset 2" in bar
     assert 'href="/outputs/1?preset=2"' in bar
     # switching from elsewhere (remote, other app) flushes it
     ctx.fake.master["preset"] = 1
@@ -156,7 +156,7 @@ async def test_push_all_from_the_sync_bar(ctx):
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     response = await ctx.http.post(f"{UI}/presets/0/push", params={"page": "/routing"}, headers=HX)
     assert response.status_code == 200
-    assert "Push complete" in response.text
+    assert "All sent (" in response.text
     assert len(ctx.fake.configs) > 4
     # mute-wrapped: the first call mutes the outputs
     first = ctx.fake.configs[0]

@@ -44,6 +44,7 @@ from app.sync.session import (
     StateUnavailable,
     UnknownPreset,
 )
+from app.sync.status import badge_statuses
 from app.web.sync_ui import confirmation_text
 from app.web.ui_common import channel_color, channel_label, device_preset, is_htmx, load_state, manager_of
 
@@ -178,7 +179,8 @@ async def _run_edit(
 
 
 def _statuses(session: DeviceSession, preset: int, prefix: str) -> dict[str, str]:
-    return {p: s for p, s in session.sync_status(preset).items() if p.startswith(prefix)}
+    # The status model's overlay (≠ changed on device, ⏸ waiting), as the header and the sync bar (design 11.1).
+    return {p: s for p, s in badge_statuses(session, preset).items() if p.startswith(prefix)}
 
 
 def band_source(band: PeqBand) -> str:

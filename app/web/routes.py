@@ -24,16 +24,19 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
-from app.web import devices
-from app.web.nav import build_nav
+from app.sync.status import badge_statuses
+from app.sync.summary import session_summary
+from app.web import devices, flow, glossary, shell
+from app.web.nav import build_nav, nav_groups
 from app.web.templating import graph_defaults, templates
 
 router = APIRouter(include_in_schema=False)
+router.include_router(flow.router)  # /ui/flow, the signal-flow diagram (phase 9 design §5)
 
 ERROR_HEADER = "X-Mdsp-Error"
 
 # "sync" and "desired" refresh the output cards (other tabs, Home Assistant, the writer); "master" a preset switch.
-DASHBOARD_TOPICS = ("levels", "master", "device", "sync", "desired")
+DASHBOARD_TOPICS = ("levels", "master", "device", "sync", "desired", "verify")
 # One feed per page: each EventSource holds one of the browser's ~6 HTTP/1.1 connections per host, and the header
 # (outside any nested feed) needs "sync" to keep its badge current while the sync table pushes.
 DEVICE_TOPICS = ("master", "device", "sync", "log", "verify")
@@ -96,6 +99,11 @@ def header_context(request: Request, session: DeviceSession | None) -> dict[str,
         "sources": list(profile.sources) if profile else [],
         "volume_confirm_db": settings.gain_step_confirm_db,
         "unsupported": [d.product_name or "unknown" for d in manager.unsupported],
+        # The global shell (phase 9 design §3): the problems pill of the playing preset and the Help me… menu.
+        "problems": shell.problems_view(request, session) if session is not None else None,
+        "help_menu": shell.help_menu(request),
+        "meters_href": shell.meters_href(request),
+        "short_status": shell.short_status,
         **devices.header_extras(request, session),  # device switcher and storage banner
     }
 
@@ -108,23 +116,36 @@ def _url(request: Request, path: str, **params: Any) -> str:
 
 def page_context(request: Request, session: DeviceSession | None, topics: tuple[str, ...]) -> dict[str, Any]:
     serial = session.serial if session else None
+    nav = build_nav(
+        request, session.profile if session else None, getattr(session, "channel_meta", None) if session else None
+    )
+    # Every page listens to the meters too: the header's CLIP light latches on any page (design §3.1).
+    if "levels" not in topics:
+        topics = (*topics, "levels")
     return {
         **header_context(request, session),
-        "nav": build_nav(
-            request, session.profile if session else None, getattr(session, "channel_meta", None) if session else None
-        ),
+        "nav": nav,
+        "nav_groups": nav_groups(nav),
+        # Channel names for the header's CLIP light ("Shakers clipped").
+        "clip_names": {
+            "i": [c.label for c in _nav_children(nav, "/inputs")],
+            "o": [c.label for c in _nav_children(nav, "/outputs")],
+        },
         "sse_url": _url(request, "/api/v1/events", topics=",".join(topics), serial=serial),
         "header_url": _url(request, "/ui/header", serial=serial),
     }
 
 
 # Same order and glyphs as the editing pages' sync badges (app/web/ui_common.py).
-_SYNC_ORDER = ("failed", "pending", "unknown", "synced")
-_SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}
+# The status model's order and glyphs (app/sync/status.py), in the badges' keys (status.badge_statuses).
+_SYNC_ORDER = ("failed", "changed", "pending", "waiting", "unknown", "synced")
+_SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?", "changed": "≠", "waiting": "⏸"}
 
 
 async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | None:
     """Per-output gain/delay/crossover of the active preset plus a worst-of sync badge; None until state is loaded.
+
+    ``summary`` is the output's `OutputSummary` (its plain-language sentence and health badge).
 
     ``ceiling`` and ``gain_min`` bound the gain nudge buttons; ``never_synced`` (gain or mute never confirmed on the
     device) makes un-muting ask first, as on the output page.
@@ -140,7 +161,8 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
     if not 0 <= preset < session.profile.n_presets:
         return None
     doc = session.desired(preset)
-    sync = session.sync_status(preset)
+    sync = badge_statuses(session, preset)
+    summary = session_summary(session, preset)  # the plain-language sentence and badge (phase 9 design 6)
     cards = []
     for i, out in enumerate(doc.outputs):
         prefix = f"outputs.{i}."
@@ -158,6 +180,7 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
                 "crossover": "on" if any(not g.bypass for g in out.crossover) else "bypassed",
                 "sync": worst,
                 "sync_icon": _SYNC_ICON[worst],
+                "summary": summary.outputs[i] if summary is not None and i < len(summary.outputs) else None,
             }
         )
     return cards
@@ -194,20 +217,23 @@ async def dashboard_outputs_context(
         "output_links": [child.path if child.enabled else None for child in outputs_nav],
         "output_state": cards,
         "outputs_preset": preset,
+        "outputs_master_mute": master.mute if cards is not None and master is not None else None,  # badges say Silent
         "outputs_edit_url": None if preset is None else _url(request, f"/ui/devices/{serial}/presets/{preset}/edit"),
         "outputs_url": _url(request, "/ui/dashboard/outputs", serial=serial),
     }
 
 
-@router.get("/", response_class=HTMLResponse, name="dashboard")
+@router.get("/meters", response_class=HTMLResponse, name="meters")
 async def dashboard(request: Request, serial: int | None = None) -> HTMLResponse:
+    """Meters & graph: the dashboard that was the start page until Home took ``/`` (phase 9 design §12.3). The
+    signal-flow diagram it carried for a while lives on Home now."""
     session = _pick_session(request, serial)
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DASHBOARD_TOPICS)
     status = session.status if session else None
     ctx.update(
-        title="Dashboard",
+        title="Meters & graph",
         input_names=[child.label for child in _nav_children(ctx["nav"], "/inputs")],
         response_view=graph_defaults(request)["view"] or "sub",
         initial_levels={
@@ -238,8 +264,37 @@ async def device_page(request: Request, serial: int | None = None) -> HTMLRespon
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DEVICE_TOPICS)
-    ctx.update(title="Device", **device_info_context(request, session))
+    ctx.update(
+        title="Device & sync", sync_preset=_shown_preset(request, session), **device_info_context(request, session)
+    )
     return templates.TemplateResponse(request, "device.html", ctx)
+
+
+def _shown_preset(request: Request, session: DeviceSession | None) -> int | None:
+    """The 0-based preset the Device & sync page shows: ``?preset=`` (1-based), else the playing one, else the first.
+    None for an unknown preset (the sync panel then answers 404)."""
+    if session is None:
+        return None
+    raw = request.query_params.get("preset")
+    if raw is None or not raw.isdigit():
+        playing = session.master.preset if session.master is not None else None
+        return playing if isinstance(playing, int) and 0 <= playing < session.profile.n_presets else 0
+    preset = int(raw) - 1
+    return preset if 0 <= preset < session.profile.n_presets else None
+
+
+# The header (master, device) is the only live part of the glossary page.
+HELP_TOPICS = ("master", "device")
+
+
+@router.get("/help", response_class=HTMLResponse, name="help_page")
+async def help_page(request: Request) -> HTMLResponse:
+    """The glossary (design §13): every term from app/web/glossary.py, grouped, each with an ``id`` anchor that the
+    toggletips' "More →" links point at. Plain HTML, so it works without JavaScript."""
+    session = _pick_session(request, None)
+    ctx = page_context(request, session, HELP_TOPICS)
+    ctx.update(title="Glossary", groups=glossary.grouped(), terms=glossary.TERMS)
+    return templates.TemplateResponse(request, "help.html", ctx)
 
 
 # --- partials ---------------------------------------------------------------------------------------------------------

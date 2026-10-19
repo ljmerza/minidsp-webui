@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{#- The glossary (phase 9 design §13): every term of app/web/glossary.py, grouped, each with an id anchor that the
+    toggletips' "More →" links point at. No scripts needed. -#}
+
+{% block content %}
+<h1>Glossary</h1>
+<p class="lead">What the words in this app mean. A <span class="tt-glyph tt-glyph-inline" aria-hidden="true">?</span>
+  next to a word on any page opens its short explanation; this page adds a little more.</p>
+
+<nav class="card help-index" aria-labelledby="help-index-title">
+  <h2 id="help-index-title" class="visually-hidden">Contents</h2>
+  <ul>
+    {% for name, items in groups %}
+      <li><a href="#{{ name|lower|replace(' ', '-') }}">{{ name }}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
+
+{% for name, items in groups %}
+  {%- set gid = name|lower|replace(' ', '-') %}
+  <section class="card help-group" aria-labelledby="{{ gid }}">
+    <h2 id="{{ gid }}">{{ name }}</h2>
+    <dl class="help-terms">
+      {% for t in items %}
+        <div class="help-term" id="{{ t.id }}">
+          <dt>{{ t.label }}</dt>
+          <dd>
+            <p>{{ t.short }}</p>
+            {% if t.more %}<p>{{ t.more }}</p>{% endif %}
+            {% if t.related %}
+              <p class="help-related">See also:
+                {% for r in t.related %}<a href="#{{ r }}">{{ terms[r].label }}</a>{{ ", " if not loop.last }}{% endfor %}</p>
+            {% endif %}
+          </dd>
+        </div>
+      {% endfor %}
+    </dl>
+  </section>
+{% endfor %}
+{% endblock %}

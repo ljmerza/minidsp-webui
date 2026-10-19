@@ -328,6 +328,18 @@ there take precedence over the environment.
 | `GRAPH_VIEW` † | `auto` | Frequency range graphs open in: `sub` (5–300 Hz), `full` (10 Hz–20 kHz) or `auto` (each page's own). A range picked on a page is remembered by the browser and wins |
 | `GRAPH_DB_RANGE` † | `24` | Default magnitude scale, ± this many dB (3 to 60); the Fit button still auto-scales |
 
+#### Guidance
+
+Rules of thumb behind the plain-language summaries and health notes, not device facts.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GUIDANCE_HIGH_TOTAL_DB` † | `12` | A total level (input + route + output) at or above this gets a headroom caution |
+| `GUIDANCE_NO_SIGNAL_DBFS` † | `-90` | Meters below this read "no signal" |
+| `GUIDANCE_VOLUME_QUIET_DB` † | `-80` | Volume below this gets a "very quiet" note |
+| `GUIDANCE_VOLUME_TYPICAL_MIN_DB` / `_MAX_DB` † | `-40` / `-10` | The usual listening range of Volume |
+| `GUIDANCE_COMP_THRESHOLD_DBFS` / `GUIDANCE_COMP_RATIO` † | `-60` / `10` | A compressor at or below this threshold with at least this ratio gets a "may hold it almost silent" caution |
+
 #### MQTT / Home Assistant
 
 | Variable | Default | Description |
@@ -351,7 +363,14 @@ make test-integration    # integration tests against the dev stack (starts and s
 make dev-down
 make dev-up-embedded     # the all-in-one variant: bundled minidspd + mock device, UI on 127.0.0.1:8481
 make test-embedded       # build the image and test it in embedded + mock mode
+make e2e-setup           # once: Chromium for Playwright + the minidspd release binary (to ~/.cache/minidsp-webui)
+make test-e2e            # browser tests at 1440x900 and 390x844 (touch), with axe-core accessibility checks
 ```
+
+The browser tests (`tests/e2e`, Playwright for Python) start the app itself in embedded mode with minidspd's mock
+device, on random loopback ports and a throwaway database, one fresh app per test file. They ignore your environment
+and `.env`, and refuse to run if minidspd sees any device besides the mock. `tests/e2e/conftest.py` describes the
+fixtures; pytest-playwright's `--headed`, `--slowmo 200` and `--tracing retain-on-failure` help when one fails.
 
 The dev stack (`docker-compose.dev.yml`) runs the real `minidspd` 0.1.12 against its built-in mock device, so no
 hardware is needed. Its `webui` service runs in external mode against a separate mock daemon container; the
@@ -377,4 +396,5 @@ a real broker.
   tab converges on the same state.
 
 CI runs ruff and pytest on every pull request and builds multi-arch images to GHCR, using the reusable workflows in
-[ljmerza/misc-actions](https://github.com/ljmerza/misc-actions).
+[ljmerza/misc-actions](https://github.com/ljmerza/misc-actions). The browser tests run in their own workflow
+(`.github/workflows/e2e.yml`) on every pull request and push to `main`.

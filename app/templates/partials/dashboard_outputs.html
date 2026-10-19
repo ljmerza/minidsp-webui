@@ -2,7 +2,8 @@
     on SSE sync / desired events and when the active preset changes. dashboard.js drives the quick controls; the
     level readouts bind to the dashboard's levelMeters component. -#}
 <ul class="output-cards"{% if outputs_edit_url %} data-edit-url="{{ outputs_edit_url }}"{% endif %}
-    data-preset="{{ outputs_preset if outputs_preset is not none else '' }}">
+    data-preset="{{ outputs_preset if outputs_preset is not none else '' }}"
+    data-master-mute="{{ outputs_master_mute|tojson if outputs_master_mute is not none else '' }}">
   {% for name in output_names %}
     {%- set key = "o" ~ loop.index0 -%}
     {%- set edit_path = output_links[loop.index0] -%}
@@ -16,15 +17,36 @@
           <span x-text="readout('{{ key }}')">&mdash;</span>
         </span>
       </div>
+      {%- set s = card.summary if card else none -%}
+      {% if s %}
+        {#- Phase 9 summary engine (app/sync/summary.py): what the output does, in words, and its health badge. -#}
+        <div class="output-summary" data-output-summary>
+          <span class="health-badge health-{{ s.badge }}" data-health-badge="{{ s.badge }}">
+            <span class="health-glyph" aria-hidden="true">{{ s.badge_glyph }}</span> {{ s.badge_word }}
+          </span>
+          {#- One literal help() per badge, so tests/web/test_glossary.py can check every id. -#}
+          {%- if s.badge == "silent" %}{{ help("b-silent") }}{% elif s.badge == "overload" %}{{ help("b-overload") }}
+          {%- elif s.badge == "muted" %}{{ help("b-muted") }}{% elif s.badge == "not_in_use" %}{{ help("b-not-in-use") }}
+          {%- elif s.badge == "check" %}{{ help("b-check") }}{% elif s.badge == "ready" %}{{ help("b-ready") }}
+          {%- elif s.badge == "unknown" %}{{ help("st-unknown") }}{% endif %}
+          <p class="output-sentence">{{ s.sentence }}</p>
+          {% if s.badge_reason and s.badge in ("silent", "check", "overload") %}
+            {%- set issue = s.problems|selectattr("text", "equalto", s.badge_reason)|first -%}
+            <p class="output-reason health-{{ s.badge }}">{{ s.badge_reason }}
+              {%- if issue %}{% for a in issue.actions if a.href %} <a href="{{ root }}{{ a.href }}">{{ a.label }}</a>{% endfor %}{% endif -%}
+            </p>
+          {% endif %}
+        </div>
+      {% endif %}
       <dl class="output-params">
         {% if card %}
-          <div><dt>Gain</dt><dd data-gain-text>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
+          <div><dt>Output level</dt><dd data-gain-text>{{ card.gain_db|db }}{% if card.mute %} (muted){% endif %}</dd></div>
           <div><dt>Delay</dt><dd>{{ card.delay_ms|num(2) }} ms</dd></div>
-          <div><dt>Crossover</dt><dd>{{ card.crossover }}</dd></div>
+          <div><dt>Band (crossover)</dt><dd>{{ card.crossover }}</dd></div>
         {% else %}
-          <div><dt>Gain</dt><dd>&mdash;</dd></div>
+          <div><dt>Output level</dt><dd>&mdash;</dd></div>
           <div><dt>Delay</dt><dd>&mdash;</dd></div>
-          <div><dt>Crossover</dt><dd>&mdash;</dd></div>
+          <div><dt>Band (crossover)</dt><dd>&mdash;</dd></div>
         {% endif %}
       </dl>
       {% if card and outputs_edit_url %}
@@ -34,20 +56,19 @@
             {{- "Muted" if card.mute else "Mute" -}}
           </button>
           <button type="button" class="btn-small" data-action="nudge" data-step="-0.5"
-                  aria-label="{{ name }} gain down 0.5 dB"{% if card.gain_db <= card.gain_min %} disabled{% endif %}>&minus;0.5 dB</button>
+                  aria-label="{{ name }} level down 0.5 dB"{% if card.gain_db <= card.gain_min %} disabled{% endif %}>&minus;0.5 dB</button>
           <button type="button" class="btn-small" data-action="nudge" data-step="0.5"
-                  aria-label="{{ name }} gain up 0.5 dB"{% if card.gain_db >= card.ceiling %} disabled
-                  title="At this output's gain ceiling ({{ card.ceiling|db }})"{% endif %}>+0.5 dB</button>
+                  aria-label="{{ name }} level up 0.5 dB"{% if card.gain_db >= card.ceiling %} disabled{% endif %}>+0.5 dB</button>
         </div>
+        {% if card.gain_db >= card.ceiling %}<p class="hint output-limit">At its level limit ({{ card.ceiling|db(signed=true) }}).{{ help("level-limit") }}</p>{% endif %}
       {% endif %}
       <div class="output-foot">
         {% if card %}
-          <span class="sync-badge sync-{{ card.sync }}" data-sync-badge
-                title="Sync status of this output's settings (active preset)">
-            <span class="sync-icon" aria-hidden="true">{{ card.sync_icon }}</span> <span class="sync-text">{{ card.sync }}</span>
+          <span class="sync-badge sync-{{ card.sync }}" data-sync-badge>
+            <span class="sync-icon" aria-hidden="true">{{ card.sync_icon }}</span> <span class="sync-text">{{ status_text[card.sync] }}</span>
           </span>
         {% else %}
-          <span class="sync-badge sync-unknown" title="Preset state is not loaded">
+          <span class="sync-badge sync-unknown">
             <span aria-hidden="true">&ndash;</span> not tracked yet
           </span>
         {% endif %}

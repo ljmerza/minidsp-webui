@@ -3,8 +3,8 @@
 {%- set path = "outputs." ~ channel.index ~ ".delay_ms" -%}
 {%- set others = [] -%}
 {%- for name in output_names %}{% if loop.index0 != channel.index %}{% set _ = others.append({"index": loop.index0, "name": name}) %}{% endif %}{% endfor -%}
-<h2>Delay</h2>
-{{ m.delay_control("delay-" ~ channel.index, path, values[path], sample_rate, delay_max_ms, statuses, failed_reasons) }}
+<h2>Delay{{ help("delay") }}</h2>
+{{ m.delay_control("delay-" ~ channel.index, path, values[path], sample_rate, delay_max_ms, statuses, failed_reasons, term=none) }}
 <p class="hint">Range 0 to {{ '%.3f'|format(delay_max_ms) }} ms ({{ delay_max_samples }} samples at {{ (sample_rate / 1000)|round|int }} kHz).
   The device stores whole samples, so the value is rounded to the nearest sample.</p>
 
@@ -27,7 +27,7 @@
 
   {% if others %}
   <fieldset class="helper">
-    <legend>Relative helper</legend>
+    <legend>Line up with another output{{ help("line-up") }}</legend>
     <div class="helper-row">
       <span>This output is</span>
       <label><span class="visually-hidden">Distance difference in metres</span>

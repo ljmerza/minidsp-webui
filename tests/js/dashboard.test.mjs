@@ -229,7 +229,7 @@ describe('outputCards', () => {
     confirmAnswer = false;
     page.click(muteButton(card));
     assert.equal(confirms.length, 1);
-    assert.match(confirms[0], /Out 3 has never been synced/);
+    assert.match(confirms[0], /Out 3 has never been sent/);
     assert.equal(calls.length, 0);
     assert.equal(card.dataset.mute, 'true');
 
@@ -333,5 +333,142 @@ describe('outputCards', () => {
     const later = { detail: { shouldSwap: true } };
     page.box.listeners['htmx:beforeSwap'][0](later);
     assert.equal(later.detail.shouldSwap, true);
+  });
+
+  test('a re-fetch asked for before a change went out is not shown; the cards are fetched again', async () => {
+    const card = makeCard(0);
+    const page = mount([card]);
+    const request = () => page.box.listeners['htmx:beforeRequest'][0]({ target: page.box });
+    const swap = () => {
+      const event = { detail: { shouldSwap: true } };
+      page.box.listeners['htmx:beforeSwap'][0](event);
+      return event.detail.shouldSwap;
+    };
+    request(); // e.g. a "sync" event's re-fetch, still on its way when the user mutes
+    page.click(muteButton(card));
+    calls[0].reply(200, {});
+    await settle();
+    refreshes = []; // the drain's re-fetch, which htmx drops while the older one is in flight
+    assert.equal(swap(), false); // the older answer still says un-muted
+    assert.equal(card.dataset.mute, 'true');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(refreshes, [[page.box, 'refresh']]);
+    request();
+    assert.equal(swap(), true);
+  });
+
+  test('re-fetches when Mute all changes, since every health badge then says Silent', () => {
+    const page = mount([makeCard(0)], '0');
+    page.list.dataset.masterMute = 'false';
+    page.master({ master: { volume: -20, mute: false, preset: 0 } });
+    assert.equal(refreshes.length, 0);
+    page.master({ master: { mute: true } });
+    assert.equal(refreshes.length, 1);
+    page.list.dataset.masterMute = ''; // cards not loaded: nothing to compare with
+    page.master({ master: { mute: false } });
+    assert.equal(refreshes.length, 1);
+  });
+});
+
+// --- Home's level rule (phase 9 design §4.3; app/web/home.py level_step is the same rule) -------------------------
+
+describe('levelStep', () => {
+  const { levelStep } = window.mdsp.dashboard;
+  const shakers = (output, routes) => ({ index: 0, output, ceiling: 12, gainMin: -72, routes });
+
+  test('+ below the limit raises the output level', () => {
+    assert.deepEqual(levelStep(shakers(11, [{ input: 0, route: 4 }]), 1), {
+      values: { 'outputs.0.gain_db': 11.5 },
+      target: 'output',
+    });
+    assert.deepEqual(levelStep(shakers(11.8, [{ input: 0, route: 4 }]), 1).values, { 'outputs.0.gain_db': 12 });
+  });
+
+  test('+ at the limit raises every enabled route that is still below it', () => {
+    const plan = levelStep(shakers(12, [{ input: 0, route: 4 }, { input: 1, route: 12 }, { input: 2, route: 11.8 }]), 1);
+    assert.equal(plan.target, 'routes');
+    assert.deepEqual(plan.values, { 'inputs.0.routing.0.gain_db': 4.5, 'inputs.2.routing.0.gain_db': 12 });
+  });
+
+  test('+ with the output and every route at the limit, or nothing routed, does nothing', () => {
+    assert.deepEqual(levelStep(shakers(12, [{ input: 0, route: 12 }]), 1), { values: {}, target: 'none' });
+    assert.deepEqual(levelStep(shakers(12, []), 1), { values: {}, target: 'none' });
+  });
+
+  test('− lowers the output level only, down to the minimum', () => {
+    assert.deepEqual(levelStep(shakers(12, [{ input: 0, route: 12 }]), -1), {
+      values: { 'outputs.0.gain_db': 11.5 },
+      target: 'output',
+    });
+    assert.deepEqual(levelStep(shakers(-71.8, []), -1).values, { 'outputs.0.gain_db': -72 });
+    assert.deepEqual(levelStep(shakers(-72, []), -1), { values: {}, target: 'none' });
+  });
+});
+
+describe('totalView', () => {
+  const { totalView } = window.mdsp.dashboard;
+  test('the big number and its breakdown read as the summary engine writes them', () => {
+    assert.deepEqual(totalView({ output: 12, routes: [{ name: 'In 1', in: 0, route: 4 }] }), {
+      text: '+16.0 dB',
+      breakdown: 'route +4 + output +12',
+    });
+    assert.deepEqual(totalView({ output: 0, routes: [] }), { text: '0.0 dB', breakdown: 'output 0' });
+    assert.deepEqual(totalView({ output: -3.5, routes: [{ name: 'In 1', in: -2, route: 0 }] }), {
+      text: '−5.5 dB',
+      breakdown: 'In 1 level −2 + route 0 + output −3.5',
+    });
+    assert.deepEqual(
+      totalView({ output: 12, routes: [{ name: 'In 1', in: 0, route: 4 }, { name: 'In 2', in: 0, route: -2 }] }),
+      { text: '+10 to +16 dB', breakdown: 'In 1: route +4 + output +12 · In 2: route −2 + output +12' },
+    );
+  });
+});
+
+describe('Home cards', () => {
+  function homeCard(o, { gain, routes, ceiling = 12 }) {
+    const step = (s) => new El('home-step', { action: 'level', step: String(s) });
+    return new El('output-card home-card', {
+      output: String(o), name: 'Shakers', gain: String(gain), mute: 'false', ceiling: String(ceiling),
+      gainMin: '-72', neverSynced: 'false', routes: JSON.stringify(routes),
+    }, [
+      new El('home-level', {}, [step(-0.5), new El('home-total-value', { totalText: '' }), step(0.5)]),
+      new El('home-breakdown', { breakdown: '' }),
+      new El('home-note', { note: 'routes' }),
+      new El('home-note', { note: 'max' }),
+      new El('home-note', { note: 'min' }),
+    ]);
+  }
+  const levelButton = (card, s) => card.querySelectorAll('[data-action="level"]').find((b) => b.dataset.step === String(s));
+  const note = (card, name) => card.querySelectorAll('[data-note]').find((n) => n.dataset.note === name);
+
+  test('+ at the output limit raises the route, and the total and breakdown follow', async () => {
+    const card = homeCard(0, { gain: 12, routes: [{ input: 0, name: 'In 1', in: 0, route: 4 }] });
+    const page = mount([card]);
+    page.click(levelButton(card, 0.5));
+    assert.deepEqual(calls[0].body.values, { 'inputs.0.routing.0.gain_db': 4.5 });
+    assert.equal(card.querySelector('[data-total-text]').textContent, '+16.5 dB');
+    assert.equal(card.querySelector('[data-breakdown]').textContent, 'route +4.5 + output +12');
+    assert.equal(note(card, 'routes').hidden, false);
+    assert.equal(note(card, 'max').hidden, true);
+    assert.equal(JSON.parse(card.dataset.routes)[0].route, 4.5);
+    calls[0].reply(200, {});
+    await settle();
+  });
+
+  test('at both limits + is disabled and the maximum note shows; − lowers the output only', async () => {
+    const card = homeCard(0, { gain: 11.5, routes: [{ input: 0, name: 'In 1', in: 0, route: 12 }] });
+    const page = mount([card]);
+    page.click(levelButton(card, 0.5));
+    assert.deepEqual(calls[0].body.values, { 'outputs.0.gain_db': 12 });
+    assert.equal(levelButton(card, 0.5).disabled, true);
+    assert.equal(note(card, 'max').hidden, false);
+    assert.equal(note(card, 'routes').hidden, true);
+    calls[0].reply(200, {});
+    await settle();
+    page.click(levelButton(card, -0.5));
+    assert.deepEqual(calls[1].body.values, { 'outputs.0.gain_db': 11.5 });
+    assert.equal(levelButton(card, 0.5).disabled, false);
+    calls[1].reply(200, {});
+    await settle();
   });
 });

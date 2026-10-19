@@ -20,12 +20,23 @@ from app.web.templating import templates
 ERROR_HEADER = "X-Mdsp-Error"
 
 # Live topics for the editing pages: the header (master, device) plus sync status and desired-state broadcasts.
-EDIT_TOPICS = ("master", "device", "sync", "desired")
+# "verify": a device check turns sent settings into ≠ on the badges and the sync bar (design 11.1).
+EDIT_TOPICS = ("master", "device", "sync", "desired", "verify")
 
 KINDS = ("input", "output")
-STATUS_ORDER = ("failed", "pending", "unknown", "synced")  # worst first
-STATUS_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}
-STATUS_TEXT = {"synced": "synced", "pending": "pending", "failed": "failed", "unknown": "unknown"}
+# Worst first, as the status model's headline (app/sync/status.py ORDER): "changed" (≠, found by the last check) and
+# "waiting" (⏸, a preset that isn't playing) come from `status.badge_statuses`.
+STATUS_ORDER = ("failed", "changed", "pending", "waiting", "unknown", "synced")
+STATUS_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?", "changed": "≠", "waiting": "⏸"}
+# On-screen words (phase 9 design §2): the internal keys stay "synced"/"pending" in the API and CSS classes.
+STATUS_TEXT = {
+    "synced": "sent",
+    "pending": "sending",
+    "failed": "failed",
+    "unknown": "unknown",
+    "changed": "changed on device",
+    "waiting": "waiting",
+}
 
 # Default channel colours (Settings can override them), one per channel kind and index.
 DEFAULT_COLORS = {

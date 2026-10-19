@@ -45,6 +45,7 @@ from app.sync.session import (
     UndoUnavailable,
     undo_unit,
 )
+from app.sync.status import check_summary, status_view
 from app.web.sync_ui import SYNC_CHANGED, describe_path, format_value
 from app.web.ui_common import channel_label, manager_of, render, url
 
@@ -178,7 +179,8 @@ async def undo_accept(request: UndoRequest, session: Session) -> Any:
 
 _BADGE = {"ok": "synced", "drift": "failed", "unknown": "unknown", "unverifiable": "unknown"}
 _ICON = {"ok": "✓", "drift": "⚠", "unknown": "?", "unverifiable": "–"}
-_TEXT = {"ok": "matches", "drift": "drift", "unknown": "unknown", "unverifiable": "not readable"}
+# On-screen words (phase 9 design §2); the API keeps the status keys.
+_TEXT = {"ok": "matches", "drift": "changed on device", "unknown": "unknown", "unverifiable": "can't check"}
 _ORDER = {"drift": 0, "unknown": 1, "ok": 2, "unverifiable": 3}
 TOAST = "mdsp-toast"  # HX-Trigger event: app.js shows a toast, optionally with an action button (Undo)
 
@@ -188,7 +190,7 @@ def _row(session: DeviceSession, item: svc.VerifyItem) -> dict[str, Any]:
     note = item.note
     if item.status == svc.ItemStatus.UNKNOWN:
         relation = "matches" if item.matches_desired else "differs from"
-        note = f"Never confirmed written; the device value {relation} the desired one." + (f" {note}" if note else "")
+        note = f"Not sent by the app yet; the device value {relation} the app's value." + (f" {note}" if note else "")
     if svc.zero_filter(item):
         note = "All zeros (looks like a read error), so it is never used." + (f" {note}" if note else "")
     return {
@@ -353,13 +355,22 @@ def verify_context(
     rows = sorted((_row(session, i) for i in report.items), key=lambda r: _ORDER[r["status"]]) if report else []
     base = f"/ui/devices/{session.serial}/verify"
     refused = report.refused if report else []
+    check = None
+    drift_paths = [i.path for i in report.drifted] if report else []
+    if report is not None:
+        # The result in words, counted by the one status model: a change stays open until sent, used or forgotten.
+        view = status_view(session, report.preset, report)
+        if view is not None:
+            drift_paths = [p for p in drift_paths if p in view.changed]
+        check = view.check if view is not None else check_summary(report, None, set(drift_paths))
     return {
         "serial": session.serial,
         "report": report,
+        "check": check,
         "counts": report.counts if report else None,
         "rows": [r for r in rows if r["status"] != "unverifiable"],
         "unverifiable": [r for r in rows if r["status"] == "unverifiable"],
-        "drift_paths": [i.path for i in report.drifted] if report else [],
+        "drift_paths": drift_paths,
         "accept_paths": [i.path for i in report.acceptable] if report else [],
         "accept_count": _count_units([i.path for i in report.acceptable]) if report else 0,
         "refused": refused_lines(session, session.writer.state(report.preset).desired, refused) if refused else [],
@@ -423,7 +434,7 @@ async def verify_mark_unknown(request: Request, serial: int) -> Response:
     report.marked_unknown = sorted(set(report.marked_unknown) | set(marked))
     message = (
         f"Forgot {_settings(len(marked))}: the app now treats them as Unknown. Nothing changed on the device. "
-        "Push them from the sync table to overwrite the device."
+        "Send them from the table below to overwrite the device."
         if marked
         else None
     )

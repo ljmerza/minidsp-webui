@@ -644,8 +644,8 @@
     out.warnings = [];
     if (deviation > FLOAT32_WARN_DB) {
       out.warnings.push(
-        `${label}: float32 coefficient rounding moves the response by up to ${deviation.toFixed(2)} dB ` +
-          '(the device stores float32)',
+        `${label}: rounding note: the device stores filters as float32 numbers, which moves the response by up ` +
+          `to ${deviation.toFixed(2)} dB`,
       );
     }
     return out;

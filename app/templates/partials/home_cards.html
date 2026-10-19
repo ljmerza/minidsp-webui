@@ -1,0 +1,38 @@
+{#- The output cards of the playing preset (phase 9 design §4.1, §4.5): Home folds outputs marked Not in use into one
+    line ("Out 3 · Out 4 ◌ Not in use: muted. [Show]"); /outputs shows every card. Rendered by the pages and by
+    /ui/home/cards and /ui/home/outputs (re-fetched on SSE sync / desired / verify; static/js/dashboard.js also
+    re-fetches it when the playing preset or Mute all changes). Context: app/web/home.py cards_context(). -#}
+{%- from "partials/home_card.html" import output_card -%}
+{% if first_run %}
+  {#- 4.4: the device isn't set up yet, so the app doesn't know what any card would say. -#}
+  <div class="home-first-run" data-first-run>
+    <p>The app doesn't know what your miniDSP holds yet.{{ help("set-up") }}</p>
+    <p><a class="btn-link home-first-run-btn" href="{{ adopt_href }}">Set up this device&hellip;</a></p>
+  </div>
+{% elif cards is none %}
+  <p class="hint home-waiting">Waiting for the device's settings&hellip;</p>
+{% else %}
+  {%- set folded_names = folded|map(attribute="o")|map(attribute="name")|list -%}
+  <ul class="output-cards home-cards{% if not fold %} is-overview{% endif %}" data-edit-url="{{ cards_edit_url }}"
+      data-preset="{{ cards_preset }}"
+      data-master-mute="{{ cards_master_mute|tojson if cards_master_mute is not none else '' }}">
+    {% for c in cards if not (fold and c.o.unused) %}
+      {{ output_card(c, cards_edit_url, cards_preset, overview=not fold) }}
+    {% endfor %}
+    {% if folded %}
+      {%- set all_muted = folded|map(attribute="o")|selectattr("muted")|list|length == folded|length -%}
+      <li class="home-fold" data-fold>
+        <span class="home-fold-names">{{ folded_names|join(" · ") }}</span>
+        <span class="health-badge health-not_in_use"><span class="health-glyph" aria-hidden="true">&#9676;</span> Not in use</span>{{ help("not-in-use") }}
+        <span class="home-fold-state">{{ "Muted." if all_muted else "" }}</span>
+        <button type="button" class="btn-small home-fold-btn" @click="showUnused = !showUnused"
+                aria-expanded="false" :aria-expanded="showUnused.toString()">
+          <span x-text="showUnused ? 'Hide' : 'Show'">Show</span><span class="visually-hidden"> {{ folded_names|join(" and ") }}</span>
+        </button>
+      </li>
+      {% for c in folded %}
+        {{ output_card(c, cards_edit_url, cards_preset, 'x-show="showUnused" x-cloak data-folded') }}
+      {% endfor %}
+    {% endif %}
+  </ul>
+{% endif %}

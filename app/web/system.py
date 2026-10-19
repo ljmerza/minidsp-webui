@@ -75,7 +75,7 @@ def traces(result: SystemResult, names: list[str], colors: list[str]) -> list[di
         out.append(
             {
                 "id": "sum",
-                "label": "Electrical sum",
+                "label": "Sum",
                 "color": SUM_COLOR,
                 "kind": "sum",
                 "bold": True,
@@ -93,7 +93,7 @@ async def system_page(request: Request, serial: int | None = None, preset: int |
     session = pick_session(request, serial)
     if serial is not None and session is None:
         return not_found_page(request, serial)
-    ctx = edit_page_context(request, session, "System")
+    ctx = edit_page_context(request, session, "Combined response")
     if session is None:
         return render(request, "system.html", ctx)
     error = await load_state(session)

@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from app.api.deps import require_same_origin
@@ -31,6 +31,7 @@ from app.sync.session import (
     StateUnavailable,
     UnknownPreset,
 )
+from app.sync.status import badge_statuses, status_view
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
     EDIT_TOPICS,
@@ -61,9 +62,9 @@ DEFAULT_DISTANCE_M = 3.0
 # phases light up a tab just by adding the template. ``fir`` is also hidden unless the profile supports FIR.
 OUTPUT_TABS: tuple[tuple[str, str], ...] = (
     ("delay", "Delay"),
-    ("crossover", "Crossover"),
-    ("peq", "PEQ"),
-    ("compressor", "Compressor"),
+    ("crossover", "Band (crossover)"),
+    ("peq", "EQ"),
+    ("compressor", "Compressor (limiter)"),
     ("fir", "FIR"),
     ("response", "Response"),
 )
@@ -149,7 +150,7 @@ def _base_ctx(request: Request, session: DeviceSession, preset: int, title: str,
     ctx = edit_page_context(request, session, title)
     serial = session.serial
     page = page_ref(request)
-    statuses = session.sync_status(preset)
+    statuses = badge_statuses(session, preset)  # the status model, so the badges agree with the header (design 11.1)
     values = simple_values(session, preset)
     summary = session.sync_summary(preset)
     ctx.update(
@@ -223,14 +224,8 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     return render(request, "routing.html", ctx)
 
 
-@router.get("/inputs", include_in_schema=False)
-async def inputs_index(request: Request) -> RedirectResponse:
-    return RedirectResponse(url(request, "/inputs/1", **dict(request.query_params)), status_code=307)
-
-
-@router.get("/outputs", include_in_schema=False)
-async def outputs_index(request: Request) -> RedirectResponse:
-    return RedirectResponse(url(request, "/outputs/1", **dict(request.query_params)), status_code=307)
+# /inputs and /outputs are the overview pages (phase 9 design §4.5, app/web/home.py); they used to redirect to the
+# first channel.
 
 
 def _channel_ctx(request: Request, session: DeviceSession, kind: str, index: int) -> dict[str, Any]:
@@ -347,7 +342,7 @@ def _current(session: DeviceSession, preset: int, paths: list[str]) -> dict[str,
 
 def _statuses(session: DeviceSession, preset: int, paths: list[str]) -> dict[str, str]:
     try:
-        status = session.sync_status(preset)
+        status = badge_statuses(session, preset)
     except (StateUnavailable, UnknownPreset):
         return {}
     return {p: status[p] for p in paths if p in status}
@@ -426,12 +421,17 @@ async def edit_values(request: Request, serial: int, preset: int) -> Response:
 
 # --- sync bar (per-page preset status, retry, push, switch & apply) --------------------------------------------------
 
+DEVICE_PAGE = "/device"  # its sync bar is the status overview (`syncbar_response`)
+
 
 def syncbar_context(request: Request, session: DeviceSession, preset: int, page: str | None) -> dict[str, Any]:
     serial = session.serial
     summary = session.sync_summary(preset)
     active = device_preset(session)
     base = f"/ui/devices/{serial}/presets/{preset}"
+    # The status model (app/sync/status.py): its counts and headline state, so the bar never says "all sent" while the
+    # header says "changed on device".
+    view = status_view(session, preset)
     return {
         "session": session,
         "serial": serial,
@@ -440,6 +440,7 @@ def syncbar_context(request: Request, session: DeviceSession, preset: int, page:
         "is_active": active == preset,
         "summary": summary,
         "counts": summary["counts"],
+        "view": view,
         "tabs": preset_tabs(session, preset),
         "page": page,
         "preset_link": (lambda p: preset_link(request, page, p)) if page else None,
@@ -469,7 +470,12 @@ def syncbar_response(
     error: str | None = None,
 ) -> Response:
     ctx = {"bar": syncbar_context(request, session, preset, _safe_page(page)), "message": message}
-    return render(request, "partials/syncbar.html", ctx, status_code=status_code, error=error)
+    template = "partials/syncbar.html"
+    if ctx["bar"]["page"] == DEVICE_PAGE:
+        # The Device & sync page shows the status overview instead (phase 9 design §11.1, app/web/sync_ui.py).
+        template = "partials/sync_overview.html"
+        ctx["view"] = status_view(session, preset)
+    return render(request, template, ctx, status_code=status_code, error=error)
 
 
 async def _preset_session(request: Request, serial: int, preset: int) -> DeviceSession | Response:
@@ -506,10 +512,10 @@ async def retry(request: Request, serial: int, preset: int, page: str | None = N
 
 def _flush_message(result: Any, writes: int) -> str:
     if result.ok:
-        return f"Push complete ({writes} write{'s' if writes != 1 else ''})."
+        return f"All sent ({writes} write{'s' if writes != 1 else ''})."
     if result.staged:
-        return "Staged: the push runs when this preset becomes active."
-    return f"Push incomplete: {len(result.pending)} pending, {len(result.failed)} failed. {result.error or ''}".strip()
+        return "Waiting: everything is sent when this preset plays."
+    return f"Not all sent: {len(result.pending)} sending, {len(result.failed)} failed. {result.error or ''}".strip()
 
 
 @router.post("/ui/devices/{serial}/presets/{preset}/push", response_class=HTMLResponse)

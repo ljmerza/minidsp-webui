@@ -1,0 +1,27 @@
+{#- Home's meter strip (phase 9 design §4.1): every channel's meter and CLIP light in one thin line, inside the page's
+    levelMeters component (static/js/meters.js). Muted outputs are marked 🔇. Meters are never live regions; a clip
+    latch is announced by the diagram card. Context: app/web/home.py strip_context(). -#}
+<section class="card home-strip" aria-labelledby="home-strip-title">
+  <div class="home-strip-head">
+    <h2 id="home-strip-title">Levels{{ help("meter") }}</h2>
+    <span class="meters-state" x-show="stale" x-cloak>no signal data</span>
+    <button type="button" class="btn-small" @click="resetAllClips()" :disabled="!anyClip()">Reset CLIP</button>
+    <a class="home-more" href="{{ meters_page }}">Meters &amp; graph <span aria-hidden="true">&rsaquo;</span></a>
+  </div>
+  <ul class="home-strip-list">
+    {% for ch in strip %}
+      <li class="home-strip-item{% if ch.out %} is-out{% endif %}">
+        <span class="home-strip-name">{{ ch.name }}{% if ch.muted %} <span aria-hidden="true">&#128263;</span><span class="visually-hidden">(muted)</span>{% endif %}</span>
+        <span class="home-meter is-small" role="meter" aria-label="{{ ch.name }} level" aria-valuemin="-120" aria-valuemax="0"
+              aria-valuenow="-120" :aria-valuenow="meterNow('{{ ch.key }}')" :aria-valuetext="readout('{{ ch.key }}')">
+          <span class="home-meter-track" aria-hidden="true"><span class="home-meter-bar" :style="hbarStyle('{{ ch.key }}')"></span></span>
+          <span class="home-meter-value" aria-hidden="true" x-text="readout('{{ ch.key }}')">&mdash;</span>
+        </span>
+        <button type="button" class="home-clip" :class="{ 'is-on': clip.{{ ch.key }} }" @click="resetClip('{{ ch.key }}')"
+                aria-label="{{ ch.name }} CLIP light" :aria-label="clipLabel('{{ ch.key }}')">
+          <span aria-hidden="true">CLIP <span x-text="clip.{{ ch.key }} ? '●' : '○'">&#9675;</span></span>
+        </button>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
