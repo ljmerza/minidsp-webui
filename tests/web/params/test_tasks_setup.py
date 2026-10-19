@@ -59,6 +59,20 @@ async def test_save_checks_for_problems_first_then_saves_with_an_empty_name_fiel
     assert "Type a name first." in empty
 
 
+async def test_a_wizard_write_lets_the_mqtt_bridge_refresh_at_once(ctx):
+    class Bridge:
+        refreshes = 0
+
+        def refresh(self) -> None:
+            self.refreshes += 1
+
+    bridge = ctx.app.state.mqtt = Bridge()
+    await _get(ctx, "profiles", step="3", do="save", preset="1")
+    assert bridge.refreshes == 0  # reading a step changes nothing
+    await _post(ctx, "profiles", step="3", do="save", preset="1", name="Movies", op="save")
+    assert bridge.refreshes == 1  # Home Assistant's profile list updates now, as on the Profiles page
+
+
 async def test_save_with_nothing_wrong_says_so(ctx):
     check = text(await _get(ctx, "profiles", step="2", do="save", preset="1"))
     assert "No problems found in preset 1." in check
@@ -202,6 +216,26 @@ async def test_set_levels_starts_quiet(ctx):
     assert ctx.session.master.volume == -40.0
     assert "Changes so far" in done and "Volume −20 dB → −40 dB" in done
     assert "quiet enough to start" in done
+
+
+async def test_set_levels_start_quiet_confirms_a_big_drop_with_a_checkbox(ctx):
+    await ctx.session.set_volume(-5.0, confirm=True)
+    response = await _get(ctx, "set-levels", step="1")
+    raw, quiet = response.text, text(response)
+    assert "I confirm turning the Volume down by 35 dB (from −5 dB to −40 dB)." in quiet
+    assert re.search(r'<input type="checkbox" name="confirm" value="1" required>', raw)
+    unticked = text(await _post(ctx, "set-levels", step="1", op="quiet"))
+    assert ctx.session.master.volume == -5.0
+    assert "Tick the box to confirm turning the Volume down this far." in unticked
+    assert "needs confirmation" not in unticked and "I confirm turning the Volume down by 35 dB" in unticked
+    done = text(await _post(ctx, "set-levels", step="1", op="quiet", confirm="1"))
+    assert ctx.session.master.volume == -40.0
+    assert "Volume −5 dB → −40 dB" in done and "quiet enough to start" in done
+
+
+async def test_set_levels_start_quiet_needs_no_checkbox_for_a_small_drop(ctx):
+    quiet = text(await _get(ctx, "set-levels", step="1"))
+    assert "I confirm" not in quiet
 
 
 async def test_set_levels_input_feedback_and_its_fix_and_undo_all(ctx):

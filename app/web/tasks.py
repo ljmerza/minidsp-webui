@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
-from app.api.deps import require_same_origin
+from app.api.deps import refresh_mqtt_after_write, require_same_origin
 from app.model.config_doc import PathError, get_path
 from app.sync.session import (
     ConfirmationRequired,
@@ -50,7 +50,9 @@ from app.web.routes import page_context
 from app.web.templating import templates
 
 # Writes refuse cross-site browser requests, as the editors' endpoints do (app/api/deps.py).
-router = APIRouter(include_in_schema=False, dependencies=[Depends(require_same_origin)])
+router = APIRouter(
+    include_in_schema=False, dependencies=[Depends(require_same_origin), Depends(refresh_mqtt_after_write)]
+)
 
 UNDO_WINDOW_S = 30.0  # how long Undo is offered (design §14.1)
 UNDO_GRACE_S = 15.0  # a late click (a slow phone, a toast read to the end) still counts

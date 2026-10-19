@@ -186,7 +186,9 @@ def answers(params: Mapping[str, str], summary: PresetSummary | None, docs: Sequ
 
 
 def _params(a: Answers) -> dict[str, str]:
-    out = {"seat": "1" if a.seat else "0", "unit": a.unit}
+    out = {"seat": "1" if a.seat else "0"}
+    if a.unit_given:  # only once chosen on step 2, so step 2 can still apply the remembered unit (design §14.5)
+        out["unit"] = a.unit
     if a.felt is not None:
         out["felt"] = str(a.felt + 1)
     if a.heard is not None:

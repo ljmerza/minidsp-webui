@@ -192,6 +192,15 @@ def test_the_distance_unit_is_remembered(desktop: Page):
     dialog(desktop).get_by_role("button", name=re.compile("Next")).click()
     wait_step(desktop, "Check")
     expect(dialog(desktop)).to_contain_text("Shakers will wait 8.89 ms (853 samples)")
+    desktop.keyboard.press("Escape")
+    expect(dialog(desktop)).to_be_hidden()
+    # The normal flow: step 1, then Next, still picks up the remembered unit.
+    visit(desktop, "/?task=line-up")
+    wait_step(desktop, "Which two?")
+    dialog(desktop).get_by_role("button", name=re.compile("Next")).click()
+    wait_step(desktop, "How far from your seat?")
+    expect(dialog(desktop).get_by_role("radio", name="feet")).to_be_checked()
+    expect(dialog(desktop).locator(".lineup-heard .unit")).to_have_text("ft")
     desktop.evaluate("() => localStorage.removeItem('mdsp.distanceUnit')")
 
 

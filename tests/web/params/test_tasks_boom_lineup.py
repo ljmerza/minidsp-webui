@@ -124,6 +124,15 @@ async def test_line_up_sets_8_75_ms_for_3_m_then_nudges_and_undo_all(ctx):
     assert out.delay_ms == 0.0 and not out.invert
 
 
+async def test_line_up_step_1_leaves_the_unit_to_step_2_so_the_remembered_one_applies(ctx):
+    step1 = (await ctx.http.get("/ui/tasks/line-up?mode=dialog", headers=HX)).text
+    assert 'name="unit"' not in step1
+    step2 = (await ctx.http.get("/ui/tasks/line-up?step=2&seat=1&felt=1&heard=2&mode=dialog", headers=HX)).text
+    assert "localStorage.getItem('mdsp.distanceUnit')" in step2
+    chosen = (await ctx.http.get("/ui/tasks/line-up?step=2&seat=1&felt=1&heard=2&unit=m&mode=dialog", headers=HX)).text
+    assert "localStorage.getItem('mdsp.distanceUnit')" not in chosen  # chosen on step 2 (Back from step 3) wins
+
+
 async def test_line_up_feet_and_a_farther_felt_output(ctx):
     feet = await ctx.http.get("/ui/tasks/line-up?step=3&felt=1&heard=2&seat=1&heard_dist=10&unit=ft", headers=HX)
     assert "Out 1 will wait 8.89 ms (853 samples)" in html.unescape(feet.text)

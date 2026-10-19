@@ -105,3 +105,29 @@ def test_everyday_volume_and_done(desktop: Page, api: Api, shoot):
     expect(dialog(desktop).get_by_role("link", name=re.compile("Save as a profile"))).to_be_visible()
     shoot(desktop, "p9-chunk13-levels-done")
     api.master(volume=-30.0)
+
+
+def test_start_quiet_from_a_loud_volume_confirms_the_drop_in_the_step(desktop: Page, api: Api):
+    def volume() -> float:
+        return api._ok(api.http.get(f"{api.dev}/status"))["master"]["volume"]
+
+    api.master(volume=-5.0, confirm=True)
+    try:
+        visit(desktop, "/?task=set-levels")
+        wait_step(desktop, "Start quiet")
+        box = dialog(desktop).get_by_label(
+            re.compile(r"I confirm turning the Volume down by 35 dB \(from −5 dB to −40 dB\)")
+        )
+        expect(box).to_be_visible()
+        button = dialog(desktop).get_by_role("button", name=re.compile(r"Turn the volume down from −5 dB to −40 dB"))
+        button.click()  # the required checkbox stops the form: nothing is sent
+        settle(desktop, 300)
+        assert volume() == -5.0
+        box.check()
+        button.click()
+        wait_step(desktop, "Start quiet")
+        expect(dialog(desktop)).to_contain_text("quiet enough to start")
+        expect(dialog(desktop)).not_to_contain_text("needs confirmation")
+        assert wait_until(lambda: volume() == -40.0, what="Volume at −40 dB")
+    finally:
+        api.master(volume=-20.0, confirm=True)

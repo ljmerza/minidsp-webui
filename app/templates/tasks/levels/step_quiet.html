@@ -12,6 +12,9 @@
   {%- call t.form("post", "task-live-form") %}
     {{ t.hidden(s.params) }}
     <input type="hidden" name="step" value="1">
+    {%- if quiet_confirm %}
+    <label class="task-confirm"><input type="checkbox" name="confirm" value="1" required> {{ quiet_confirm }}</label>
+    {%- endif %}
     <button type="submit" name="op" value="quiet" class="btn-primary task-live">Turn the volume down from {{ volume_text }} to {{ quiet_text }}</button>
     <span class="task-applies-now">Applies now</span>
   {%- endcall %}

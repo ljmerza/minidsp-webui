@@ -429,6 +429,16 @@ def _step(ctx: TaskCtx, run: Run, number: int, title: str, template: str, data: 
     return Step(number, title, template, run.params(), data, undo=record, **kw)
 
 
+def _quiet_confirm(ctx: TaskCtx, volume: float | None) -> str | None:
+    """The checkbox line when turning the Volume down to −40 dB is a drop big enough to ask first (Settings)."""
+    limit = float(getattr(ctx.session, "volume_drop_confirm_db", 0.0) or 0.0) if ctx.session is not None else 0.0
+    if volume is None or limit <= 0 or volume - QUIET_DB <= limit:
+        return None
+    return (
+        f"I confirm turning the Volume down by {plain(volume - QUIET_DB, 1)} dB (from {db(volume)} to {db(QUIET_DB)})."
+    )
+
+
 def _step_quiet(ctx: TaskCtx, run: Run, **kw: Any) -> Step:
     master = _master(ctx)
     volume = master.volume if master is not None else None
@@ -440,6 +450,7 @@ def _step_quiet(ctx: TaskCtx, run: Run, **kw: Any) -> Step:
         "quiet_text": db(QUIET_DB),
         "is_quiet": volume is not None and volume <= QUIET_DB + 0.01,
         "muted": bool(master is not None and master.mute),
+        "quiet_confirm": _quiet_confirm(ctx, volume),
     }
     return _step(ctx, run, 1, "Start quiet", "tasks/levels/step_quiet.html", data, **kw)
 
@@ -682,6 +693,9 @@ async def act(ctx: TaskCtx, params: Mapping[str, str]) -> Step:
     try:
         record, change, next_kw = await _live(ctx, run, op, params, preset, summary)
     except (ConfirmationRequired, DesiredValidationError, MasterValidationError) as exc:
+        if isinstance(exc, ConfirmationRequired) and op == "quiet":
+            # The checkbox is in step 1's form; this only happens when it wasn't ticked (or the threshold changed).
+            return _step_quiet(ctx, run, error="Tick the box to confirm turning the Volume down this far.")
         extra = {"confirm_needed": params.get("delta")} if isinstance(exc, ConfirmationRequired) and op == "vol" else {}
         return await _rerender(ctx, run, step, params, error=_fail(ctx, exc), **extra)
     except Exception as exc:  # the daemon is down, a switch is running, ...
@@ -711,7 +725,7 @@ async def _live(
         volume = master.volume if master is not None else None
         if volume is not None and volume <= QUIET_DB:
             return None, None, {}
-        record = await apply_master(session, preset, confirm=False, volume=QUIET_DB)
+        record = await apply_master(session, preset, confirm=confirmed(params), volume=QUIET_DB)
         was = f"{db(volume)} {ARROW} " if volume is not None else ""
         return record, f"Volume {was}{db(QUIET_DB)}", {}
     if op == "unmute":
