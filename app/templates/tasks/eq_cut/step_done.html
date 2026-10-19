@@ -1,0 +1,11 @@
+{#- Fix a boom step 5 (design §14.2): the output's EQ now, Undo, and a way on to the EQ table to fine-tune. -#}
+{{ t.heading() }}
+{%- if message %}{{ t.message(("✓ " if not is_error and message.startswith(o.name) else "") ~ message, error=is_error) }}{% endif %}
+<div class="task-done-card">
+  <p class="output-sentence"><strong>{{ o.name }}</strong>: {{ o.sentence }}</p>
+</div>
+<div class="task-undo-row">
+  {{ t.undo_form(s.params) }}
+  <a class="btn-link task-more" href="{{ eq_href }}">Fine-tune in the EQ table</a>
+</div>
+{{ t.nav(close=true) }}

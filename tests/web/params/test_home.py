@@ -263,10 +263,11 @@ async def test_guided_tasks_card_lists_the_seven_tasks(ctx):
         "Save or load a setup",
         "Set up this device",
     ]
-    # PR 11: the two first wizards open from here; the others keep today's page until their wizard exists
+    # PR 11-12: the built wizards open from here; the others keep today's page until their wizard exists
     assert 'href="/tasks/diagnose" data-task="diagnose"' in tasks
     assert 'href="/tasks/louder" data-task="louder"' in tasks
-    assert 'href="/outputs/1?tab=peq" data-task="eq-cut"' in tasks
+    assert 'href="/tasks/eq-cut" data-task="eq-cut"' in tasks
+    assert 'href="/tasks/line-up" data-task="line-up"' in tasks
 
 
 async def test_meters_and_graph_keep_the_old_dashboard(ctx):

@@ -1,0 +1,36 @@
+{#- Line up step 4 (design §14.5): optional fine-tuning by feel. These buttons apply at once (and say so); Undo all on
+    the next step covers them too. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p>Play a scene with sharp hits (a door slam, a punch, a kick drum) and feel whether the hit and the boom land
+  together.</p>
+<p class="lineup-now"><strong>{{ who }} waits {{ now }}</strong></p>
+<div class="lineup-tune">
+  {%- for by, label, ok in (("-1", "−1 ms", can_less), ("1", "+1 ms", can_more)) %}
+  {%- call t.form("post", "lineup-tune-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="4">
+    <input type="hidden" name="by" value="{{ by }}">
+    <button type="submit" name="op" value="nudge" class="lineup-nudge"{% if not ok %} disabled{% endif %}
+            aria-describedby="lineup-applies-{{ mode }}">{{ label }}</button>
+  {%- endcall %}
+  {%- endfor %}
+</div>
+<p class="hint" id="lineup-applies-{{ mode }}"><strong>These apply now.</strong> Each press is sent to the device
+  straight away.</p>
+<div class="lineup-tune">
+  {%- call t.form("post", "lineup-tune-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="4">
+    <input type="hidden" name="invert" value="{{ '0' if inverted else '1' }}">
+    <button type="submit" name="op" value="polarity" class="lineup-polarity" aria-describedby="lineup-polarity-hint-{{ mode }}">
+      {%- if inverted %}Back to 0° on {{ felt_name }}{% else %}Try polarity 180° on {{ felt_name }}{% endif %}</button>
+  {%- endcall %}
+</div>
+<p class="hint" id="lineup-polarity-hint-{{ mode }}">Polarity{{ help("polarity") }} is {{ "180°" if inverted else "0°" }} now.
+  {%- if inverted %} Which felt tighter? Keep the one you prefer.{% else %} Flipping it is harmless to try (applies now).{% endif %}</p>
+{%- call t.form(main=true) %}
+  {{ t.hidden(s.params) }}
+{%- endcall %}
+{{ t.nav(next=5, next_label="Finish") }}

@@ -1,0 +1,16 @@
+{#- Fix a boom step 4 (design §14.2): what Apply will do, in words; a checkbox for a big boost. Nothing is sent
+    until Apply, and then the whole band goes in one edit. -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  <ul class="task-result">{% for line in lines %}<li>{{ line }}</li>{% endfor %}</ul>
+  <p>{{ reading }}</p>
+  {%- if band_note %}<p class="hint">{{ band_note }}</p>{% endif %}
+  {{ t.hidden(s.params) }}
+  <input type="hidden" name="step" value="4">
+  {%- if confirm_line %}
+  <label class="task-confirm"><input type="checkbox" name="confirm" value="1" required> {{ confirm_line }}</label>
+  {%- endif %}
+  {{ t.nothing_sent() }}
+{%- endcall %}
+{{ t.nav(back=3, apply="Apply") }}

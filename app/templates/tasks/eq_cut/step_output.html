@@ -1,0 +1,24 @@
+{#- Fix a boom step 1 (design §14.2): which output, with its EQ now and how many bands are free. An output whose
+    10 bands are all in use can't be chosen: the wizard never overwrites a band that is on. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("output",)) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Which output booms?</legend>
+    {%- for r in rows %}
+    <label class="task-choice{% if r.full %} is-unavailable{% endif %}">
+      <input type="radio" name="output" value="{{ r.n }}"{% if r.n == chosen %} checked{% endif %}
+             {%- if r.full %} disabled aria-describedby="eqcut-why-{{ r.n }}-{{ mode }}"{% endif %}>
+      <span>{{ r.text }}{% if r.note %} <span class="muted">({{ r.note }})</span>{% endif %}
+        {%- if r.free %}<span class="task-why">{{ r.free }}</span>{% endif %}
+        {%- if r.full %}<span class="task-why" id="eqcut-why-{{ r.n }}-{{ mode }}">Not possible now: {{ r.why }}
+          Change one in the <a href="{{ r.eq_href }}">EQ table</a>.</span>{% endif %}</span>
+    </label>
+    {%- endfor %}
+  </fieldset>
+  <p class="hint">A boom is one low note that rings louder and longer than the rest. An EQ{{ help("eq") }} cut lowers
+    just that note.</p>
+{%- endcall %}
+{%- if chosen %}{{ t.nav(next=2) }}{% else %}{{ t.nav() }}{% endif %}
