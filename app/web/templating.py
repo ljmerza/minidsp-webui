@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from markupsafe import Markup
 
-from app import __version__
+from app import GIT_COMMIT, REPO_URL, __version__
 from app.sync.status import status_view
 from app.sync.summary import session_summary
 from app.web.glossary import help_button
@@ -92,6 +92,7 @@ def _request_globals(request: Request) -> dict[str, Any]:
     return {
         "root": request.scope.get("root_path", "").rstrip("/"),
         "asset_version": __version__,
+        "build_info": {"version": __version__, "commit": GIT_COMMIT, "short": GIT_COMMIT[:7], "repo": REPO_URL},
         "meter_ticks": METER_TICKS_DB,
         "graph_defaults": graph_defaults(request),
     }
