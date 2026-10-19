@@ -186,6 +186,20 @@ def test_steepness_lr4_writes_the_same_design_as_lr_24(desktop: Page, api: Api):
     expect(desktop.locator(".xover-sentence")).to_contain_text("fades by 24 dB per octave")
 
 
+def test_the_band_tab_has_one_legend(screen: Page):
+    """The graph draws its own legend (following the traces); the template must not add a second, static one."""
+    visit(screen, f"{SHAKERS}?tab=crossover")
+    legends = screen.locator("#tab-panel .graph-legend")
+    expect(legends.locator("li").first).to_be_visible()
+    expect(legends).to_have_count(1)
+
+
+def test_the_eq_tab_explains_the_width_in_hz(screen: Page):
+    """Design §8.2: the width hint under the table, for the 4 dB cut at 40 Hz (Q 4)."""
+    visit(screen, f"{SHAKERS}?tab=peq")
+    expect(screen.locator("#tab-panel .peq-width-hint")).to_have_text("Width (Q 4) at 40 Hz: affects about 35–45 Hz")
+
+
 def test_at_the_limit_the_level_tab_raises_the_route(desktop: Page, api: Api):
     visit(desktop, SHAKERS)
     notes = desktop.locator("#level-notes")

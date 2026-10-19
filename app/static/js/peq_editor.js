@@ -196,10 +196,30 @@
     return remember(key) || pageView(fallback);
   }
 
+  // What a peaking band's width means in Hz (phase 9 design §8.2, help "q"): the two frequencies where the cut or boost
+  // is half its depth in dB, f0·(√(1 + 1/4Q²) ∓ 1/2Q). Q 4 at 40 Hz → about 35–45 Hz; Q 0.7 → about 21–78 Hz.
+  // Returns null for a frequency or Q that isn't a positive number.
+  function widthRange(freq, q) {
+    const f = Number(freq);
+    const width = Number(q);
+    if (!(f > 0) || !(width > 0)) return null;
+    const root = Math.sqrt(1 + 1 / (4 * width * width));
+    return [f * (root - 1 / (2 * width)), f * (root + 1 / (2 * width))];
+  }
+
+  // "Width (Q 4) at 40 Hz: affects about 35–45 Hz" for the hint under the EQ table; "" when there is nothing to say.
+  function widthHint(freq, q) {
+    const range = widthRange(freq, q);
+    if (!range) return '';
+    const hz = (v) => (v < 1000 ? String(Math.round(v)) : String(Math.round(v / 10) * 10));
+    return `Width (Q ${fieldText(roundQ(Number(q)))}) at ${fieldText(roundFreq(Number(freq)))} Hz: `
+      + `affects about ${hz(range[0])}–${hz(range[1])} Hz`;
+  }
+
   const helpers = {
     ICON, RANK, BAND_COLORS, request, send, errorText, parseEvent, worst, applySync, remember, biquadFromForm,
     stability, fullPrecision, createPlot, pageView, startView, pointerData, roundFreq, roundQ, roundGain, clamp,
-    parseSigned, fieldText,
+    parseSigned, fieldText, widthRange, widthHint,
   };
   window.mdsp = Object.assign(window.mdsp || {}, { filters: helpers });
 
@@ -376,6 +396,12 @@
       },
       statusText(band) {
         return this.isOff(band) ? 'off' : this.status(band);
+      },
+      // The width hint under the table follows the selected band, else the first peaking band in use.
+      widthHint() {
+        const peaking = (b) => b && b.form.type === 'peaking' && !this.isOff(b);
+        const band = peaking(this.bands[this.selected]) ? this.bands[this.selected] : this.bands.find(peaking);
+        return band ? widthHint(band.form.freq, band.form.q) : '';
       },
       isDragging(band) {
         return ctl.drag !== null && ctl.drag.index === band.index;

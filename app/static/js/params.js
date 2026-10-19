@@ -474,7 +474,7 @@
         this.status[path] = 'pending';
       }
       this.renderBadges();
-      await this.send(values, true);
+      return this.send(values, true); // 'ok' or 'rejected' (cancelled at the confirmation, or refused)
     }
 
     async send(values, commit, confirm = false) {

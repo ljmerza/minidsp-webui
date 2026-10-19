@@ -213,6 +213,7 @@
       </template>
     </table>
   </div>
+  <p class="hint peq-width-hint" x-show="widthHint()" x-text="widthHint()" x-cloak></p>
 
   <div class="peq-actions">
     <button type="button" @click="bankAction('bypass_all')" :disabled="!loaded">Bypass all</button>

@@ -129,12 +129,6 @@
     </template>
   </div>
 
-  <p class="graph-legend" aria-hidden="true">
-    <span class="legend-item"><span class="legend-line" style="--line: {{ channel.color }}"></span> result</span>
-    <span class="legend-item"><span class="legend-line" style="--line: #f472b6"></span> filter 1</span>
-    <span class="legend-item"><span class="legend-line" style="--line: #facc15"></span> filter 2</span>
-    <span class="muted">(dashed: a filter that is off)</span>
-  </p>
   {{ fx.graph_toolbar() }}
   <div class="graph-box" x-ref="graph" aria-label="{{ channel.name }} crossover response"></div>
   {{ fx.warnings() }}

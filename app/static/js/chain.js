@@ -141,7 +141,7 @@
     syncSteppers();
   });
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const button = e.target.closest && e.target.closest('[data-chain-values]');
     if (!button || button.disabled) return;
     const page = params();
@@ -154,7 +154,11 @@
     if (!page || !values) return;
     const before = Object.fromEntries(Object.keys(values).map((path) => [path, page.value(path)]));
     button.disabled = true;
-    page.sendBatch(values);
+    // Only claim it happened once the server took it: a cancelled confirmation or a refusal gets no toast or Undo.
+    if ((await page.sendBatch(values)) !== 'ok') {
+      button.disabled = false;
+      return;
+    }
     toast(button.dataset.chainDone || 'Done.', 'info', {
       action: { label: 'Undo', onClick: () => page.sendBatch(before) },
     });

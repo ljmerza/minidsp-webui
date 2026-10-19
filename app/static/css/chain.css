@@ -89,8 +89,6 @@
 .xover-advanced > summary, .helper-more > summary { cursor: pointer; color: var(--text-muted); padding: 0.3rem 0; min-height: 1.75rem; }
 .xover-advanced > summary { font-size: 0.9rem; }
 .graph-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem; margin: var(--gap) 0 0.3rem; font-size: 0.85rem; }
-.legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
-.legend-line { display: inline-block; width: 1.4rem; height: 0; border-top: 3px solid var(--line, var(--text)); }
 
 /* --- EQ tab and Compressor tab -------------------------------------------------------------------------------------- */
 
