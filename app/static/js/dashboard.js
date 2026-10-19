@@ -134,6 +134,8 @@
     let focus = null; // the quick control that had focus before a re-fetch replaced it
     let hold = null; // { button, timer, repeated } while a −/+ is held down
     let deferred = false; // a re-fetch was skipped while an Adjust ▾ menu was open
+    let writes = 0; // changes sent so far
+    let fetchedAfter = null; // `writes` when the cards' newest re-fetch went out
 
     return {
       showUnused: false, // Home: the cards folded into the "Not in use" line are shown
@@ -158,10 +160,18 @@
         );
         const box = this.box();
         if (!box) return;
+        box.addEventListener('htmx:beforeRequest', (e) => {
+          if (e.target === box) fetchedAfter = writes;
+        });
         box.addEventListener('htmx:beforeSwap', (e) => {
           // A re-fetch landing while a change is on its way would flash the old value; the drain re-fetches anyway.
           if (this.busy() || hold) e.detail.shouldSwap = false;
-          else if (Array.from(box.querySelectorAll('[data-adjust]')).some((menu) => menu.open)) {
+          else if (fetchedAfter !== null && fetchedAfter < writes) {
+            // Asked for before the newest change went out, so it shows the old values (and an Undo would then find
+            // nothing to undo). The drain's own re-fetch was dropped while this one was in flight: fetch again.
+            e.detail.shouldSwap = false;
+            setTimeout(() => this.refresh(), 0);
+          } else if (Array.from(box.querySelectorAll('[data-adjust]')).some((menu) => menu.open)) {
             e.detail.shouldSwap = false;
             deferred = true;
           } else focus = box.contains(document.activeElement) ? focusKey(document.activeElement) : null;
@@ -415,6 +425,7 @@
       async send(url, values, confirm = false) {
         let response;
         let data = null;
+        writes += 1;
         try {
           response = await fetch(url, {
             method: 'POST',

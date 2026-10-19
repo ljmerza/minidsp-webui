@@ -335,6 +335,28 @@ describe('outputCards', () => {
     assert.equal(later.detail.shouldSwap, true);
   });
 
+  test('a re-fetch asked for before a change went out is not shown; the cards are fetched again', async () => {
+    const card = makeCard(0);
+    const page = mount([card]);
+    const request = () => page.box.listeners['htmx:beforeRequest'][0]({ target: page.box });
+    const swap = () => {
+      const event = { detail: { shouldSwap: true } };
+      page.box.listeners['htmx:beforeSwap'][0](event);
+      return event.detail.shouldSwap;
+    };
+    request(); // e.g. a "sync" event's re-fetch, still on its way when the user mutes
+    page.click(muteButton(card));
+    calls[0].reply(200, {});
+    await settle();
+    refreshes = []; // the drain's re-fetch, which htmx drops while the older one is in flight
+    assert.equal(swap(), false); // the older answer still says un-muted
+    assert.equal(card.dataset.mute, 'true');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(refreshes, [[page.box, 'refresh']]);
+    request();
+    assert.equal(swap(), true);
+  });
+
   test('re-fetches when Mute all changes, since every health badge then says Silent', () => {
     const page = mount([makeCard(0)], '0');
     page.list.dataset.masterMute = 'false';
