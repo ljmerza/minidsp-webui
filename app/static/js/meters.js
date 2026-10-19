@@ -4,10 +4,9 @@
 (() => {
   'use strict';
 
-  // Keep in sync with app/web/templating.py (meter_fraction).
+  // Keep in sync with app/web/templating.py (meter_fraction): the labelled ticks evenly spaced, linear between them.
   const FLOOR_DB = -120;
-  const KNEE_DB = -40;
-  const KNEE_FRACTION = 0.25;
+  const TICKS = [-120, -60, -40, -30, -20, -12, -6, 0];
   const PEAK_HOLD_MS = 1500;
   const CLIP_DBFS = -1;
   const STALE_MS = 2500;
@@ -15,8 +14,11 @@
   function meterFraction(db) {
     if (db === null || db === undefined || !Number.isFinite(db)) return 0;
     const v = Math.min(0, Math.max(FLOOR_DB, db));
-    if (v >= KNEE_DB) return KNEE_FRACTION + ((1 - KNEE_FRACTION) * (v - KNEE_DB)) / -KNEE_DB;
-    return (KNEE_FRACTION * (v - FLOOR_DB)) / (KNEE_DB - FLOOR_DB);
+    const step = 1 / (TICKS.length - 1);
+    for (let k = 0; k < TICKS.length - 1; k++) {
+      if (v <= TICKS[k + 1]) return (k + (v - TICKS[k]) / (TICKS[k + 1] - TICKS[k])) * step;
+    }
+    return 1;
   }
 
   window.mdsp = Object.assign(window.mdsp || {}, { meterFraction });

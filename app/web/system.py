@@ -1,5 +1,6 @@
-"""System page (docs 05 §6): an overlay of the selected outputs with their electrical sum, and the integration panel
-(phase difference of a pair of outputs, Shakers vs Sub by default, over 20-100 Hz with |Δφ| > 120° highlighted).
+"""Combined response page (docs 05 §6; "System" before phase 9): an overlay of the selected outputs with their
+electrical sum, and the integration panel (phase difference of a pair of outputs, Shakers vs Sub by default, over
+20-100 Hz with |Δφ| > 120° highlighted).
 
 - ``GET /system``: the page (``?preset=`` is 1-based like the other editing pages; default: the active preset).
 - ``GET /ui/devices/{serial}/presets/{p}/system``: graph.js traces plus the integration analysis, driven by
@@ -28,6 +29,7 @@ from app.api.v1.system import (
 from app.dsp import response as resp
 from app.sync.session import DeviceSession
 from app.web.filters import SUM_COLOR, compact, parse_indexes, parse_range
+from app.web.graph_reading import graph_reading, tactile_outputs
 from app.web.params import page_ref, preset_link
 from app.web.ui_common import (
     channel_color,
@@ -170,6 +172,8 @@ async def system_data(
         return _error(422, "invalid", str(exc))
 
     taps = await _fir_taps(session, doc, sorted(set(selected) | set(the_pair or ())))
+    input_names = [channel_label(session, "input", i) for i in range(profile.n_inputs)]
+    tactile = tactile_outputs(getattr(session, "channel_meta", None), selected)
     freqs = resp.freq_grid(lo, hi, SYSTEM_POINTS)
     fs = profile.sample_rate
 
@@ -184,6 +188,8 @@ async def system_data(
             "range": [lo, hi],
             "muted": [n for n, ch in enumerate(doc.outputs) if ch.mute],
             "traces": traces(result, names, colors),
+            "reading": graph_reading(doc, selected, names, inputs=feeding, input_names=input_names),
+            "tactile": tactile,
             "integration": None,
         }
         if the_pair is not None:

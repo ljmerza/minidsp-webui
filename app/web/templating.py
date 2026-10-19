@@ -53,20 +53,24 @@ def fmt_duration(seconds: float | None) -> str:
     return f"{secs} s"
 
 
-# Meter scale (mirrored in static/js/meters.js): -120..-40 dBFS fills the bottom quarter, -40..0 the rest.
+# Meter scale (mirrored in static/js/meters.js and static/js/task_levels.js): the labelled ticks sit evenly spaced
+# (phase 9 design §12.3), and the bar is linear in dB between two neighbouring ticks.
 METER_FLOOR_DB = -120.0
-METER_KNEE_DB = -40.0
-METER_KNEE_FRACTION = 0.25
-METER_TICKS_DB = (0, -6, -12, -20, -30, -40, -80, -120)
+METER_TICKS_DB = (0, -6, -12, -20, -30, -40, -60, -120)
 
 
 def meter_fraction(db: float | None) -> float:
+    """Height of a meter bar (0..1) for a level in dBFS: each gap between two ticks is the same height."""
     if db is None or not math.isfinite(db):
         return 0.0
     db = min(0.0, max(METER_FLOOR_DB, db))
-    if db >= METER_KNEE_DB:
-        return METER_KNEE_FRACTION + (1 - METER_KNEE_FRACTION) * (db - METER_KNEE_DB) / -METER_KNEE_DB
-    return METER_KNEE_FRACTION * (db - METER_FLOOR_DB) / (METER_KNEE_DB - METER_FLOOR_DB)
+    ticks = sorted(METER_TICKS_DB)  # -120 ... 0
+    step = 1 / (len(ticks) - 1)
+    for k in range(len(ticks) - 1):
+        lo, hi = ticks[k], ticks[k + 1]
+        if db <= hi:
+            return (k + (db - lo) / (hi - lo)) * step
+    return 1.0
 
 
 GRAPH_VIEWS = ("sub", "full")  # named frequency views, as in app/dsp/response.py and static/js/graph.js

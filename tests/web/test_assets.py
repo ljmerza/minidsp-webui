@@ -5,7 +5,7 @@ import re
 import pytest
 
 from app.main import STATIC_DIR
-from app.web.templating import fmt_db, fmt_duration, fmt_num, meter_fraction
+from app.web.templating import METER_TICKS_DB, fmt_db, fmt_duration, fmt_num, meter_fraction
 
 VENDOR = STATIC_DIR / "vendor"
 
@@ -74,9 +74,11 @@ def test_fmt_duration(seconds, expected):
 def test_meter_fraction_scale():
     assert meter_fraction(0) == 1.0
     assert meter_fraction(3) == 1.0  # clamped
-    assert meter_fraction(-40) == pytest.approx(0.25)
-    assert meter_fraction(-20) == pytest.approx(0.625)
-    assert meter_fraction(-80) == pytest.approx(0.125)
+    # The labelled ticks are evenly spaced (phase 9 design §12.3): -120 at 0, -60 at 1/7, ... 0 at 7/7.
+    for k, tick in enumerate(sorted(METER_TICKS_DB)):
+        assert meter_fraction(tick) == pytest.approx(k / 7)
+    assert meter_fraction(-50) == pytest.approx(1.5 / 7)  # linear in dB between two ticks
+    assert meter_fraction(-90) == pytest.approx(0.5 / 7)
     assert meter_fraction(-120) == 0.0
     assert meter_fraction(-200) == 0.0
     assert meter_fraction(None) == 0.0
@@ -85,6 +87,9 @@ def test_meter_fraction_scale():
 
 def test_meter_scale_constants_match_the_js_mirror():
     js = (STATIC_DIR / "js" / "meters.js").read_text()
-    for name, value in (("FLOOR_DB", "-120"), ("KNEE_DB", "-40"), ("KNEE_FRACTION", "0.25"), ("PEAK_HOLD_MS", "1500")):
+    for name, value in (("FLOOR_DB", "-120"), ("PEAK_HOLD_MS", "1500")):
         assert re.search(rf"const {name} = {re.escape(value)};", js), name
     assert re.search(r"const CLIP_DBFS = -1;", js)
+    ticks = ", ".join(str(t) for t in sorted(METER_TICKS_DB))
+    for mirror in ("meters.js", "task_levels.js"):
+        assert f"const TICKS = [{ticks}];" in (STATIC_DIR / "js" / mirror).read_text(), mirror
