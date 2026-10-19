@@ -88,6 +88,12 @@
         {% for entry in help_menu if entry.href != "/help" %}<li><a href="{{ root }}{{ entry.href }}">{{ entry.label }}</a></li>{% endfor %}
       </ul>
       {% endif %}
+      <footer class="nav-footer">
+        <a href="{{ build_info.repo }}" target="_blank" rel="noopener noreferrer">GitHub repository</a>
+        <span class="nav-build">v{{ build_info.version }}{% if build_info.commit %} &middot;
+          <a href="{{ build_info.repo }}/commit/{{ build_info.commit }}" target="_blank" rel="noopener noreferrer"
+             aria-label="Commit {{ build_info.short }} on GitHub"><code>{{ build_info.short }}</code></a>{% else %} &middot; dev build{% endif %}</span>
+      </footer>
     </nav>
     <div class="nav-backdrop" @click="close(true)" aria-hidden="true"></div>
 

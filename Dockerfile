@@ -54,6 +54,7 @@ COPY --from=minidsp /out/minidspd /out/minidsp /usr/local/bin/
 # MALLOC_ARENA_MAX keeps glibc from growing one malloc arena per thread, which matters under a 256 MB memory limit.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    APP_GIT_COMMIT="${GIT_COMMIT}" \
     MALLOC_ARENA_MAX=2 \
     PATH="/app/.venv/bin:${PATH}"
 
