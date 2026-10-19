@@ -13,7 +13,8 @@
 {% else %}
 {% include "partials/adopt_banner.html" %}
 <div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
-     data-output-levels='{{ initial_output_levels|tojson }}' hx-trigger="sse:sync, sse:desired, sse:verify, sse:levels">
+     data-output-levels='{{ initial_output_levels|tojson }}' hx-trigger="sse:sync, sse:desired, sse:verify, sse:levels"
+     x-data='levelMeters({{ input_meters|tojson }})'>
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
 
@@ -29,8 +30,10 @@
       <div class="route-grid" style="--n-in: {{ n_in }}; --n-out: {{ output_names|length }}">
         <span class="rg-corner" aria-hidden="true"></span>
         {% for in_name in input_names %}
-          <span class="rg-in" style="--row: {{ loop.index + 1 }}; --chan: {{ input_colors[loop.index0] }}" aria-hidden="true">
-            <span class="chan-dot"></span>{{ in_name }}</span>
+          <span class="rg-in" style="--row: {{ loop.index + 1 }}; --chan: {{ input_colors[loop.index0] }}">
+            <span class="rg-in-name" aria-hidden="true"><span class="chan-dot"></span>{{ in_name }}</span>
+            <span class="rg-in-meter">{{ rm.input_meter("i%d"|format(loop.index0), in_name) }}</span>
+          </span>
         {% endfor %}
         <span class="rg-total-label" style="--row: {{ n_in + 2 }}">Total{{ help("total") }}</span>
         {% for name in output_names %}
@@ -62,6 +65,7 @@
                   <span class="rg-cell-in" aria-hidden="true">{{ in_name }}</span>
                   <span class="visually-hidden">Route {{ in_name }} to {{ name }}</span>
                 </label>
+                <span class="rg-cell-meter">{{ rm.input_meter("i%d"|format(i), in_name, compact=true) }}</span>
                 <span class="route-level">
                   <button type="button" class="route-step" data-step-for="{{ gp }}" data-step-db="-0.5" data-enabled-by="{{ ep }}"
                           aria-label="Route level from {{ in_name }} to {{ name }} down 0.5 dB"{% if not on %} disabled{% endif %}>&minus;</button>
@@ -119,6 +123,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
 <script src="{{ root }}/static/js/routing.js?v={{ asset_version }}"></script>
 <script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
 {% endblock %}
