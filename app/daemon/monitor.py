@@ -47,6 +47,7 @@ class DeviceMonitor:
         on_connected: Callable[[bool], Awaitable[None] | None] | None = None,  # arg: recovered after a drop
         on_disconnected: Hook | None = None,
         connect: Callable[..., Any] = ws_connect,
+        levels_hook: Callable[[list[float], list[float]], tuple[list[float], list[float]]] | None = None,
     ) -> None:
         self.serial = serial
         self._bus = bus
@@ -59,6 +60,8 @@ class DeviceMonitor:
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
         self._connect = connect
+        # Rewrites each level frame (the embedded mock's level pattern, app/daemon/mock_levels.py); None: as received.
+        self._levels_hook = levels_hook
 
         self.status: StatusSummary | None = None
         self.connected = False
@@ -281,6 +284,11 @@ class DeviceMonitor:
         has_levels = self.levels_enabled and bool(summary.input_levels or summary.output_levels)
         if has_levels:
             input_levels, output_levels = summary.input_levels, summary.output_levels
+            if self._levels_hook is not None:
+                try:
+                    input_levels, output_levels = self._levels_hook(list(input_levels), list(output_levels))
+                except Exception:  # a broken pattern must not stop the stream: keep the frame as received
+                    log.exception("level hook failed for device %s", self.serial)
 
         self.status = StatusSummary(master=master, input_levels=input_levels, output_levels=output_levels)
 

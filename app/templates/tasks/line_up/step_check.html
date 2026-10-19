@@ -1,0 +1,28 @@
+{#- Line up step 3 (design §14.5): the result in words, then Apply. A result beyond the device's longest delay is
+    refused with the reason. -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  <ul class="task-result">{% for line in lines %}<li>{{ line }}</li>{% endfor %}</ul>
+  {%- if refused %}
+  <p class="task-msg task-msg-error" role="alert">Nothing can be applied. Go back and check the distances.</p>
+  {%- elif unchanged %}
+  <p class="task-msg" role="status">{{ who }} already waits that long, so nothing needs to change. You can still
+    fine-tune by feel.</p>
+  {%- endif %}
+  <p class="hint">1 ms is about 34 cm (13.5 in) of sound travel; the device counts in samples{{ help("samples") }}.</p>
+  {{ t.hidden(s.params) }}
+  <input type="hidden" name="step" value="3">
+  {%- if not refused and not unchanged %}{{ t.nothing_sent() }}{% endif %}
+{%- endcall %}
+{%- if refused %}{{ t.nav(back=2) }}
+{%- elif unchanged %}
+<div class="task-nav">
+  {%- set q = dict(s.params, step=2)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+  <a class="btn-link task-back" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+     hx-target="closest [data-task-host]" hx-swap="innerHTML"><span aria-hidden="true">&#9664;</span> Back</a>
+  {%- set n = dict(s.params, step=4)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+  <a class="btn-link btn-primary task-next" href="{{ page_url }}?{{ n }}" hx-get="{{ fragment_url }}?{{ n }}&amp;mode={{ mode }}"
+     hx-target="closest [data-task-host]" hx-swap="innerHTML">Fine-tune <span aria-hidden="true">&#9654;</span></a>
+</div>
+{%- else %}{{ t.nav(back=2, apply="Apply") }}{% endif %}

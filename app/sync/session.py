@@ -548,6 +548,11 @@ class MasterAudit:
             self._close(name)
 
 
+def _mock_pattern(settings: Settings) -> bool:
+    """The embedded mock's level pattern is on (``MINIDSPD_MOCK_LEVELS``, app/daemon/mock_levels.py)."""
+    return bool(getattr(settings, "minidspd_mock", False)) and getattr(settings, "minidspd_mock_levels", "off") != "off"
+
+
 class DeviceSession:
     def __init__(
         self,
@@ -584,6 +589,7 @@ class DeviceSession:
             levels_idle_grace_s=settings.levels_idle_grace_s,
             on_connected=self._on_monitor_connected,
             on_disconnected=self._on_monitor_disconnected,
+            levels_hook=self._mock_levels if _mock_pattern(settings) else None,
         )
         self.on_lost: Callable[[], None] | None = None  # set by SessionManager: called when the device seems gone
         # Embedded mode: the miniDSP's USB (bus, device number) pairs, None if unknown. A re-enumeration (new device
@@ -688,6 +694,29 @@ class DeviceSession:
     def needs_adoption(self) -> bool:
         """True until one of the adopt flows has been run for this device."""
         return self.adoption is None
+
+    def _mock_levels(self, inputs: list[float], outputs: list[float]) -> tuple[list[float], list[float]]:
+        """The monitor's level hook in embedded mock mode with ``MINIDSPD_MOCK_LEVELS`` set: the synthetic pattern of
+        app/daemon/mock_levels.py instead of the mock's flat readings. Only for the mock device (a ``mock:`` URL)."""
+        if self.device is None or not self.device.url.startswith("mock:"):
+            return inputs, outputs
+        from app.daemon.mock_levels import pattern_levels
+
+        master = self.master
+        doc = None
+        playing = master.preset if master is not None else None
+        if self.loaded and isinstance(playing, int) and 0 <= playing < self.profile.n_presets:
+            with contextlib.suppress(Exception):
+                doc = self.desired(playing)
+        result = pattern_levels(
+            self.settings.minidspd_mock_levels,
+            time.monotonic(),
+            doc,
+            n_inputs=self.profile.n_inputs,
+            n_outputs=self.profile.n_outputs,
+            master_mute=bool(master is not None and master.mute),
+        )
+        return result if result is not None else (inputs, outputs)
 
     def set_state(self, state: SessionState, *, force_event: bool = False) -> None:
         if state != self.state or force_event:

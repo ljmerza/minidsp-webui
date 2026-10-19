@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="{{ root }}/static/css/help.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/sync.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/shell.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ root }}/static/css/tasks.css?v={{ asset_version }}">
   {% block head %}{% endblock %}
 </head>
 <body hx-ext="sse" sse-connect="{{ sse_url }}" data-serial="{{ serial if serial is not none else '' }}"
@@ -104,12 +105,17 @@
 
   <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
+  {#- The guided tasks' dialog (phase 9 design §14.1; static/js/tasks.js). -#}
+  {% include "tasks/_dialog.html" %}
+
   <script src="{{ root }}/static/vendor/htmx/htmx.min.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/vendor/htmx/sse.min.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/app.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/master.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/help.js?v={{ asset_version }}"></script>
   <script src="{{ root }}/static/js/shell.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/tasks.js?v={{ asset_version }}"></script>
+  <script src="{{ root }}/static/js/task_levels.js?v={{ asset_version }}"></script>
   {% block scripts %}{% endblock %}
   <script defer src="{{ root }}/static/vendor/alpine/alpine.min.js?v={{ asset_version }}"></script>
 </body>

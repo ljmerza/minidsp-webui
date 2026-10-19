@@ -1,0 +1,10 @@
+{#- Set levels step 7 (design §14.6): the result in words, Undo all, Save as a profile. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<div class="task-done-card">
+  {%- for line in lines %}<p>{{ line }}</p>{% endfor %}
+</div>
+{% include "tasks/levels/_changes.html" %}
+{%- if save_href %}<p><a class="btn-link task-live" href="{{ save_href }}">Save as a profile&hellip;</a></p>{% endif %}
+{{ t.nav(back=6, close=true) }}

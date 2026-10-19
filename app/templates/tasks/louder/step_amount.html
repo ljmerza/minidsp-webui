@@ -1,0 +1,22 @@
+{#- Make one louder step 2 (design §14.4): louder or quieter, and by how much (a magnitude: no minus sign to type). -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  <p class="task-question">{{ o.name }} now: {{ o.total.text }} ({{ o.total.breakdown }})</p>
+  {{ t.hidden(s.params, skip=("dir", "amount", "custom", "method")) }}
+  <fieldset class="task-segmented">
+    <legend>Louder or quieter?</legend>
+    <label><input type="radio" name="dir" value="up"{% if direction == "up" %} checked{% endif %}> Louder</label>
+    <label><input type="radio" name="dir" value="down"{% if direction == "down" %} checked{% endif %}> Quieter</label>
+  </fieldset>
+  <fieldset class="task-segmented">
+    <legend>By how much?</legend>
+    {%- for q in quick %}
+    <label><input type="radio" name="amount" value="{{ '%g'|format(q) }}"{% if q == amount and not custom %} checked{% endif %}> {{ '%g'|format(q) }} dB</label>
+    {%- endfor %}
+  </fieldset>
+  <label class="task-field">Or another amount (dB)
+    <input type="number" name="custom" inputmode="decimal" min="0.5" max="24" step="0.5" value="{{ custom }}"
+           aria-describedby="louder-custom-hint-{{ mode }}"></label>
+  <p class="hint" id="louder-custom-hint-{{ mode }}">0.5 to 24 dB. 3 dB is a small but clear step; 6 dB is a lot.</p>
+{%- endcall %}
+{{ t.nav(back=1, next=3) }}

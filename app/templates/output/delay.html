@@ -7,6 +7,10 @@
 {{ m.delay_control("delay-" ~ channel.index, path, values[path], sample_rate, delay_max_ms, statuses, failed_reasons, term=none) }}
 <p class="hint">Range 0 to {{ '%.3f'|format(delay_max_ms) }} ms ({{ delay_max_samples }} samples at {{ (sample_rate / 1000)|round|int }} kHz).
   The device stores whole samples, so the value is rounded to the nearest sample.</p>
+{%- if "line-up" in task_ids %}
+<p class="task-entry"><a href="{{ root }}/tasks/line-up?output={{ channel.index + 1 }}">Line up shakers with the sub…</a>
+  <span class="muted">(guided: works it out from distances)</span></p>
+{%- endif %}
 
 <div class="delay-helpers"
      x-data='delayHelper({{ {"path": path, "speed": speed_of_sound, "distance": default_distance_m, "maxMs": delay_max_ms, "sampleRate": sample_rate, "others": others}|tojson }})'>

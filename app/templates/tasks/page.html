@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{#- A guided task as a page (/tasks/<id>?step=n&…): the same steps as in the dialog, for deep links, refresh and the
+    browser's Back button (app/web/tasks.py). -#}
+{% block content %}
+<h1 class="task-page-title">{{ w.label }}</h1>
+<p class="task-page-back"><a href="{{ root }}/tasks">All guided tasks</a></p>
+<section class="card task-page" aria-labelledby="task-heading-page">
+  <div class="task-host" data-task-host data-mode="page">
+    {% include "tasks/_step.html" %}
+  </div>
+</section>
+{% endblock %}

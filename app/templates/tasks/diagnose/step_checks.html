@@ -1,0 +1,66 @@
+{#- Something wrong? step 2 (design §14.3): the checks in order, ✓ / ✗ with its fixes / can't tell / not checked yet.
+    The first ✗ is open; a fix shows what it will do, applies on Apply fix and the checks run again. -#}
+{%- macro fix_form(check, fix, index) -%}
+  {%- if fix.kind == "link" -%}
+    <a class="btn-link btn-small task-fix-link" href="{{ root }}{{ fix.href }}">{{ fix.label }}</a>
+  {%- elif fix.kind == "task" -%}
+    {%- set href = task_href(fix.task, **fix.params) -%}
+    {%- if href %}<a class="btn-link btn-small task-fix-link" href="{{ href }}">{{ fix.label }}</a>{% endif -%}
+  {%- else -%}
+    {%- call t.form("post", "task-fix") %}
+      {{ t.hidden(s.params) }}
+      <input type="hidden" name="step" value="2">
+      <input type="hidden" name="check" value="{{ check.id }}">
+      <input type="hidden" name="fix" value="{{ index }}">
+      {%- if fix.preview %}<p class="task-fix-preview">Fix: {{ fix.preview }}</p>{% endif %}
+      {%- if fix.kind == "source" %}
+        <label class="task-field">Source{{ help("source") }}
+          <select name="source">
+            {%- for choice in fix.choices %}<option value="{{ choice }}"{% if choice == fix.current %} selected{% endif %}>{{ choice }}</option>{% endfor %}
+          </select></label>
+      {%- endif %}
+      {%- if fix.confirm %}
+        <label class="task-confirm"><input type="checkbox" name="confirm" value="1"> {{ fix.confirm }}</label>
+      {%- endif %}
+      <button type="submit" name="op" value="fix" class="btn-primary task-apply-fix">{{ "Apply fix" if fix.kind != "source" else fix.label }}<span class="visually-hidden">: {{ fix.label }}</span></button>
+    {%- endcall %}
+  {%- endif -%}
+{%- endmacro -%}
+
+{{ t.heading() }}
+<p class="task-question">{{ question }}</p>
+{%- if no_device %}{{ t.no_device() }}{% endif %}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+{%- if undo_json and message %}<div class="task-undo-row">{{ t.undo_form(s.params) }}</div>{% endif %}
+
+{%- for g in groups %}
+<section class="task-checks-group" aria-label="{{ g.title or 'The device' }}">
+  {%- if g.title %}<h3 class="task-group-title">{{ g.title }}</h3>{% endif %}
+  <ul class="task-checks">
+    {%- for c in g.checks %}
+    {%- set is_open = (open_fix and open_fix[0] == c.id) or (not open_fix and c.id == first_fail) %}
+    <li class="task-check is-{{ c.result }}" data-check="{{ c.id }}">
+      <span class="task-check-glyph" aria-hidden="true">{{ c.glyph }}</span>
+      <span class="visually-hidden">{{ c.word }}: </span>
+      {%- if c.result == "fail" and c.fixes %}
+      <details class="task-check-fixes"{% if is_open %} open{% endif %}>
+        <summary><span class="task-check-text">{{ c.text }}</span> <span class="task-fix-toggle">Fix <span aria-hidden="true">&#9662;</span></span></summary>
+        {%- if c.detail %}<p class="task-check-detail">{{ c.detail }}</p>{% endif %}
+        <div class="task-fix-list">
+          {%- for fx in c.fixes %}{{ fix_form(c, fx, loop.index0) }}{% endfor %}
+        </div>
+      </details>
+      {%- else %}
+      <span class="task-check-text">{{ c.text }}{% if c.result == "pending" %} <span class="muted">({{ c.detail|lower|replace(".", "") }})</span>{% endif %}</span>
+      {%- if c.detail and c.result != "pending" %}<p class="task-check-detail">{{ c.detail }}</p>{% endif %}
+      {%- if c.fixes and c.result != "fail" %}<div class="task-fix-list">{% for fx in c.fixes if fx.kind in ("link", "task") %}{{ fix_form(c, fx, loop.index0) }}{% endfor %}</div>{% endif %}
+      {%- endif %}
+    </li>
+    {%- endfor %}
+  </ul>
+</section>
+{%- endfor %}
+
+{%- call t.form(main=true) %}{{ t.hidden(s.params) }}{%- endcall %}
+{{ t.nav(back=1, next=3, next_label="Finish") }}

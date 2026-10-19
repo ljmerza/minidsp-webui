@@ -1,0 +1,18 @@
+{#- Make one louder step 5 (design §14.4): the card's sentence and total now, Undo, and "A bit more (+1)". -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+<div class="task-done-card">
+  <p class="task-done-total"><strong>{{ o.name }}</strong>: {{ o.total.text }} total <span class="muted">({{ o.total.breakdown }})</span></p>
+  <p class="output-sentence">{{ o.sentence }}</p>
+  {%- if o.headroom.text %}<p class="hint">{{ o.headroom.text }}</p>{% endif %}
+</div>
+<div class="task-undo-row">
+  {{ t.undo_form(s.params) }}
+  {%- call t.form() %}
+    {%- for k, v in more.items() if k != "step" %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    {%- if serial_param is not none %}<input type="hidden" name="serial" value="{{ serial_param }}">{% endif %}
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <button type="submit" name="step" value="4" class="task-more">A bit more (+1 dB)</button>
+  {%- endcall %}
+</div>
+{{ t.nav(close=true) }}

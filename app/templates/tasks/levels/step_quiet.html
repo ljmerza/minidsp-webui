@@ -1,0 +1,34 @@
+{#- Set levels step 1 (design §14.6): start quiet. The buttons here apply at once. -#}
+{{ t.heading() }}
+{%- if no_device %}{{ t.no_device() }}{% endif %}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p class="task-question">Turn the volume{{ help("volume") }} down before we start, so the first loud moment isn't too loud.</p>
+{%- if volume_text %}
+  {%- if is_quiet %}
+  <p class="task-ok"><span aria-hidden="true">&#10003;</span> Volume is at {{ volume_text }}: quiet enough to start.</p>
+  {%- else %}
+  <p>Volume is at {{ volume_text }}.</p>
+  {%- call t.form("post", "task-live-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="1">
+    {%- if quiet_confirm %}
+    <label class="task-confirm"><input type="checkbox" name="confirm" value="1" required> {{ quiet_confirm }}</label>
+    {%- endif %}
+    <button type="submit" name="op" value="quiet" class="btn-primary task-live">Turn the volume down from {{ volume_text }} to {{ quiet_text }}</button>
+    <span class="task-applies-now">Applies now</span>
+  {%- endcall %}
+  {%- endif %}
+{%- endif %}
+{%- if muted %}
+  <p>Mute all{{ help("mute") }} is on, so nothing will play.</p>
+  {%- call t.form("post", "task-live-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="1">
+    <button type="submit" name="op" value="unmute" class="task-live">Turn Mute all off</button>
+    <span class="task-applies-now">Applies now</span>
+  {%- endcall %}
+{%- endif %}
+{% include "tasks/levels/_changes.html" %}
+{%- call t.form(main=true) %}{{ t.hidden(s.params) }}{%- endcall %}
+{{ t.nav(next=2) }}

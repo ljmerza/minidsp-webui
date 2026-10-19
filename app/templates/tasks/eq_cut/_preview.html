@@ -1,0 +1,33 @@
+{#- Fix a boom's before/after preview (app/web/task_eq_cut.py `preview`): the output's EQ and band filters now (solid)
+    and with the new band (dashed). The drawing is aria-hidden; the reading line under it says the same in words. The
+    figure stays put and its body is swapped when a choice changes, so the polite live region reads the new line. -#}
+<figure class="eqcut-preview" aria-live="polite">
+<div class="eqcut-preview-body">
+  {%- if graph %}
+  <p class="eqcut-legend">{{ o.name }}, {{ graph.range }}:
+    <span class="eqcut-key eqcut-key-now" aria-hidden="true"></span> now
+    <span class="eqcut-key eqcut-key-new" aria-hidden="true"></span> with the {{ "cut" if a.kind == "cut" else "boost" }}</p>
+  <div class="eqcut-plot" aria-hidden="true">
+    <svg class="eqcut-graph" viewBox="0 0 {{ graph.w }} {{ graph.h }}" preserveAspectRatio="none" focusable="false">
+      {%- for t in graph.y_ticks %}
+      <line class="eqcut-grid{% if t.zero %} eqcut-zero{% endif %}" x1="{{ graph.left }}" x2="{{ graph.right }}" y1="{{ t.y }}" y2="{{ t.y }}" vector-effect="non-scaling-stroke"/>
+      {%- endfor %}
+      {%- for t in graph.x_ticks %}
+      <line class="eqcut-grid" x1="{{ t.x }}" x2="{{ t.x }}" y1="{{ graph.top_y }}" y2="{{ graph.bottom_y }}" vector-effect="non-scaling-stroke"/>
+      {%- endfor %}
+      <line class="eqcut-mark" x1="{{ graph.mark }}" x2="{{ graph.mark }}" y1="{{ graph.top_y }}" y2="{{ graph.bottom_y }}" vector-effect="non-scaling-stroke"/>
+      <polyline class="eqcut-now" points="{{ graph.now }}" vector-effect="non-scaling-stroke"/>
+      <polyline class="eqcut-new" points="{{ graph.new }}" vector-effect="non-scaling-stroke"/>
+    </svg>
+    {%- for t in graph.y_ticks %}
+    <span class="eqcut-tick eqcut-tick-y" style="top: {{ t.pct }}%; width: {{ graph.left_pct }}%">{{ t.label }}</span>
+    {%- endfor %}
+    {%- for t in graph.x_ticks %}
+    <span class="eqcut-tick eqcut-tick-x" style="left: {{ t.pct }}%">{{ t.label }}</span>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+  <p class="eqcut-reading"><strong>{{ reading }}</strong></p>
+  {%- if band_note %}<p class="hint">{{ band_note }}</p>{% endif %}
+</div>
+</figure>

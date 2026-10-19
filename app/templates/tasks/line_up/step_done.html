@@ -1,0 +1,20 @@
+{#- Line up step 5 (design §14.5): what the outputs do now, the note about the Combined response's sum line, and
+    Undo all (the delay and every nudge). -#}
+{{ t.heading() }}
+{%- if message %}{{ t.message(message, error=is_error) }}{% endif %}
+<div class="task-done-card">
+  <p><strong>{{ line }}</strong></p>
+  <p class="hint">The Combined response graph doesn't know the distance to your seat, so its sum line may show dips
+    you won't feel.</p>
+</div>
+<div class="task-undo-row">
+  {%- if undo_json %}
+  {%- call t.form("post", "task-undo-form") %}
+    {{ t.hidden(s.params, skip=("undo",)) }}
+    <input type="hidden" name="step" value="5">
+    <input type="hidden" name="undo" value="{{ undo_json }}">
+    <button type="submit" name="op" value="undo" class="task-undo" data-undo-left="{{ undo_left }}">Undo all</button>
+  {%- endcall %}
+  {%- endif %}
+</div>
+{{ t.nav(close=true) }}

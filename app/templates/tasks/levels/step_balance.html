@@ -1,0 +1,10 @@
+{#- Set levels step 5 (design §14.6): balance between the outputs. -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p class="task-question">Is any output too weak or too strong compared with the others?</p>
+{%- if louder_href %}<p><a class="btn-link task-live" href="{{ louder_href }}">Make one louder or quieter&hellip;</a></p>{% endif %}
+<p class="hint">"Make one louder" opens its own guided task; this one ends there. If it sounds balanced, carry on.</p>
+{% include "tasks/levels/_changes.html" %}
+{%- call t.form(main=true) %}{{ t.hidden(s.params) }}{%- endcall %}
+{{ t.nav(back=4, next=6, next_label="It's fine") }}

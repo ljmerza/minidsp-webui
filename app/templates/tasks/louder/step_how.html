@@ -1,0 +1,24 @@
+{#- Make one louder step 3 (design §14.4): the ways to get there, each with its result; ones that aren't possible now
+    say why. At the output's level limit the route is preselected (P04). -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  <p class="task-question">{{ o.name }}: {{ "louder" if direction == "up" else "quieter" }} by {{ '%g'|format(amount) }} dB</p>
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("method",)) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">How?</legend>
+    {%- for opt in options %}
+    <label class="task-choice{% if not opt.available %} is-unavailable{% endif %}">
+      <input type="radio" name="method" value="{{ opt.id }}"{% if opt.id == chosen %} checked{% endif %}
+             {%- if not opt.available %} disabled aria-describedby="louder-why-{{ opt.id }}-{{ mode }}"{% endif %}>
+      <span>{{ opt.label }}{% if opt.recommended %} <strong class="task-recommended">Recommended</strong>{% endif %}
+        {%- if not opt.available %}<span class="task-why" id="louder-why-{{ opt.id }}-{{ mode }}">Not possible now: {{ opt.reason }}</span>{% endif %}</span>
+    </label>
+    {%- endfor %}
+  </fieldset>
+  {%- if o.total.at_limit and direction == "up" %}
+  <p class="hint"><span aria-hidden="true">&#9650;</span> {{ possessive(o.name) }} output level is at its level limit{{ help("level-limit") }}, so raising
+    the route is the way to make it louder.</p>
+  {%- endif %}
+{%- endcall %}
+{%- if chosen %}{{ t.nav(back=2, next=4) }}{% else %}{{ t.nav(back=2) }}{% endif %}

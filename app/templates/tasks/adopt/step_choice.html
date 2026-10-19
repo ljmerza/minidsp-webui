@@ -1,0 +1,29 @@
+{#- Set up this device step 5 (design §14.7): Remember (writes nothing, the default) or Overwrite the device (needs a
+    tick). Don't know yet has no choice to make. -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("choice",)) }}
+  <input type="hidden" name="step" value="5">
+  {%- if how == "software" %}
+  <p><strong>Don't know yet</strong>{{ help("dont-know") }}: the app assumes nothing about {{ preset_words }}; each setting is
+    sent the first time you change it. Nothing is written now. Then Check device reads what the device can report.</p>
+  {%- else %}
+  {%- if warning %}<p class="task-msg task-msg-error"><span aria-hidden="true">&#9888;</span> {{ warning }}</p>{% endif %}
+  {%- if how == "factory" %}<p class="hint">You confirmed that your device really is at factory defaults.</p>{% endif %}
+  <fieldset class="task-choices" x-data='{ choice: {{ choice|tojson }} }'>
+    <legend class="visually-hidden">Remember or write?</legend>
+    <label class="task-choice"><input type="radio" name="choice" value="trust" x-model="choice"{% if choice != "push" %} checked{% endif %}>
+      <span><strong>Remember (trust)</strong>{{ help("remember") }}: writes nothing. The app takes this as what the device
+        holds; on the playing preset it reads what it can from the device instead.</span></label>
+    <label class="task-choice"><input type="radio" name="choice" value="push" x-model="choice"{% if choice == "push" %} checked{% endif %}>
+      <span><strong>Overwrite the device (push)</strong>{{ help("overwrite") }}: sends all of it to the device{% if mute_wrap %};
+        outputs are muted for a few seconds{% endif %}.</span></label>
+    <label class="task-confirm" x-show="choice === 'push'" x-cloak><input type="checkbox" name="push_ok" value="1"
+           :required="choice === 'push'"> I understand this overwrites {{ preset_words }}.</label>
+  </fieldset>
+  {%- endif %}
+  <p class="hint">Setting up the playing preset reads it back and then checks the device; that takes a few seconds.</p>
+  <p class="task-nothing-sent"><strong>Nothing is written until you press Set up{% if how != "software" %}, and only with Overwrite{% endif %}.</strong></p>
+{%- endcall %}
+{{ t.nav(back=4, apply="Set up") }}

@@ -1,0 +1,20 @@
+{#- Load, "When?" (design §14.8): store it (it plays when you switch to that preset) or store it and play it now. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  <p class="task-question">{% if name %}Loading &ldquo;{{ name }}&rdquo; into preset {{ target_n }}. {% endif %}Store or play{{ help("store-vs-play") }}?</p>
+  {{ t.hidden(s.params, skip=("when",)) }}
+  {%- if is_playing %}
+  <input type="hidden" name="when" value="play">
+  <p>Preset {{ target_n }} is playing, so it plays straight away{% if mute_wrap %}; outputs are muted for a few seconds
+    while it's sent{% endif %}.</p>
+  {%- else %}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">When?</legend>
+    <label class="task-choice"><input type="radio" name="when" value="store"{% if when != "play" %} checked{% endif %}>
+      <span><strong>Store in preset {{ target_n }}</strong>: it plays when you switch to preset {{ target_n }}.</span></label>
+    <label class="task-choice"><input type="radio" name="when" value="play"{% if when == "play" %} checked{% endif %}>
+      <span><strong>Store and play now</strong>: switch to preset {{ target_n }} (sound drops for a few seconds).</span></label>
+  </fieldset>
+  {%- endif %}
+{%- endcall %}
+{{ t.nav(back=3, next=5) }}

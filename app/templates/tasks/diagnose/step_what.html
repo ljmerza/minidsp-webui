@@ -1,0 +1,26 @@
+{#- Something wrong? step 1 (design §14.3): what is wrong. app/web/task_diagnose.py _step_what. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.hidden(s.params, skip=("what", "output")) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">What's wrong?</legend>
+    <label class="task-choice"><input type="radio" name="what" value="all"{% if what == "all" %} checked{% endif %}>
+      Everything is silent</label>
+    <div class="task-choice task-choice-with">
+      <label><input type="radio" name="what" value="one"{% if what == "one" %} checked{% endif %}>
+        One output is silent:</label>
+      <label class="visually-hidden" for="diag-output-{{ mode }}">Which output</label>
+      <select id="diag-output-{{ mode }}" name="output">
+        {%- for o in outputs %}
+        <option value="{{ o.n }}"{% if o.n == output_n %} selected{% endif %}>{{ o.name }} ({{ o.glyph }} {{ o.badge }})</option>
+        {%- endfor %}
+      </select>
+    </div>
+    <label class="task-choice"><input type="radio" name="what" value="distorted"{% if what == "distorted" %} checked{% endif %}>
+      Something sounds distorted</label>
+  </fieldset>
+  <p class="hint">The checks run as soon as you press Next. They only read; nothing changes until you press a fix's
+    <strong>Apply fix</strong>.</p>
+{%- endcall %}
+{{ t.nav(next=2, next_label="Run the checks") }}

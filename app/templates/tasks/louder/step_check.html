@@ -1,0 +1,15 @@
+{#- Make one louder step 4 (design §14.4): the result in words, the headroom sentence, a checkbox for a big raise.
+    Nothing is sent until Apply. -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  <p class="task-question">{{ option.label }}.</p>
+  <ul class="task-result">{% for line in lines %}<li>{{ line }}</li>{% endfor %}</ul>
+  {{ t.hidden(s.params) }}
+  <input type="hidden" name="step" value="4">
+  {%- if confirm_line %}
+  <label class="task-confirm"><input type="checkbox" name="confirm" value="1" required> {{ confirm_line }}</label>
+  {%- endif %}
+  {{ t.nothing_sent() }}
+{%- endcall %}
+{{ t.nav(back=3, apply="Apply") }}

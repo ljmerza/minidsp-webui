@@ -52,8 +52,8 @@ async def test_sidebar_has_the_three_groups_and_keeps_every_page(ctx):
         assert f">{label}</a>" in settings and f'href="{path}"' in settings, label
     assert "Combined response" in settings  # listed (not mounted in this test app)
     assert 'href="/outputs/1"' in settings and 'href="/inputs/2"' in settings
-    # Pages later PRs add aren't listed until they exist; Meters & graph (PR 9) is.
-    assert "Guided tasks" not in nav
+    # Pages later PRs add aren't listed until they exist; Meters & graph (PR 9) and Guided tasks (PR 11) are.
+    assert '<a href="/tasks">Guided tasks</a>' in everyday
     assert '<a href="/meters">Meters &amp; graph</a>' in settings and '<a href="/outputs">Outputs</a>' in settings
     assert '<a href="/routing" aria-current="page">Routing</a>' in nav
 
