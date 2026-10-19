@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}],"defaultSwapStyle":"innerHTML","scrollIntoViewOnBoost":false}'>
   <title>{% block title %}{{ title }}{% endblock %} · minidsp-webui</title>
-  <link rel="icon" href="data:,">{# no favicon: stops the browser's automatic /favicon.ico request (a 404) #}
+  <link rel="icon" type="image/svg+xml" href="{{ root }}/static/img/favicon.svg?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/help.css?v={{ asset_version }}">
   <link rel="stylesheet" href="{{ root }}/static/css/sync.css?v={{ asset_version }}">

@@ -454,7 +454,8 @@ def _session_or_404(request: Request, serial: int) -> DeviceSession | None:
 async def edit_values(request: Request, serial: int, preset: int) -> Response:
     """Set desired values by path: ``{"values": {"outputs.0.gain_db": -3}, "commit": false, "confirm": false}``.
 
-    ``commit`` marks a commit boundary (slider release, toggle, submit); drags send ``commit=false``.
+    ``commit`` marks a commit boundary (slider release, toggle, submit); drags send ``commit=false``. Commits from
+    here coalesce: a burst of +/- presses on the same setting is one revision (`DeviceSession._commit_soon`).
     """
     if not is_htmx(request):
         return PlainTextResponse("HTMX request expected", status_code=400)
@@ -473,7 +474,7 @@ async def edit_values(request: Request, serial: int, preset: int) -> Response:
             return _edit_error(session, preset, paths, 422, "invalid", "values must be finite numbers")
     try:
         result = await session.edit(
-            preset, patch_from_values(body.values), confirm=body.confirm, commit=body.commit, source="ui"
+            preset, patch_from_values(body.values), confirm=body.confirm, commit=body.commit, source="ui", coalesce=True
         )
     except ConfirmationRequired as exc:
         from app.web.sync_ui import confirmation_text  # sync_ui builds on this module
