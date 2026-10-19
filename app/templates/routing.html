@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% import "partials/params_macros.html" as m %}
+{% import "partials/routing_macros.html" as rm %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ root }}/static/css/routing.css?v={{ asset_version }}">
+{% endblock %}
 
 {% block content %}
 <h1>Routing{{ help("routing") }}</h1>
@@ -12,61 +17,82 @@
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
 
+  {#- One structure for both layouts (design §10.1 / §10.2): each output is a <section> holding its head, one cell per
+      input and its Total. On a wide screen the sections dissolve into a grid (inputs as rows, outputs as columns); under
+      600 px each one is a card, so nothing scrolls sideways. Every control exists once. -#}
+  {%- set n_in = input_names|length -%}
   <section class="card" aria-labelledby="matrix-title">
     <div class="card-head">
-      <h2 id="matrix-title">Matrix <span class="muted">preset {{ preset + 1 }}</span></h2>
+      <h2 id="matrix-title">Which inputs feed which outputs <span class="muted">preset {{ preset + 1 }}</span></h2>
     </div>
-    <div class="table-scroll">
-      <table class="routing-matrix">
-        <thead>
-          <tr>
-            <th scope="col"><span class="visually-hidden">Input</span></th>
-            {% for name in output_names %}
-              {%- set o = loop.index0 -%}
-              <th scope="col" style="--chan: {{ output_colors[o] }}">
-                <span class="chan-dot" aria-hidden="true"></span>{{ name }}
-                <span class="silent-warning" data-silent-output="{{ o }}" role="img"
-                      aria-label="No input is routed to {{ name }}: it will be silent"{% if routed[o] %} hidden{% endif %}>&#9888; silent</span>
-              </th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for in_name in input_names %}
-            {%- set i = loop.index0 %}
-            <tr>
-              <th scope="row" style="--chan: {{ input_colors[i] }}"><span class="chan-dot" aria-hidden="true"></span>{{ in_name }}</th>
-              {% for out_name in output_names %}
-                {%- set o = loop.index0 -%}
-                {%- set ep = "inputs.%d.routing.%d.enabled"|format(i, o) -%}
-                {%- set gp = "inputs.%d.routing.%d.gain_db"|format(i, o) -%}
-                {%- set on = values[ep] -%}
-                <td class="route-cell{% if on %} is-on{% endif %}" data-route-cell>
-                  <label class="route-toggle">
-                    <input type="checkbox" id="in{{ i + 1 }}-out{{ o + 1 }}" data-path="{{ ep }}" data-type="bool"
-                           data-route-output="{{ o }}" data-route-input="{{ i }}"
-                           data-route-name="{{ out_name }}" data-route-input-name="{{ in_name }}"{% if on %} checked{% endif %}>
-                    <span class="visually-hidden">Route {{ in_name }} to {{ out_name }}</span>
-                  </label>
+    <div class="table-scroll route-grid-scroll">
+      <div class="route-grid" style="--n-in: {{ n_in }}; --n-out: {{ output_names|length }}">
+        <span class="rg-corner" aria-hidden="true"></span>
+        {% for in_name in input_names %}
+          <span class="rg-in" style="--row: {{ loop.index + 1 }}; --chan: {{ input_colors[loop.index0] }}" aria-hidden="true">
+            <span class="chan-dot"></span>{{ in_name }}</span>
+        {% endfor %}
+        <span class="rg-total-label" style="--row: {{ n_in + 2 }}">Total{{ help("total") }}</span>
+        {% for name in output_names %}
+          {%- set o = loop.index0 -%}
+          {%- set r = route_outputs[o] if route_outputs|length > o else none -%}
+          <section class="rg-out" aria-labelledby="rg-out-{{ o }}" data-fix-scope
+                   style="--col: {{ o + 2 }}; --chan: {{ output_colors[o] }}"
+                   x-data="{ open: {{ 'false' if r and r.fold else 'true' }} }">
+            <div class="rg-head">
+              <h3 id="rg-out-{{ o }}" tabindex="-1"><span class="chan-dot" aria-hidden="true"></span>{{ name }}</h3>
+              <span class="silent-warning health-badge health-silent" data-silent-output="{{ o }}"{% if routed[o] %} hidden{% endif %}>
+                <span class="health-glyph" aria-hidden="true">&#9940;</span> Silent<span class="visually-hidden">: no input is routed to {{ name }}</span></span>
+              {%- if r %}{{ rm.route_badge(r) }}{% endif %}
+              <button type="button" class="rg-fold" @click="open = !open" aria-expanded="{{ 'false' if r and r.fold else 'true' }}"
+                      :aria-expanded="open.toString()" aria-label="Show the routes to {{ name }}">
+                <span aria-hidden="true" x-text="open ? '&#9662;' : '&#9656;'">{{ '&#9656;'|safe if r and r.fold else '&#9662;'|safe }}</span>
+              </button>
+            </div>
+            {% for in_name in input_names %}
+              {%- set i = loop.index0 -%}
+              {%- set ep = "inputs.%d.routing.%d.enabled"|format(i, o) -%}
+              {%- set gp = "inputs.%d.routing.%d.gain_db"|format(i, o) -%}
+              {%- set on = values[ep] -%}
+              <div class="route-cell{% if on %} is-on{% endif %}" data-route-cell style="--row: {{ i + 2 }}">
+                <label class="route-toggle">
+                  <input type="checkbox" id="in{{ i + 1 }}-out{{ o + 1 }}" data-path="{{ ep }}" data-type="bool"
+                         data-route-output="{{ o }}" data-route-input="{{ i }}"
+                         data-route-name="{{ name }}" data-route-input-name="{{ in_name }}"{% if on %} checked{% endif %}>
+                  <span class="rg-cell-in" aria-hidden="true">{{ in_name }}</span>
+                  <span class="visually-hidden">Route {{ in_name }} to {{ name }}</span>
+                </label>
+                <span class="route-level">
+                  <button type="button" class="route-step" data-step-for="{{ gp }}" data-step-db="-0.5" data-enabled-by="{{ ep }}"
+                          aria-label="Route level from {{ in_name }} to {{ name }} down 0.5 dB"{% if not on %} disabled{% endif %}>&minus;</button>
                   <span class="num-field route-gain">
                     <input type="number" data-path="{{ gp }}" data-type="number" data-gain data-enabled-by="{{ ep }}"
                            inputmode="decimal" step="0.1" min="{{ session.profile.gain_min_db }}" max="{{ ceilings[o] }}"
-                           value="{{ '%.1f'|format(values[gp]) }}" aria-label="Route level from {{ in_name }} to {{ out_name }} in dB"
+                           value="{{ '%.1f'|format(values[gp]) }}" aria-label="Route level from {{ in_name }} to {{ name }} in dB"
                            {%- if not on %} disabled{% endif %}>
                     <span class="unit">dB</span>
                   </span>
-                  {{ m.sync_badge([ep, gp], statuses, failed_reasons, compact=true) }}
-                </td>
-              {% endfor %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+                  <button type="button" class="route-step" data-step-for="{{ gp }}" data-step-db="0.5" data-enabled-by="{{ ep }}"
+                          aria-label="Route level from {{ in_name }} to {{ name }} up 0.5 dB"{% if not on %} disabled{% endif %}>+</button>
+                </span>
+                {{ m.sync_badge([ep, gp], statuses, failed_reasons, compact=true) }}
+              </div>
+            {% endfor %}
+            <div class="rg-total" style="--row: {{ n_in + 2 }}">
+              <span class="rg-total-label-inline">Total</span>
+              <span class="rg-total-body" id="route-total-{{ o }}">{% if r %}{{ rm.route_total_body(r, edit_url, preset) }}{% endif %}</span>
+            </div>
+          </section>
+        {% endfor %}
+      </div>
     </div>
-    <p class="hint">Tick a cell to route the input to that output; the number is that route's level{{ help("route-level") }}
-      and applies to that route only. Route levels are capped by the output's level limit{{ help("level-limit") }}.
-      Routes can't be read back from the device, so turning off an un-muted or playing output's last route asks
-      first.</p>
+    {{ rm.notes_list(route_notes) }}
+    <div hidden hx-get="{{ route_summary_url }}" hx-swap="none"
+         hx-trigger="sse:desired delay:300ms, sse:sync delay:300ms, sse:verify delay:300ms"></div>
+    <p class="hint">Tick a cell to route the input to that output; the number is that route's level{{ help("route-level") }}.
+      The route level adds to the output level{{ help("level") }}: Level, total = input level + route level + output
+      level. {{ route_rule }} The level limit{{ help("level-limit") }} is set per output in Settings. Routes can't be
+      read back from the device, so turning off an un-muted or playing output's last route asks first.</p>
   </section>
 
   {% if input_names|length > 1 %}

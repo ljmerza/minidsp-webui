@@ -29,7 +29,10 @@ def cases() -> dict[str, dict]:
 def test_big_drop_asks_and_sends_confirm(cases):
     case = cases["big drop accepted"]
     assert case["prevented"] and case["issued"]
-    assert case["dialog"] == "Drop the volume from -20.0 to -120.0 dB? That's 100.0 dB quieter."
+    assert case["dialog"] == (
+        "Drop the volume from -20 to -120 dB? That's 100 dB quieter in one step. The app asks before any drop of "
+        "more than 20 dB, so a slip of the slider can't silence everything without you noticing."
+    )
     assert case["confirm"] == "true"  # the server's UI guard accepts it
 
 
@@ -46,4 +49,25 @@ def test_drop_at_the_threshold_and_small_steps_pass(cases):
 
 
 def test_big_raise_still_asks(cases):
-    assert cases["big raise"]["dialog"] == "Raise the volume from -20.0 to -10.0 dB? That's 10.0 dB louder."
+    assert cases["big raise"]["dialog"] == (
+        "Raise the volume from -20 to -10 dB? That's 10 dB louder in one step. The app asks before any raise of more "
+        "than 6 dB."
+    )
+
+
+def test_the_db_weighted_slider_sends_the_db_of_its_position(cases):
+    """Design §10.3: the slider's value is a track position; the request carries the dB and the same confirm rule."""
+    case = cases["slider drop accepted"]
+    assert case["prevented"] and case["issued"] and case["confirm"] == "true"
+    assert case["dialog"].startswith("Drop the volume from -10 to -40 dB?")
+    assert case["volume"] == "-40"
+    cancelled = cases["slider drop cancelled"]
+    assert not cancelled["issued"] and float(cancelled["value"]) == pytest.approx(858.333, abs=1e-3)  # back at -10 dB
+    small = cases["slider small step"]
+    assert small["dialog"] is None and small["volume"] == "-10.5"
+
+
+def test_typed_minus_10(cases):
+    """P12's "typed −10 and got no confirm": from −3.5 that's a 6.5 dB drop (under 20), from −30 a 20 dB raise."""
+    assert cases["typed -10 from -3.5"]["dialog"] is None
+    assert cases["typed -10 from -30"]["dialog"].startswith("Raise the volume from -30 to -10 dB?")

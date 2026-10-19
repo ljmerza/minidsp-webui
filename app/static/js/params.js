@@ -371,7 +371,29 @@
       if (preview.textContent !== text) preview.textContent = text;
     }
 
+    // The − / + beside a signed field (routing's route levels, design §16 phone rule 4): one 0.5 dB step within the
+    // field's range, sent like a typed value (quick presses are gathered into one write).
+    stepField(button) {
+      const path = button.dataset.stepFor;
+      const field = this.controls(path).find((el) => el.type === 'number');
+      if (!field || field.disabled) return;
+      const current = parseFloat(field.value);
+      const base = Number.isFinite(current) ? current : this.desired[path];
+      if (typeof base !== 'number') return;
+      const min = parseFloat(field.min);
+      const max = parseFloat(field.max);
+      const value = round(Math.min(Number.isFinite(max) ? max : Infinity, Math.max(Number.isFinite(min) ? min : -Infinity, base + Number(button.dataset.stepDb))), 1);
+      if (value === round(base, 1)) return;
+      this.showValue(path, value);
+      this.schedule(path, value, { commit: true });
+    }
+
     onClick(e) {
+      const step = e.target.closest && e.target.closest('[data-step-for]');
+      if (step && this.root.contains(step) && !step.disabled) {
+        this.stepField(step);
+        return;
+      }
       const button = e.target.closest && e.target.closest('[data-mono-sum]');
       if (!button || !this.root.contains(button) || button.disabled) return;
       const plan = this.monoPlan();

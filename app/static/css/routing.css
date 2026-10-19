@@ -1,0 +1,68 @@
+/* The Routing page (phase 9 design §10.1 / §10.2): one <section> per output holding its head, a cell per input and its
+   Total. Wide screens: the sections dissolve into a grid (inputs as rows, outputs as columns). Under 600 px: one card
+   per output, nothing scrolls sideways (P18). Loaded by routing.html only. */
+
+.route-grid {
+  display: grid; gap: 0.4rem 0.45rem; align-items: stretch;
+  grid-template-columns: max-content repeat(var(--n-out, 4), minmax(min-content, 1fr));
+}
+.rg-out { display: contents; }
+.rg-head, .route-grid .route-cell, .rg-total { grid-column: var(--col); }
+.rg-corner, .rg-head { grid-row: 1; }
+.rg-corner, .rg-in, .rg-total-label { grid-column: 1; }
+.rg-in, .route-grid .route-cell, .rg-total, .rg-total-label { grid-row: var(--row); }
+
+.rg-in, .rg-total-label { display: flex; align-items: center; gap: 0.1rem; padding: 0 0.4rem; font-weight: 600; white-space: nowrap; }
+.rg-total-label { align-items: flex-start; padding-top: 0.45rem; }
+.rg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; padding: 0.25rem 0.4rem; }
+.rg-head h3 { margin: 0; font-size: 0.95rem; white-space: nowrap; }
+.rg-head h3:focus { outline: none; }
+.rg-head h3:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.route-badge, .rg-head .silent-warning { font-size: 0.8rem; margin: 0; }
+/* The instant "Silent" (params.js, while the summary catches up) stands in for the summary's badge. */
+.rg-head .silent-warning[hidden] { display: none; }
+.rg-head .silent-warning:not([hidden]) ~ .route-badge { display: none; }
+
+.route-grid .route-cell { display: flex; align-items: center; gap: 0.3rem; }
+.route-toggle { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.route-level { display: inline-flex; align-items: center; gap: 0.2rem; }
+.route-step { width: 2rem; height: 2rem; padding: 0; line-height: 1; }
+.route-grid .route-gain input { width: 4.2rem; }
+.rg-cell-in, .rg-fold, .rg-total-label-inline { display: none; }
+
+.rg-total {
+  display: flex; flex-direction: column; gap: 0.15rem; padding: 0.4rem 0.5rem;
+  border-top: 2px solid var(--border);
+}
+.rg-total-body { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+.rg-total-num { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.rg-total-nothing { color: var(--bad); }
+.rg-total-from { color: var(--text); }
+.rg-total-detail { color: var(--text-muted); font-size: 0.85rem; }
+.rg-total-headroom { font-size: 0.85rem; color: var(--warn); }
+.rg-total-headroom.headroom-problem { color: var(--bad); }
+
+.route-notes { list-style: none; margin: 0.75rem 0 0; padding: 0; color: var(--text-muted); }
+.route-notes li { margin: 0.2rem 0; }
+
+@media (max-width: 599.98px) {
+  .route-grid-scroll { overflow: visible; }
+  .route-grid { display: block; }
+  .rg-corner, .rg-in, .rg-total-label { display: none; }
+  .rg-out {
+    display: flex; flex-direction: column; gap: 0.4rem; margin: 0 0 0.6rem; padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+  }
+  .rg-head { order: 0; padding: 0; }
+  .rg-total { order: 1; flex-direction: row; gap: 0.5rem; padding: 0.3rem 0 0; border-top: 0; }
+  .rg-total-body { flex: 1 1 0; min-width: 0; }
+  .route-grid .route-cell { order: 2; flex-wrap: wrap; justify-content: space-between; }
+  .rg-total-label-inline { display: inline; color: var(--text-muted); }
+  .rg-cell-in { display: inline; font-weight: 600; }
+  .route-toggle { min-height: 44px; min-width: 44px; padding-right: 0.3rem; }
+  .route-step { width: 44px; height: 44px; font-size: 1.15rem; }
+  .route-grid .route-gain input { width: 4.5rem; min-height: 44px; }
+  .rg-fold { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin-left: auto; padding: 0; }
+  /* Muted and not-in-use outputs fold their route switches; the head and the Total stay (design §10.2). */
+  .rg-head:has(.rg-fold[aria-expanded="false"]) ~ .route-cell { display: none; }
+}

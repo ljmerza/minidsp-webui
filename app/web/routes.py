@@ -26,7 +26,7 @@ from app.sync.session import (
 )
 from app.sync.status import badge_statuses
 from app.sync.summary import session_summary
-from app.web import devices, flow, glossary, shell
+from app.web import devices, flow, glossary, shell, volume_scale
 from app.web.nav import build_nav, nav_groups
 from app.web.templating import graph_defaults, templates
 
@@ -98,6 +98,18 @@ def header_context(request: Request, session: DeviceSession | None) -> dict[str,
         "presets": range(profile.n_presets if profile else 0),
         "sources": list(profile.sources) if profile else [],
         "volume_confirm_db": settings.gain_step_confirm_db,
+        # The dB-weighted slider's first position, ticks and the typical band from Settings (design §10.3).
+        "volume_slider": volume_scale.slider_view(
+            master.volume if master is not None else None,
+            profile.master_volume_min_db,
+            profile.master_volume_max_db,
+            (
+                getattr(settings, "guidance_volume_typical_min_db", -40.0),
+                getattr(settings, "guidance_volume_typical_max_db", -10.0),
+            ),
+        )
+        if profile is not None
+        else None,
         "unsupported": [d.product_name or "unknown" for d in manager.unsupported],
         # The global shell (phase 9 design §3): the problems pill of the playing preset and the Help me… menu.
         "problems": shell.problems_view(request, session) if session is not None else None,
