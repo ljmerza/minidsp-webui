@@ -32,6 +32,28 @@ async def test_drag_edits_dont_commit_but_release_does(ctx):
     assert rows[0].source == "ui"
 
 
+async def test_committed_presses_coalesce_into_one_revision(ctx):
+    """+/- presses (each a committed edit) on one setting: one revision once they stop, device writes at once."""
+    ctx.session.commit_coalesce_s = 0.1
+    for value in (-1.0, -2.0, -3.0, -4.0):
+        response = await ctx.edit(0, {"outputs.0.gain_db": value}, commit=True)
+        assert response.status_code == 200 and response.json()["revision"] == 0
+    await ctx.settle()
+    assert {"index": 0, "gain": -4.0} in ctx.fake.outputs_written()
+    assert await ctx.repo.count_revisions(SERIAL, 0) == 0
+    await asyncio.sleep(0.25)
+    await ctx.drain()
+    [row] = await ctx.repo.list_revisions(SERIAL, 0)
+    assert (row.revision, row.summary, row.source) == (1, "outputs.0.gain_db: 0 → -4", "ui")
+
+
+async def test_a_press_on_another_setting_records_the_burst_first(ctx):
+    for value in (-1.0, -2.0):
+        await ctx.edit(0, {"outputs.0.gain_db": value}, commit=True)
+    await ctx.edit(0, {"outputs.1.gain_db": -1.0}, commit=True)
+    assert [r.summary for r in await ctx.repo.list_revisions(SERIAL, 0)] == ["outputs.0.gain_db: 0 → -2"]
+
+
 async def test_delay_is_rounded_to_whole_samples(ctx):
     data = (await ctx.edit(0, {"outputs.1.delay_ms": 9.004})).json()
     assert data["values"]["outputs.1.delay_ms"] == pytest.approx(9.0)

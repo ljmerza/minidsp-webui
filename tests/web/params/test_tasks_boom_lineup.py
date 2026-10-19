@@ -6,7 +6,7 @@ import re
 from app.model.filters import FilterDesign
 from app.sync.filters import set_peq_band
 
-from .conftest import HX
+from .conftest import HX, SERIAL
 
 ORIGIN = {**HX, "Origin": "http://test"}
 
@@ -122,6 +122,26 @@ async def test_line_up_sets_8_75_ms_for_3_m_then_nudges_and_undo_all(ctx):
     assert "Undone" in html.unescape(undone.text)
     out = ctx.session.desired(0).outputs[0]
     assert out.delay_ms == 0.0 and not out.invert
+
+
+async def test_line_up_nudges_are_one_revision(ctx):
+    base = {"felt": "1", "heard": "2", "seat": "1", "heard_dist": "3", "unit": "m"}
+    applied = await _post(ctx, "line-up", **base, step="3", op="apply")
+    assert await ctx.repo.count_revisions(SERIAL, 0) == 1  # Apply is recorded at once
+    record = _undo(applied.text)
+    for _ in range(3):
+        nudged = await _post(ctx, "line-up", **base, target="felt", step="4", op="nudge", by="1", undo=record)
+        record = _undo(nudged.text)
+    assert ctx.session.desired(0).outputs[0].delay_ms == 11.75
+    assert await ctx.repo.count_revisions(SERIAL, 0) == 1  # the nudges are held
+    undone = await _post(ctx, "line-up", **base, target="felt", step="5", op="undo", undo=record)
+    assert "Undone" in html.unescape(undone.text)
+    rows = await ctx.repo.list_revisions(SERIAL, 0)
+    assert [r.summary for r in rows] == [
+        "outputs.0.delay_ms: 11.75 → 0",
+        "outputs.0.delay_ms: 8.75 → 11.75",
+        "outputs.0.delay_ms: 0 → 8.75",
+    ]
 
 
 async def test_line_up_step_1_leaves_the_unit_to_step_2_so_the_remembered_one_applies(ctx):

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__, web
@@ -37,6 +38,7 @@ from app.web import system as system_ui
 from app.web.settings_ui import apply_stored_runtime_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
+FAVICON = STATIC_DIR / "img" / "favicon.svg"
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +162,11 @@ def create_app(settings: Settings | None = None, *, client: DaemonClient | None 
     app.include_router(verify_api.ui_router)
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        """For browsers that ask for /favicon.ico directly (pages link the SVG): the same SVG icon."""
+        return FileResponse(FAVICON, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/healthz", tags=["health"])
     async def healthz() -> dict[str, str]:

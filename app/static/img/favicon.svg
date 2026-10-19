@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>minidsp-webui</title>
+  <path d="M7 3v26M16 3v26M25 3v26" stroke="#4ea1ff" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+  <g fill="#4ea1ff">
+    <rect x="2" y="17" width="10" height="6" rx="2"/>
+    <rect x="11" y="7" width="10" height="6" rx="2"/>
+    <rect x="20" y="12" width="10" height="6" rx="2"/>
+  </g>
+</svg>
