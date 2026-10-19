@@ -8,6 +8,8 @@
 {%- set active_preset = master.preset if master is not none else none -%}
 {#- Big master-volume drops need a confirmation in the UI (docs/02 §A); 0 turns the check off. -#}
 {%- set drop_confirm_db = session.volume_drop_confirm_db if session is not none and session.volume_drop_confirm_db is defined else 0 -%}
+{#- The dB-weighted Volume slider (app/web/routes.py header_context); without it, the plain linear slider. -#}
+{%- set vs = volume_slider if volume_slider is defined and volume_slider else none -%}
 {#- ``devices`` (switcher entries, only with more than one device) and ``storage_problem`` come from
     app.web.devices.header_extras. -#}
 {%- set device_choices = devices if devices is defined and devices else [] -%}
@@ -200,7 +202,7 @@
     <div class="hdr-sheet hdr-volume-box" x-data="hdrSheet" :class="{ 'is-open': open }"
          @keydown.escape="close(true)" @click.outside="close(false)">
     {% if vol is not none %}
-    <div class="hdr-volume" x-data="masterVolume({{ vol }})">
+    <div class="hdr-volume" x-data="masterVolume({{ vol }}{% if vs %}, {{ profile.master_volume_min_db }}, {{ profile.master_volume_max_db }}, {{ profile.master_volume_step_db }}{% endif %})">
     {% else %}
     <div class="hdr-volume">
     {% endif %}
@@ -214,6 +216,31 @@
         <span class="vol-open-value"{% if vol is not none %} x-text="fmt(v)"{% endif %}>{{ vol|db }}</span>
       </button>
       <span class="hdr-sheet-panel vol-sheet" id="hdr-volume-sheet" role="group" aria-label="Volume">
+      {%- if vs %}
+      {#- dB-weighted (design §10.3, app/web/volume_scale.py): the value is a track position, aria-valuetext the dB, and
+          master.js sends the dB. The typical band and the ticks are a hint drawn behind and under the native slider. -#}
+      <span class="vol-track">
+      {%- if vs.band %}
+        <span class="vol-band" aria-hidden="true" style="--band-left: {{ vs.band.left }}; --band-width: {{ vs.band.width }}"></span>
+      {%- endif %}
+      <input type="range" id="master-volume" name="volume"
+             min="0" max="{{ vs.max|int }}" step="any" value="{{ vs.pos }}"
+             aria-valuetext="{{ vol|db }}"
+             {%- if vs.band %} aria-describedby="vol-typical"{% endif %}
+             {%- if vol is not none %} :value="pos()" @input="moved($event)" :aria-valuetext="fmt(v)"{% endif %}
+             {%- if not controls_enabled or vol is none %} disabled{% endif %}
+             data-volume-input data-current="{{ vol if vol is not none else '' }}"
+             data-volume-scale="{{ profile.master_volume_min_db }} {{ profile.master_volume_max_db }} {{ profile.master_volume_step_db }}"
+             data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
+             hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
+        <span class="vol-ticks" aria-hidden="true">
+          {%- for t in vs.ticks %}<span class="vol-tick" style="--tick-at: {{ t.at }}">{{ t.label }}</span>{% endfor -%}
+        </span>
+        {%- if vs.band %}
+        <span class="visually-hidden" id="vol-typical">Typical listening is between {{ vs.band.low|db }} and {{ vs.band.high|db }}.</span>
+        {%- endif %}
+      </span>
+      {%- else %}
       <input type="range" id="master-volume" name="volume"
              min="{{ profile.master_volume_min_db }}" max="{{ profile.master_volume_max_db }}"
              step="{{ profile.master_volume_step_db }}"
@@ -224,6 +251,7 @@
              data-volume-input data-current="{{ vol if vol is not none else '' }}"
              data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
              hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
+      {%- endif %}
       <span class="vol-value">
         <input type="number" id="master-volume-num" name="volume" inputmode="decimal"
                aria-label="Volume in dB"

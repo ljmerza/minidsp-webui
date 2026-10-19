@@ -32,6 +32,8 @@ from app.sync.session import (
     UnknownPreset,
 )
 from app.sync.status import badge_statuses, status_view
+from app.sync.summary import session_summary
+from app.web import routing_ui
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
     EDIT_TOPICS,
@@ -221,7 +223,31 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     ctx["sse_url"] = url(request, "/api/v1/events", topics=",".join((*EDIT_TOPICS, "levels")), serial=session.serial)
     status = session.status
     ctx["initial_output_levels"] = list(status.output_levels) if status else []
+    ctx.update(_routing_summary(request, session, p))
     return render(request, "routing.html", ctx)
+
+
+def _routing_summary(request: Request, session: DeviceSession, preset: int) -> dict[str, Any]:
+    """The Routing page's badges, Total row, input notes and rule text (app/web/routing_ui.py), plus where it
+    re-fetches them."""
+    n_out = session.profile.n_outputs
+    ceilings = [session.channel_ceiling("output", o) for o in range(n_out)]
+    ctx = routing_ui.routing_context(
+        session_summary(session, preset), ceilings, channel_names(session, "input"), channel_names(session, "output")
+    )
+    ctx["route_summary_url"] = url(request, f"/ui/devices/{session.serial}/presets/{preset}/routing/summary")
+    return ctx
+
+
+@router.get("/ui/devices/{serial}/presets/{preset}/routing/summary", response_class=HTMLResponse)
+async def routing_summary(request: Request, serial: int, preset: int) -> Response:
+    """The Routing page's summary parts, swapped in out-of-band (the switches themselves are never re-rendered)."""
+    session = await _preset_session(request, serial, preset)
+    if isinstance(session, Response):
+        return session
+    ctx = {"serial": serial, "preset": preset, "edit_url": url(request, f"/ui/devices/{serial}/presets/{preset}/edit")}
+    ctx.update(_routing_summary(request, session, preset))
+    return render(request, "partials/routing_summary.html", ctx)
 
 
 # /inputs and /outputs are the overview pages (phase 9 design §4.5, app/web/home.py); they used to redirect to the
