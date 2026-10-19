@@ -15,8 +15,11 @@ PAGES = [
     "/outputs/1",
     "/outputs/1?tab=crossover",
     "/outputs/1?tab=peq",
+    "/outputs/1?tab=delay",
+    "/outputs/1?tab=polarity",
     "/outputs/1?tab=compressor",
     "/outputs/1?tab=response",
+    "/inputs/1?tab=level",
     "/device",
     "/settings",
     "/help",
@@ -38,7 +41,7 @@ CONFUSING = {
     "Route gain vs output gain": [("/routing", ["route-level"]), ("/outputs/1", ["level"]), ("/meters", ["level"])],
     "Mono sum": [("/routing", ["mono-sum"])],
     "Polarity": [("/outputs/1", ["polarity"])],
-    "Samples": [("/outputs/1", ["samples"])],
+    "Samples": [("/outputs/1?tab=delay", ["samples"])],
     "Electrical (response / sum)": [("/meters", ["calc-response"]), ("/outputs/1?tab=response", ["calc-response"])],
     "Device preset / editing preset / templates / profile": [
         ("/routing", ["device-preset", "editing-preset"]),
@@ -91,7 +94,9 @@ async def test_waiting_changes_are_visible_text_not_a_tooltip(ctx):
 
 async def test_vocabulary_on_the_editing_pages(ctx):
     html = (await ctx.http.get("/outputs/1?tab=crossover")).text
-    assert ">Band (crossover)</a>" in html and ">EQ</a>" in html and ">Compressor (limiter)</a>" in html
+    assert "<h2>Band (crossover)" in html and "Settings on this output" in html
+    assert '<span class="chain-text">Compressor off</span>' in html
+    assert '<span class="chain-text">EQ none</span>' in html
     assert "Filter stages used:" in html and ">Templates</span>" in html and "Steepness" in html
     main = html.split('<main id="main"', 1)[1]
     assert "Group " not in main and "Uses <strong" not in main

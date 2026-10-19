@@ -1,7 +1,7 @@
 {#- Load, "When?" (design §14.8): store it (it plays when you switch to that preset) or store it and play it now. -#}
 {%- call t.form(main=true) %}
   {{ t.heading() }}
-  <p class="task-question">{% if name %}Loading &ldquo;{{ name }}&rdquo; into preset {{ target_n }}. {% endif %}Store or play{{ help("store-vs-play") }}?</p>
+  <p class="task-question">{% if name %}Loading &ldquo;{{ name }}&rdquo; into preset {{ target_n }}. {% endif %}Store it, or play it now?{{ help("store-vs-play") }}</p>
   {{ t.hidden(s.params, skip=("when",)) }}
   {%- if is_playing %}
   <input type="hidden" name="when" value="play">

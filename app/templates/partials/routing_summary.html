@@ -1,0 +1,8 @@
+{#- The Routing page's badges, Total row and input notes, re-fetched after a change and swapped in out-of-band
+    (app/web/params.py routing_summary). The route switches and level fields are never re-rendered. -#}
+{%- from "partials/routing_macros.html" import route_badge, route_total_body, notes_list -%}
+{%- for r in route_outputs %}
+{{ route_badge(r, oob=true) }}
+<div hx-swap-oob="innerHTML:#route-total-{{ r.index }}">{{ route_total_body(r, edit_url, preset) }}</div>
+{%- endfor %}
+{{ notes_list(route_notes, oob=true) }}

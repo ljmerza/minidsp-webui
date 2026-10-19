@@ -262,6 +262,11 @@
     clearTimeout(offlineTimer);
     offlineTimer = null;
     setOffline(false);
+    // Parts rendered while settings were still being sent look again once the feed is open: the "sync" event saying
+    // the writes finished may have gone out before this page connected, which left "Sending" on screen for good.
+    for (const el of document.querySelectorAll('[data-resync-on-open]')) {
+      if (window.htmx) window.htmx.trigger(el, 'mdsp-resync');
+    }
   });
 
   // Keyboard: "m" toggles master mute, 1-4 pick a preset (each preset button asks for confirmation).

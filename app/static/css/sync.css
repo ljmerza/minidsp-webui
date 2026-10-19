@@ -5,6 +5,13 @@
 .sync-changed { color: var(--warn); border-color: var(--warn); background: rgba(240, 180, 41, 0.08); }
 .sync-cant-check { color: var(--text-muted); }
 .sync-badge.is-quiet { border: 0; padding: 0; } /* Sent shows no mark; the word is there for screen readers */
+/* The same on the editing pages (design §1 graft: "nothing shown for sent settings", no wall of green ticks): a
+   setting's badge only appears once it is something other than Sent. The word stays for screen readers. */
+.sync-badge.sync-synced:is([data-sync-for], .is-compact) { border: 0; padding: 0; min-width: 0; }
+.sync-badge.sync-synced:is([data-sync-for], .is-compact) > * {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* --- status overview and actions ---------------------------------------------------------------------------------- */
 

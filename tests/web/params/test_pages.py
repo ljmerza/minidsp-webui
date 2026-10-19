@@ -115,9 +115,12 @@ async def test_pages_edit_the_active_preset_by_default_and_any_preset_on_request
     assert (await ctx.http.get("/routing?preset=9")).status_code == 404
 
 
-async def test_input_page_header_strip(ctx):
+async def test_input_page_level_tab(ctx):
+    # Phase 9 design §9: Level · EQ; the bare URL keeps showing the EQ editor, the level is one chip away.
     await ctx.session.set_channel_meta("input", 0, name="Main L", max_gain_db=6.0)
-    response = await ctx.http.get("/inputs/1")
+    bare = (await ctx.http.get("/inputs/1")).text
+    assert "peqEditor(" in bare and 'data-chain-tab="level"' in bare
+    response = await ctx.http.get("/inputs/1?tab=level")
     assert response.status_code == 200
     html = response.text
     assert "Main L" in html
@@ -129,22 +132,29 @@ async def test_input_page_header_strip(ctx):
     assert "EQ" in html
 
 
-async def test_output_page_strip_and_delay_tab(ctx):
+async def test_output_page_level_tab_and_delay_tab(ctx):
+    # Phase 9 design §8: the chain's Level tab opens first; the delay is edited only on its own tab.
     await ctx.session.edit(0, {"outputs": {"1": {"delay_ms": 9.0, "invert": True}}})
     html = (await ctx.http.get("/outputs/2")).text
-    for field in ("gain_db", "mute", "invert", "delay_ms"):
+    for field in ("gain_db", "mute", "invert"):
         assert f'data-path="outputs.1.{field}"' in html
+    assert 'data-path="outputs.1.delay_ms"' not in html
     assert "checked" in _tag(html, r'data-path="outputs\.1\.invert"')
-    assert 'data-samples-for="outputs.1.delay_ms">864<' in html
     assert "data-confirm-unmute" in _tag(html, r'data-path="outputs\.1\.mute"')
-    # tabs: Delay is current, the others are live links, FIR is hidden without FIR support
-    assert 'class="tab is-current"' in html and ">Delay</a>" in html
-    assert re.search(r'<a class="tab"[^>]*>Compressor \(limiter\)</a>', html)
-    assert ">FIR<" not in html
+    # chips: Level is current, the others are live links, FIR is hidden without FIR support
+    assert re.search(r'<a class="chain-chip[^"]*is-current"[^>]*tab=level[^>]*aria-current="page"', html)
+    assert re.search(r'<a class="chain-chip[^"]*"[^>]*tab=compressor', html)
+    assert "tab=fir" not in html
+    assert '<span class="chain-text">Delay 9 ms</span>' in html
+
+    delay = (await ctx.http.get("/outputs/2?tab=delay")).text
+    assert 'data-path="outputs.1.delay_ms"' in delay and 'data-path="outputs.1.gain_db"' not in delay
+    assert 'data-samples-for="outputs.1.delay_ms">864<' in delay
     # helpers: default distance 3 m at 343 m/s, the other outputs as references, the real device limit
-    assert '"distance": 3.0' in html and '"speed": 343.0' in html
-    assert '"name": "Out 1"' in html and '"name": "Out 2"' not in html
-    assert "79.833 ms (7664 samples" in html
+    assert '"distance": 3.0' in delay and '"speed": 343.0' in delay
+    assert '"others": [{"index": 0, "name": "Out 1"}, {"index": 2' in delay  # the other outputs, not itself
+    assert "79.833 ms (7664 samples" in delay
+    assert "lineUpHelper(" in delay and 'step="0.1" x-model.number="feet"' not in delay
 
 
 async def test_unknown_channel_and_redirects(ctx):
@@ -200,7 +210,11 @@ async def test_header_sync_summary_and_staged_dots(ctx):
     await ctx.session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})
     html = (await ctx.http.get("/routing")).text
     button = _tag(html, 'id="preset-2"')
-    assert "has-staged" in button and "1 change waiting" in button and "title=" not in button
+    assert "has-staged" in button and "title=" not in button
+    # Named by its content ("Preset 2, 1 change waiting"), which holds the phone sheet's visible line (WCAG 2.5.3).
+    body = html.split('id="preset-2"', 1)[1].split("</button>", 1)[0]
+    assert '<span class="visually-hidden">Preset </span>2' in body
+    assert '<span class="preset-desc"><span class="visually-hidden">, </span>1 change waiting</span>' in body
     assert "has-staged" not in _tag(html, 'id="preset-1"')
     assert re.search(r'aria-label="Preset 2, 1 change\(s\) waiting"', html)
     assert "Preset 2: 1 waiting" in html

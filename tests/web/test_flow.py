@@ -115,14 +115,17 @@ def test_blocks_come_in_design_order_with_their_states_and_links():
     assert by_key["polarity"].glyph == ""
 
 
-def test_block_names_say_value_state_and_what_opens():
+def test_block_names_start_with_the_visible_text_then_say_state_and_what_opens():
+    # WCAG 2.5.3 Label in Name: speech input users say what they see ("click Polarity 0°").
     names = {b.key: b.aria_label for b in output_blocks(_shakers())}
-    assert names["band"] == "Band, 20 to 80 hertz, on. Open band settings."
-    assert names["level"] == "Level, +16 dB total, at its limit, check. Go to its level."
-    assert names["delay"] == "Delay, 8.75 milliseconds, on. Open delay settings."
-    assert names["polarity"] == "Polarity, 0 degrees, off. Go to its polarity switch."
-    assert names["compressor"] == "Compressor, off, off. Open compressor settings."
-    assert names["eq"] == "EQ, 1 cut, on. Open EQ settings."
+    assert names["band"] == "Band 20–80 Hz, on. Open band settings."
+    assert names["level"] == "Level +16 max, total in dB, at its limit, check. Go to its level."
+    assert names["delay"] == "Delay 8.75, in milliseconds, on. Open delay settings."
+    assert names["polarity"] == "Polarity 0°, off. Go to its polarity switch."
+    assert names["compressor"] == "Comp. off (Compressor). Open compressor settings."
+    assert names["eq"] == "EQ 1 cut, on. Open EQ settings."
+    for block in output_blocks(_shakers()):
+        assert block.aria_label.startswith(block.label.replace("▲max", "max")), block
 
 
 def test_a_problem_block_is_red_with_its_word():
@@ -131,7 +134,7 @@ def test_a_problem_block_is_red_with_its_word():
     data["outputs"][0]["crossover"] = [xo("hp", 100), xo("lp", 80)]
     band = next(b for b in output_blocks(run(data).outputs[0]) if b.key == "band")
     assert (band.label, band.state, band.glyph) == ("Band: nothing passes", "problem", "⛔")
-    assert band.aria_label.startswith("Band, nothing passes, problem.")
+    assert band.aria_label.startswith("Band: nothing passes, problem.")
 
 
 def test_unsent_blocks_get_a_corner_glyph():

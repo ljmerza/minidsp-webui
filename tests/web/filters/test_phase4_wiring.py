@@ -57,13 +57,14 @@ async def test_settings_toggle_turns_the_fir_tab_on_and_off(ctx):
     _mount(ctx)
     html = (await ctx.http.get("/settings")).text
     assert 'id="settings-fir"' in html and "Experimental FIR" in html
-    assert ">FIR<" not in (await ctx.http.get("/outputs/2")).text
+    assert 'data-chain-tab="fir"' not in (await ctx.http.get("/outputs/2")).text
 
     on = await ctx.http.post("/ui/settings/fir", data={"fir_experimental": "on"}, headers=SAME_ORIGIN)
     assert on.status_code == 200 and on.headers.get("HX-Refresh") == "true"
     assert ctx.session.profile.fir_supported and ctx.settings.fir_experimental
     assert await ctx.repo.get_setting(fir_svc.FIR_SETTING_KEY) is True
-    assert re.search(r'<a class="tab"[^>]*tab=fir[^>]*>FIR</a>', (await ctx.http.get("/outputs/2")).text)
+    page = (await ctx.http.get("/outputs/2")).text
+    assert re.search(r'tab=fir"[^>]*data-chain-tab="fir"[^>]*>.*?FIR off', page, re.S)
     fir_html = (await ctx.http.get("/outputs/2?tab=fir")).text
     assert "firEditor(" in fir_html and "/static/js/fir.js" in fir_html
     assert (await ctx.http.get("/api/v1/fir/capability")).json()["enabled"] is True
@@ -71,7 +72,7 @@ async def test_settings_toggle_turns_the_fir_tab_on_and_off(ctx):
     off = await ctx.http.post("/ui/settings/fir", data={}, headers=SAME_ORIGIN)
     assert off.status_code == 200 and off.headers.get("HX-Refresh") == "true"
     assert not ctx.session.profile.fir_supported
-    assert ">FIR<" not in (await ctx.http.get("/outputs/2")).text
+    assert 'data-chain-tab="fir"' not in (await ctx.http.get("/outputs/2")).text
 
     again = await ctx.http.post("/ui/settings/fir", data={}, headers=SAME_ORIGIN)
     assert "HX-Refresh" not in again.headers  # nothing changed, no reload

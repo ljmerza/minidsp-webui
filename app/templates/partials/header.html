@@ -8,6 +8,8 @@
 {%- set active_preset = master.preset if master is not none else none -%}
 {#- Big master-volume drops need a confirmation in the UI (docs/02 §A); 0 turns the check off. -#}
 {%- set drop_confirm_db = session.volume_drop_confirm_db if session is not none and session.volume_drop_confirm_db is defined else 0 -%}
+{#- The dB-weighted Volume slider (app/web/routes.py header_context); without it, the plain linear slider. -#}
+{%- set vs = volume_slider if volume_slider is defined and volume_slider else none -%}
 {#- ``devices`` (switcher entries, only with more than one device) and ``storage_problem`` come from
     app.web.devices.header_extras. -#}
 {%- set device_choices = devices if devices is defined and devices else [] -%}
@@ -70,18 +72,18 @@
           {%- if staged %}{% set ns.waiting = ns.waiting + [(p, staged)] %}{% endif %}
           <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}{% if staged %} has-staged{% endif %}"
                   aria-pressed="{{ 'true' if active else 'false' }}"
-                  aria-label="Preset {{ p + 1 }}{% if active %} (playing){% endif %}{% if staged %}, {{ staged }} change{{ 's' if staged != 1 }} waiting{% endif %}"
+                  {%- set desc = "Playing" if active else (staged ~ " change" ~ ("s" if staged != 1 else "") ~ " waiting") if staged else "Not playing" %}
                   aria-keyshortcuts="{{ p + 1 }}"
                   data-preset-key="{{ p + 1 }}"
                   {%- if not controls_enabled or active %} disabled{% endif %}
                   hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
                   hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
-            {{- p + 1 -}}
-            {%- if active %}<span class="preset-mark" aria-hidden="true">&#9654;</span>{% endif -%}
-            {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
-            <span class="preset-desc" aria-hidden="true">
-              {%- if active %}Playing{% elif staged %}{{ staged }} waiting{% else %}Not playing{% endif -%}
-            </span>
+            {#- Named by its content, "Preset 2, not playing", which holds the phone sheet's visible line (WCAG 2.5.3
+                 Label in Name); on desktop that line is only for screen readers. -#}
+            <span class="visually-hidden">Preset </span>{{ p + 1 }}
+            {%- if active %}<span class="preset-mark" aria-hidden="true"> &#9654;</span>{% endif -%}
+            {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true"> &#9208;</span>{% endif -%}
+            <span class="preset-desc"><span class="visually-hidden">, </span>{{ desc }}</span>
           </button>
         {% endfor %}
         <p class="hdr-sheet-note">Switching asks first. Audio may drop out for a few seconds while the device reloads.</p>
@@ -158,8 +160,11 @@
       </div>
       {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action).
            Throttled while a bulk write runs, so "Sending n of N" counts, and once more after the writes stop. -#}
+      {#- Rendered while sending: once the feed is open, look again, in case the writes finished before it connected
+           (app.js, data-resync-on-open). -#}
       <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
-            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms"
+            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms, mdsp-resync"
+            {%- if sv.state == "sending" %} data-resync-on-open{% endif %}
             hx-target="#app-header" hx-swap="innerHTML"></span>
     {% else %}
     <div class="hdr-sync">
@@ -200,7 +205,7 @@
     <div class="hdr-sheet hdr-volume-box" x-data="hdrSheet" :class="{ 'is-open': open }"
          @keydown.escape="close(true)" @click.outside="close(false)">
     {% if vol is not none %}
-    <div class="hdr-volume" x-data="masterVolume({{ vol }})">
+    <div class="hdr-volume" x-data="masterVolume({{ vol }}{% if vs %}, {{ profile.master_volume_min_db }}, {{ profile.master_volume_max_db }}, {{ profile.master_volume_step_db }}{% endif %})">
     {% else %}
     <div class="hdr-volume">
     {% endif %}
@@ -214,6 +219,31 @@
         <span class="vol-open-value"{% if vol is not none %} x-text="fmt(v)"{% endif %}>{{ vol|db }}</span>
       </button>
       <span class="hdr-sheet-panel vol-sheet" id="hdr-volume-sheet" role="group" aria-label="Volume">
+      {%- if vs %}
+      {#- dB-weighted (design §10.3, app/web/volume_scale.py): the value is a track position, aria-valuetext the dB, and
+          master.js sends the dB. The typical band and the ticks are a hint drawn behind and under the native slider. -#}
+      <span class="vol-track">
+      {%- if vs.band %}
+        <span class="vol-band" aria-hidden="true" style="--band-left: {{ vs.band.left }}; --band-width: {{ vs.band.width }}"></span>
+      {%- endif %}
+      <input type="range" id="master-volume" name="volume"
+             min="0" max="{{ vs.max|int }}" step="any" value="{{ vs.pos }}"
+             aria-valuetext="{{ vol|db }}"
+             {%- if vs.band %} aria-describedby="vol-typical"{% endif %}
+             {%- if vol is not none %} :value="pos()" @input="moved($event)" :aria-valuetext="fmt(v)"{% endif %}
+             {%- if not controls_enabled or vol is none %} disabled{% endif %}
+             data-volume-input data-current="{{ vol if vol is not none else '' }}"
+             data-volume-scale="{{ profile.master_volume_min_db }} {{ profile.master_volume_max_db }} {{ profile.master_volume_step_db }}"
+             data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
+             hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
+        <span class="vol-ticks" aria-hidden="true">
+          {%- for t in vs.ticks %}<span class="vol-tick" style="--tick-at: {{ t.at }}">{{ t.label }}</span>{% endfor -%}
+        </span>
+        {%- if vs.band %}
+        <span class="visually-hidden" id="vol-typical">Typical listening is between {{ vs.band.low|db }} and {{ vs.band.high|db }}.</span>
+        {%- endif %}
+      </span>
+      {%- else %}
       <input type="range" id="master-volume" name="volume"
              min="{{ profile.master_volume_min_db }}" max="{{ profile.master_volume_max_db }}"
              step="{{ profile.master_volume_step_db }}"
@@ -224,6 +254,7 @@
              data-volume-input data-current="{{ vol if vol is not none else '' }}"
              data-confirm-raise-db="{{ volume_confirm_db }}" data-confirm-drop-db="{{ drop_confirm_db }}"
              hx-post="{{ base }}/volume" hx-trigger="input changed delay:80ms">
+      {%- endif %}
       <span class="vol-value">
         <input type="number" id="master-volume-num" name="volume" inputmode="decimal"
                aria-label="Volume in dB"

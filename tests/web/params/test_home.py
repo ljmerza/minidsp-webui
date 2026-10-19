@@ -147,7 +147,8 @@ async def test_the_shakers_card_explains_the_limit_and_the_sub_offers_its_fix(ct
     plus = re.search(r'<button[^>]*data-action="level"[^>]*data-step="0.5"[^>]*>', shakers).group(0)
     assert "disabled" not in plus
     assert 'data-routes=\'[{"in": 0.0, "input": 0, "name": "In 1", "route": 4.0}]\'' in shakers
-    assert 'aria-label="Mute Shakers"' in shakers and 'aria-pressed="false"' in shakers
+    assert '<span data-mute-word>Mute</span><span class="visually-hidden"> Shakers</span>' in shakers
+    assert 'aria-pressed="false"' in shakers
     assert 'href="/outputs/1?tab=crossover">Band (crossover)</a>' in shakers and ">Rename</a>" in shakers
 
     sub = _card(html, 2)

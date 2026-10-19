@@ -570,12 +570,14 @@ async def _load(ctx: TaskCtx, a: Answers, params: Mapping[str, str]) -> Step:
     except LOAD_ERRORS as exc:
         return await _step_check(ctx, a, error=_load_error(ctx, exc))
     ctx.forget()
-    note, _level = outcome_note(session, a.target, result.edit.flush)
+    note, level = outcome_note(session, a.target, result.edit.flush)
     undo: dict[str, str] = {}
     if result.edit.paths and before and before != result.edit.revision:
         undo = {"rev": str(result.edit.revision), "prev": str(before), "at": f"{time.time():.1f}"}
     name = result.profile.name
-    text, _waiting = _result_text(ctx, name, a.target)
+    text, waiting = _result_text(ctx, name, a.target)
+    if waiting and level == "info":
+        note = ""  # the result already says it waits for the preset; don't say it twice
     return await _step_result(
         ctx, a, params, note=note, applied=True, toast=text, undo=undo, message=None if undo else "Nothing changed."
     )

@@ -133,6 +133,14 @@ def test_three_metres_is_8_75_ms():
     ]
 
 
+def test_the_result_says_what_the_delay_is_now():
+    # P13: with 9 ms already set, the check step says so (it was already about right).
+    result = line_up(9.0, 0.0, 0.0, 3.0, M2X4HD)
+    assert result_lines("Shakers", "Sub", result, 9.0, 0.0)[-1] == "Shakers waits 9 ms now."
+    same = line_up(8.75, 0.0, 0.0, 3.0, M2X4HD)
+    assert result_lines("Shakers", "Sub", same, 8.75, 0.0)[-1].startswith("Shakers will wait 8.75 ms")
+
+
 def test_the_heard_ones_own_delay_adds_up():
     # delay(felt) = delay(heard) + (d_heard - d_felt) / 343 m/s
     result = line_up(0.0, 2.0, 0.5, 3.0, M2X4HD)

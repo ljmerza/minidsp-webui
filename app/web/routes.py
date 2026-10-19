@@ -26,7 +26,7 @@ from app.sync.session import (
 )
 from app.sync.status import badge_statuses
 from app.sync.summary import session_summary
-from app.web import devices, flow, glossary, shell
+from app.web import devices, flow, glossary, shell, volume_scale
 from app.web.nav import build_nav, nav_groups
 from app.web.templating import graph_defaults, templates
 
@@ -98,6 +98,18 @@ def header_context(request: Request, session: DeviceSession | None) -> dict[str,
         "presets": range(profile.n_presets if profile else 0),
         "sources": list(profile.sources) if profile else [],
         "volume_confirm_db": settings.gain_step_confirm_db,
+        # The dB-weighted slider's first position, ticks and the typical band from Settings (design §10.3).
+        "volume_slider": volume_scale.slider_view(
+            master.volume if master is not None else None,
+            profile.master_volume_min_db,
+            profile.master_volume_max_db,
+            (
+                getattr(settings, "guidance_volume_typical_min_db", -40.0),
+                getattr(settings, "guidance_volume_typical_max_db", -10.0),
+            ),
+        )
+        if profile is not None
+        else None,
         "unsupported": [d.product_name or "unknown" for d in manager.unsupported],
         # The global shell (phase 9 design §3): the problems pill of the playing preset and the Help me… menu.
         "problems": shell.problems_view(request, session) if session is not None else None,
@@ -264,9 +276,14 @@ async def device_page(request: Request, serial: int | None = None) -> HTMLRespon
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DEVICE_TOPICS)
-    ctx.update(
-        title="Device & sync", sync_preset=_shown_preset(request, session), **device_info_context(request, session)
-    )
+    shown = _shown_preset(request, session)
+    ctx.update(title="Device & sync", sync_preset=shown, **device_info_context(request, session))
+    if session is not None and shown is not None and getattr(session, "loaded", False):
+        # The status panel is part of the page, not loaded after it: loading it pushed everything below down by a
+        # third of the screen (PR 17 Lighthouse: layout shift 0.57), right where a phone user is about to tap.
+        from app.web.sync_ui import sync_panel_context  # local: sync_ui builds on modules that import this one
+
+        ctx["sync_panel"] = sync_panel_context(request, session, shown)
     return templates.TemplateResponse(request, "device.html", ctx)
 
 

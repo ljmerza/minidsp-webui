@@ -1,0 +1,48 @@
+{#- Output page, Level tab (phase 9 design §8.2): the output level with − / + steppers, what to do at the level limit
+    (the §4.3 rule: raise the route, or lower the others), the total from each input, the headroom line, Mute and
+    Polarity. #level-notes re-renders itself when the preset changes, so the numbers follow the slider. -#}
+{% import "partials/params_macros.html" as m %}
+{%- set side = "outputs." ~ channel.index -%}
+{%- set gain_path = side ~ ".gain_db" -%}
+{%- set mute_path = side ~ ".mute" -%}
+{%- set inv_path = side ~ ".invert" -%}
+{%- set lv = level_view -%}
+{%- set o = out_summary -%}
+<h2>Level</h2>
+{% include "partials/level_stepper.html" %}
+
+<div id="level-notes" class="level-notes" hx-get="{{ tab_link('level') }}" hx-select="#level-notes" hx-target="this"
+     hx-swap="outerHTML" hx-trigger="sse:desired delay:400ms, sse:sync delay:400ms">
+  {% if lv and lv.at_limit %}
+    <p class="level-limit-note"><span aria-hidden="true">&#9650;</span>
+      {% if lv.max_note %}{{ lv.max_note }}{% else %}At this output's limit. To make {{ channel.name }} louder:{% endif %}{{ help("level-limit") }}</p>
+    <p class="level-actions">
+      {% if lv.raise_values %}
+        <button type="button" class="btn-small" data-chain-values='{{ lv.raise_values|tojson }}'
+                data-chain-done="{{ lv.raise_label|replace('Raise', 'Raised') }}.">{{ lv.raise_label }}</button>
+      {% endif %}
+      {% if lower_href %}<a class="btn-link btn-small" href="{{ lower_href }}">Lower the other outputs&hellip;</a>{% endif %}
+      {% if louder_href %}<a class="btn-link btn-small" href="{{ louder_href }}">Make one louder&hellip;</a>{% endif %}
+    </p>
+  {% endif %}
+  {% if lv %}
+    {% for line in lv.totals %}
+      <p class="level-total">{{ line }}{% if loop.first %}{{ help("total") }}{% endif %}</p>
+    {% endfor %}
+    {% if lv.no_route %}
+      <p class="level-total health-problem">{{ lv.no_route }} <a href="{{ root }}/routing?preset={{ preset + 1 }}">Open Routing</a></p>
+    {% endif %}
+  {% endif %}
+  {% if o and o.headroom.level != "none" %}
+    <p class="chain-headroom health-{{ o.headroom.level }}">
+      {%- if o.headroom.level in ("caution", "problem") %}<span aria-hidden="true">&#9888;</span> {% endif %}{{ o.headroom.text }}
+      Watch its CLIP light.{{ help("headroom") }}</p>
+  {% endif %}
+</div>
+
+<div class="level-switches">
+  {{ m.toggle("mute-output-" ~ channel.index, mute_path, values[mute_path], "Mute", "Muted", "Unmuted",
+              statuses, failed_reasons, confirm_unmute=channel.name, undo_name=channel.name, term="mute") }}
+  {{ m.toggle("invert-" ~ channel.index, inv_path, values[inv_path], "Polarity", "180°", "0°",
+              statuses, failed_reasons, term="polarity") }}
+</div>

@@ -89,8 +89,9 @@
   <div class="home-card-actions">
     {% if st and edit_url %}
       <button type="button" class="btn-small mute home-mute{% if o.muted %} is-muted{% endif %}" data-action="mute"
-              aria-pressed="{{ 'true' if o.muted else 'false' }}" aria-label="Mute {{ o.name }}">
-        {{- "Muted" if o.muted else "Mute" -}}
+              aria-pressed="{{ 'true' if o.muted else 'false' }}">
+        {#- The name starts with the visible word (WCAG 2.5.3): "Mute Shakers", or "Muted Shakers" while pressed. -#}
+        <span data-mute-word>{{ "Muted" if o.muted else "Mute" }}</span><span class="visually-hidden"> {{ o.name }}</span>
       </button>
     {% endif %}
     <details class="home-adjust" data-adjust>

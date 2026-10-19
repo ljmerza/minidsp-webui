@@ -1,5 +1,5 @@
 {#- Set levels step 4 (design §14.6): watch the outputs for 30 s, then each one's peak, CLIP count, total and headroom.
-    A clipping output gets three fixes; each applies now and the watch starts again. -#}
+    A clipping or nearly clipping output gets the fixes; each applies now and the watch starts again. -#}
 {{ t.heading() }}
 {{ t.message(message) }}
 {{ t.message(error, error=true) }}
@@ -20,7 +20,7 @@
 {%- else %}
 <ul class="task-checks">
   {%- for r in results %}
-  <li class="task-check is-{{ 'ok' if r.status == 'ok' else 'fail' if r.status == 'hot' else 'unknown' if r.status == 'unknown' else 'pending' }}" data-reading="o{{ r.index }}">
+  <li class="task-check is-{{ 'ok' if r.status == 'ok' else 'fail' if r.status == 'hot' else 'unknown' if r.status in ('close', 'unknown') else 'pending' }}" data-reading="o{{ r.index }}">
     <span class="task-check-glyph" aria-hidden="true">{{ r.glyph }}</span>
     <span class="visually-hidden">{{ r.word }}: </span>
     <span class="task-check-text">{{ r.text }}</span>

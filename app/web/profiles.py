@@ -310,7 +310,7 @@ async def diff_sources(request: Request, session: DeviceSession | None) -> list[
     if session is not None:
         active = device_preset(session)
         options += [
-            {"value": f"preset:{p}", "label": f"Preset {p + 1}" + (" (active)" if p == active else "")}
+            {"value": f"preset:{p}", "label": f"Preset {p + 1}" + (" (playing)" if p == active else "")}
             for p in range(session.profile.n_presets)
         ]
     return options

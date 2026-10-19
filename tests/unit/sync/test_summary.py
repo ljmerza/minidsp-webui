@@ -390,8 +390,8 @@ def test_send_failed_and_changed_on_device():
     s = run(walkthrough(), statuses=statuses, last_verify=verify, preset=0)
     texts = [p.text for p in s.problems]
     assert "2 settings on Shakers didn't reach the device." in texts
-    assert "1 setting on Shakers changed on the device since the app sent them." in texts
-    assert "1 setting on In 1 changed on the device since the app sent them." in texts
+    assert "1 setting on Shakers changed on the device since the app sent it." in texts
+    assert "1 setting on In 1 changed on the device since the app sent it." in texts
     shakers = s.outputs[0]
     assert shakers.sync.by_block["level"] == "failed" and shakers.sync.by_block["eq"] == "changed"
     assert shakers.sync.by_block["sources"] == "changed"  # the route into it
@@ -415,6 +415,8 @@ def test_unknown_settings_are_one_info_note_and_keep_ready_away():
     assert codes(s)[-1] == "unknown_settings"
     assert s.problems[-1].text == "2 settings are unknown: the app hasn't sent or read them yet."
     assert s.outputs[0].badge == "check" and s.outputs[0].sync.headline == "Unknown"
+    # The badge's reason uses the status word (Unknown), not "not sent yet" (PR 17 persona re-run).
+    assert s.outputs[0].badge_reason == "1 setting on Shakers is unknown: the app hasn't sent or read it yet."
 
 
 def test_pending_waits_for_its_preset():

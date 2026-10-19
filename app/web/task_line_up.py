@@ -303,6 +303,10 @@ def result_lines(felt: str, heard: str, result: LineUp, felt_now: float, heard_n
         f"{waits} will wait {ms(result.delay_ms)} ({result.samples} samples) so both arrive together. "
         f"{keeps} keeps its {ms(keeps_ms)}."
     )
+    waits_now = felt_now if result.target == "felt" else heard_now
+    if waits_now > 0 and abs(waits_now - result.delay_ms) >= 0.005:
+        # P13: say what it is today, so "9 ms was already about right" is visible.
+        lines.append(f"{waits} waits {ms(waits_now)} now.")
     return lines
 
 

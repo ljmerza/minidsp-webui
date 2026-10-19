@@ -380,7 +380,8 @@
         if (muteButton) {
           muteButton.classList.toggle('is-muted', muted);
           muteButton.setAttribute('aria-pressed', String(muted));
-          muteButton.textContent = muted ? 'Muted' : 'Mute';
+          const word = muteButton.querySelector('[data-mute-word]') || muteButton;
+          word.textContent = muted ? 'Muted' : 'Mute';
         }
         for (const nudge of card.querySelectorAll('[data-action="nudge"]')) {
           const up = Number(nudge.dataset.step) > 0;

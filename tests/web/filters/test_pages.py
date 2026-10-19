@@ -21,11 +21,23 @@ def _script_order(html: str) -> list[str]:
 
 
 async def test_output_tabs_light_up_with_their_templates(ctx):
+    # The chain (phase 9 design §8): each chip shows its setting's value and links to its tab.
     html = (await ctx.http.get("/outputs/2")).text
-    tabs = {"crossover": "Band (crossover)", "peq": "EQ", "compressor": "Compressor (limiter)", "response": "Response"}
-    for key, label in tabs.items():
-        assert re.search(rf'<a class="tab"[^>]*tab={key}[^>]*>{re.escape(label)}</a>', html), label
-    assert "is-disabled" not in html.split('<nav class="tabs"')[1].split("</nav>")[0]
+    chips = {
+        "level": "Level 0",
+        "crossover": "Full range",
+        "peq": "EQ none",
+        "delay": "Delay 0 ms",
+        "polarity": "Polarity 0°",
+        "compressor": "Compressor off",
+        "response": "Response",
+    }
+    nav = html.split('<nav class="chain"')[1].split("</nav>")[0]
+    assert re.findall(r'data-chain-tab="(\w+)"', nav) == list(chips)
+    for key, label in chips.items():
+        pattern = rf'href="[^"]*tab={key}"[^>]*data-chain-tab="{key}"[^>]*>.*?{re.escape(label)}'
+        assert re.search(pattern, nav, re.S), key
+    assert "is-disabled" not in nav
 
 
 async def test_peq_tab_mounts_the_editor_with_its_routes(ctx):
@@ -42,7 +54,12 @@ async def test_peq_tab_mounts_the_editor_with_its_routes(ctx):
     positions = [order.index(name) for name in ("uPlot.iife.min.js", "dsp.js", "graph.js", "peq_editor.js")]
     assert positions == sorted(positions)
     assert order[-1] == "alpine.min.js"
-    assert "crossover.js" not in order
+    # Every tab's scripts load once with the page (phase 9 design §8), so a tab swapped in place brings none.
+    assert "crossover.js" in order and "compressor.js" in order and "chain.js" in order
+    assert len(order) == len(set(order))
+    panel = html.split('id="tab-panel"', 1)[1].split("</main>", 1)[0]
+    assert "<script src=" not in panel and "<link rel=" not in panel
+    assert cfg["bass"] is False and cfg["viewKey"] == "peq.view.outputs.1"
 
 
 async def test_crossover_tab(ctx):

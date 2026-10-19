@@ -11,6 +11,12 @@
 //
 // Handles (PEQ editors): plot.setHandles([{ id, freq, value, color, active }]) draws them in magnitude mode;
 // handleAt(clientX, clientY) and toData(clientX, clientY) map pointer events back to bands and to (freq, dB).
+//
+// Phase 9 (design §12.3, §16 a11y 9 and phone 7, P09): every plot has an HTML legend built from the trace metadata
+// (opts.legend === false leaves it out), and a cursor you can place: a click or tap pins it, the arrow keys move it
+// when the plot has focus (it is a slider in frequency), Esc removes it. The readout below the plot is a fixed text
+// box (never a floating tooltip) showing the hovered point, else the pinned one. classifyNotes() sorts a graph's
+// warnings into real warnings and rounding notes, with the stronger wording at ROUNDING_STRONG_DB or more.
 (() => {
   'use strict';
 
@@ -166,6 +172,103 @@
     };
   }
 
+  // --- legend, cursor and notes (phase 9) ---------------------------------------------------------------------
+
+  // The legend rows of the visible traces, in plot order: { id, label, color, style: 'bold' | 'dashed' | 'solid' }.
+  // Traces sharing a label and colour (the integration plot's wrap segments) show once; `legend: false` hides one.
+  function legendItems(traces) {
+    const seen = new Set();
+    const out = [];
+    for (const t of traces || []) {
+      if (t.visible === false || t.legend === false) continue;
+      const label = t.label || t.id;
+      if (!label) continue;
+      const color = t.color || COLORS.fallback;
+      const key = `${label}\u0000${color}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const style = Array.isArray(t.dash) && t.dash.length ? 'dashed' : t.bold ? 'bold' : 'solid';
+      out.push({ id: t.id ?? label, label, color, style });
+    }
+    return out;
+  }
+
+  // Rounding notes at or above this many dB get the stronger wording (design §1 grafts, glossary "rounding").
+  const ROUNDING_STRONG_DB = 1;
+  const ROUNDING_RE = /^(.*?):\s*rounding note\b.*?\bup to (\d+(?:\.\d+)?) dB/;
+
+  // "output 1: rounding note: … by up to 2.29 dB" → { label: 'output 1', db: 2.29 }; null for any other warning.
+  function parseRoundingNote(text) {
+    const m = ROUNDING_RE.exec(String(text || ''));
+    if (!m) return null;
+    const db = Number(m[2]);
+    return Number.isFinite(db) ? { label: m[1].trim(), db } : null;
+  }
+
+  // A graph's warnings split into real warnings (`others`, shown as they are) and rounding notes (folded, grey,
+  // stronger wording at `strongDb` or more). `summary` is the folded line: "1 rounding note (0.20 dB, harmless)",
+  // "1 rounding note: this filter's real curve is noticeably off (2.3 dB)", "3 rounding notes (up to 0.20 dB,
+  // harmless)", "3 rounding notes: one filter's real curve is noticeably off (2.3 dB)".
+  function classifyNotes(warnings, strongDb = ROUNDING_STRONG_DB) {
+    const others = [];
+    const notes = [];
+    for (const w of warnings || []) {
+      const note = parseRoundingNote(w);
+      if (!note) {
+        others.push(w);
+        continue;
+      }
+      const strong = note.db >= strongDb;
+      const text = strong
+        ? `${note.label}: this filter's real curve is noticeably off (${note.db.toFixed(1)} dB)`
+        : `${note.label}: off by up to ${note.db.toFixed(2)} dB, harmless`;
+      notes.push({ ...note, strong, text });
+    }
+    const worst = notes.reduce((m, n) => Math.max(m, n.db), 0);
+    const nStrong = notes.filter((n) => n.strong).length;
+    let summary = '';
+    if (notes.length === 1) {
+      summary = nStrong
+        ? `1 rounding note: this filter's real curve is noticeably off (${worst.toFixed(1)} dB)`
+        : `1 rounding note (${worst.toFixed(2)} dB, harmless)`;
+    } else if (notes.length > 1 && nStrong === 1) {
+      summary = `${notes.length} rounding notes: one filter's real curve is noticeably off (${worst.toFixed(1)} dB)`;
+    } else if (notes.length > 1 && nStrong > 1) {
+      summary =
+        `${notes.length} rounding notes: ${nStrong} filters' real curves are noticeably off ` +
+        `(up to ${worst.toFixed(1)} dB)`;
+    } else if (notes.length > 1) {
+      summary = `${notes.length} rounding notes (up to ${worst.toFixed(2)} dB, harmless)`;
+    }
+    return { others, notes, strong: nStrong > 0, summary };
+  }
+
+  // The readout as one line of text (the slider's aria-valuetext): "50.0 Hz: Shakers −0.1 dB, Sub −3.2 dB".
+  function readingText(readout, mode = 'magnitude') {
+    if (!readout) return '';
+    const value = (r) => {
+      if (mode === 'phase') return fmtPhase(r.phase);
+      if (mode === 'group_delay') return fmtMs(r.group_delay);
+      return fmtDb(r.db);
+    };
+    const rows = readout.rows.map((r) => `${r.label || r.id} ${value(r)}`);
+    return rows.length ? `${fmtFreq(readout.freq)}: ${rows.join(', ')}` : fmtFreq(readout.freq);
+  }
+
+  // Cursor steps on a log grid: a key press moves about 1/12 octave (`big`: half an octave), and always at least one
+  // point; the result stays inside [lo, hi] (grid indexes of the visible range).
+  const KEY_STEP_OCT = 1 / 12;
+  const BIG_STEP_OCT = 1 / 2;
+  function stepIndex(grid, idx, direction, { big = false, lo = 0, hi = grid.length - 1 } = {}) {
+    if (!grid.length) return null;
+    const dir = direction < 0 ? -1 : 1;
+    const from = Math.min(hi, Math.max(lo, idx));
+    const target = grid[from] * 2 ** (dir * (big ? BIG_STEP_OCT : KEY_STEP_OCT));
+    let next = nearestIndex(grid, target);
+    if (next === from) next = from + dir;
+    return Math.min(hi, Math.max(lo, next));
+  }
+
   const niceStep = (span, target) => {
     const raw = span / target;
     const p = 10 ** Math.floor(Math.log10(raw));
@@ -231,7 +334,21 @@
 :where(.graph-readout-rows) { display: contents; list-style: none; }
 :where(.graph-readout-rows li) { display: inline-flex; gap: 0.4rem; align-items: center; }
 :where(.graph-swatch) { width: 0.75rem; height: 0.2rem; border-radius: 1px; display: inline-block; }
-:where(.graph-readout-label) { color: var(--text-muted, #8c96a3); }`;
+:where(.graph-readout-label) { color: var(--text-muted, #8c96a3); }
+:where(.graph-legend) { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; list-style: none; margin: 0 0 0.3rem; padding: 0;
+  font-size: 0.82rem; }
+:where(.graph-legend li) { display: inline-flex; gap: 0.4rem; align-items: center; }
+:where(.graph-legend-line) { display: inline-block; width: 1.4rem; height: 0; border-top: 2px solid currentColor; }
+:where(.graph-legend-line.is-dashed) { border-top-style: dashed; }
+:where(.graph-legend-line.is-bold) { border-top-width: 4px; }
+:where(.graph-canvas[role="slider"]) { cursor: crosshair; }
+:where(.graph-notes) { margin-top: 0.3rem; font-size: 0.82rem; }
+:where(.graph-rounding) { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; color: var(--text-muted, #8c96a3); }
+:where(.graph-rounding.is-strong) { color: var(--warn, #f0b429); }
+:where(.graph-rounding details) { flex: 1 1 0; min-width: 0; }
+:where(.graph-rounding summary) { cursor: pointer; }
+:where(.graph-rounding ul) { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+:where(.graph-reading) { margin: 0.2rem 0; }`;
 
   function injectDefaultCss() {
     if (typeof document === 'undefined' || document.getElementById('mdsp-graph-css')) return;
@@ -288,11 +405,24 @@
       this.signature = null;
       this.plot = null;
 
+      this.pinFreq = null; // the placed cursor's frequency (kept across rebuilds and grid changes)
+      this.label = opts.label || 'Graph';
+      this.valueTimer = null;
+
       injectDefaultCss();
       el.classList.add('graph');
+      if (opts.legend !== false) {
+        this.legendEl = document.createElement('ul');
+        this.legendEl.className = 'graph-legend';
+        this.legendEl.setAttribute('aria-label', 'Legend');
+        el.appendChild(this.legendEl);
+      } else {
+        this.legendEl = null;
+      }
       this.canvasEl = document.createElement('div');
       this.canvasEl.className = 'graph-canvas';
       el.appendChild(this.canvasEl);
+      this.bindCursor();
       if (opts.readout === false) {
         this.readoutEl = null;
       } else if (opts.readout && opts.readout.nodeType === 1) {
@@ -316,6 +446,7 @@
         this.resizeObserver.observe(el);
       }
       this.build();
+      this.updateSlider();
     }
 
     // --- public API ---
@@ -334,6 +465,7 @@
         this.plot.setData(this.data(), false);
         this.applyY();
       }
+      this.renderLegend();
       this.refreshReadout();
     }
 
@@ -355,6 +487,7 @@
     setView(view) {
       this.xRange = resolveView(view);
       if (this.plot) this.plot.setScale('x', { min: this.xRange[0], max: this.xRange[1] });
+      this.updateSlider();
     }
 
     setYRange(range) {
@@ -411,6 +544,133 @@
       return best;
     }
 
+    // --- the placed cursor ---
+
+    // Grid index of the placed cursor, or null (none placed, or outside the visible range).
+    pinnedIndex() {
+      if (this.pinFreq === null || !this.grid.length) return null;
+      const [lo, hi] = this.visibleIndexRange();
+      if (lo > hi) return null;
+      const idx = nearestIndex(this.grid, this.pinFreq);
+      return idx < lo || idx > hi ? null : idx;
+    }
+
+    // First and last grid index inside the x range.
+    visibleIndexRange() {
+      const [fMin, fMax] = this.xRange;
+      let lo = 0;
+      let hi = this.grid.length - 1;
+      while (lo <= hi && this.grid[lo] < fMin * (1 - 1e-9)) lo++;
+      while (hi >= lo && this.grid[hi] > fMax * (1 + 1e-9)) hi--;
+      return [lo, hi];
+    }
+
+    // Place the cursor at a frequency (null removes it). The readout and the slider value follow.
+    pin(freq) {
+      this.pinFreq = freq === null || freq === undefined || !(freq > 0) ? null : freq;
+      if (this.plot) this.plot.redraw(false, false);
+      this.refreshReadout(null);
+    }
+
+    // A click or tap inside the plotting area places the cursor there (on a PEQ handle it also selects the band).
+    pinAt(clientX, clientY) {
+      const d = this.toData(clientX, clientY);
+      if (!d || !this.grid.length) return;
+      this.pin(this.grid[nearestIndex(this.grid, d.freq)]);
+    }
+
+    bindCursor() {
+      const c = this.canvasEl;
+      if (!c || typeof c.addEventListener !== 'function') return;
+      c.setAttribute('tabindex', '0');
+      c.setAttribute('role', 'slider');
+      c.setAttribute('aria-label', `${this.label}: cursor (arrow keys move it, Esc removes it)`);
+      c.setAttribute('aria-orientation', 'horizontal');
+      c.addEventListener('click', (e) => this.pinAt(e.clientX, e.clientY));
+      c.addEventListener('keydown', (e) => this.onKey(e));
+    }
+
+    // Arrow keys move the cursor about 1/12 octave (Shift or PageUp/PageDown: half an octave), Home/End jump to the
+    // ends, Esc removes it. The first key press places it in the middle of the view.
+    onKey(e) {
+      const keys = {
+        ArrowRight: [1, false],
+        ArrowUp: [1, false],
+        ArrowLeft: [-1, false],
+        ArrowDown: [-1, false],
+        PageUp: [1, true],
+        PageDown: [-1, true],
+      };
+      if (!this.grid.length) return;
+      const [lo, hi] = this.visibleIndexRange();
+      if (lo > hi) return;
+      let idx = null;
+      const current = this.pinnedIndex();
+      if (e.key === 'Escape') {
+        if (current === null) return;
+        e.preventDefault();
+        this.pin(null);
+        return;
+      }
+      if (e.key === 'Home') idx = lo;
+      else if (e.key === 'End') idx = hi;
+      else if (keys[e.key]) {
+        const [dir, big] = keys[e.key];
+        if (current === null) idx = nearestIndex(this.grid, Math.sqrt(this.xRange[0] * this.xRange[1]));
+        else idx = stepIndex(this.grid, current, dir, { big: big || e.shiftKey, lo, hi });
+      } else {
+        return;
+      }
+      e.preventDefault();
+      this.pin(this.grid[idx]);
+    }
+
+    // The slider's value (Hz) and its spoken text, the one-line reading. The text is throttled (at most every
+    // 300 ms, the last one always lands) so holding an arrow key doesn't queue a long list of announcements.
+    updateSlider(readout = null) {
+      const c = this.canvasEl;
+      if (!c || typeof c.setAttribute !== 'function') return;
+      const [fMin, fMax] = this.xRange;
+      c.setAttribute('aria-valuemin', String(Math.round(fMin)));
+      c.setAttribute('aria-valuemax', String(Math.round(fMax)));
+      const idx = this.pinnedIndex();
+      const freq = idx === null ? fMin : this.grid[idx];
+      c.setAttribute('aria-valuenow', String(Math.round(freq)));
+      const text = idx === null ? 'no cursor placed' : readingText(readout, this.mode) || fmtFreq(freq);
+      if (this.valueText === text) return;
+      this.valueText = text;
+      clearTimeout(this.valueTimer);
+      if (idx === null) {
+        this.valueAt = 0;
+        c.setAttribute('aria-valuetext', text);
+        return;
+      }
+      const now = Date.now();
+      const apply = () => {
+        this.valueAt = Date.now();
+        c.setAttribute('aria-valuetext', this.valueText);
+      };
+      if (!this.valueAt || now - this.valueAt >= 300) apply();
+      else this.valueTimer = setTimeout(apply, 300 - (now - this.valueAt));
+    }
+
+    renderLegend() {
+      const el = this.legendEl;
+      if (!el) return;
+      const items = legendItems(this.traces);
+      el.hidden = items.length === 0;
+      el.replaceChildren(
+        ...items.map((item) => {
+          const li = document.createElement('li');
+          const line = textEl('span', `graph-legend-line is-${item.style}`, '');
+          line.style.color = item.color;
+          line.setAttribute('aria-hidden', 'true');
+          li.append(line, textEl('span', 'graph-legend-label', item.label));
+          return li;
+        }),
+      );
+    }
+
     resize() {
       if (!this.plot) return;
       const width = this.width();
@@ -418,6 +678,7 @@
     }
 
     destroy() {
+      clearTimeout(this.valueTimer);
       if (this.resizeObserver) this.resizeObserver.disconnect();
       if (this.plot) this.plot.destroy();
       this.plot = null;
@@ -505,7 +766,7 @@
         ],
         hooks: {
           drawAxes: [(u) => this.drawMinorGrid(u)],
-          draw: [(u) => this.drawHandles(u)],
+          draw: [(u) => this.drawPinned(u), (u) => this.drawHandles(u)],
           setCursor: [(u) => this.refreshReadout(u.cursor.idx)],
         },
       };
@@ -530,6 +791,39 @@
       ctx.restore();
     }
 
+    // The placed cursor: a dashed vertical line and a dot on each visible trace.
+    drawPinned(u) {
+      const idx = this.pinnedIndex();
+      if (idx === null) return;
+      const { ctx, bbox } = u;
+      const ratio = this.UPlot.pxRatio || 1;
+      const x = Math.round(u.valToPos(this.grid[idx], 'x', true)) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = this.colors.text;
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = ratio;
+      if (ctx.setLineDash) ctx.setLineDash([4 * ratio, 3 * ratio]);
+      ctx.beginPath();
+      ctx.moveTo(x, bbox.top);
+      ctx.lineTo(x, bbox.top + bbox.height);
+      ctx.stroke();
+      if (ctx.setLineDash) ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      const data = this.plot === u ? u.data : null;
+      this.traces.forEach((t, k) => {
+        if (t.visible === false || !data) return;
+        const v = data[k + 1] && data[k + 1][idx];
+        if (v === null || v === undefined || !Number.isFinite(v)) return;
+        const [ymin, ymax] = [u.scales.y.min, u.scales.y.max];
+        if (v < ymin || v > ymax) return;
+        ctx.beginPath();
+        ctx.arc(x, u.valToPos(v, 'y', true), 4 * ratio, 0, 2 * Math.PI);
+        ctx.fillStyle = t.color;
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
     drawHandles(u) {
       if (this.mode !== 'magnitude' || !this.handles.length) return;
       const { ctx } = u;
@@ -551,10 +845,15 @@
       ctx.restore();
     }
 
+    // The hovered point (`idx`, from uPlot's cursor), else the placed cursor.
     refreshReadout(idx = this.lastIdx) {
       this.lastIdx = idx;
-      const readout = idx === null || idx === undefined ? null : readoutRows(this.traces, this.grid, idx);
+      const hovered = idx !== null && idx !== undefined && idx >= 0;
+      const pinned = this.pinnedIndex();
+      const at = hovered ? idx : pinned;
+      const readout = at === null || at === undefined ? null : readoutRows(this.traces, this.grid, at);
       this.renderReadout(readout);
+      this.updateSlider(pinned === null ? null : hovered ? readoutRows(this.traces, this.grid, pinned) : readout);
       if (this.onCursor) this.onCursor(readout);
     }
 
@@ -562,7 +861,7 @@
       const el = this.readoutEl;
       if (!el) return;
       if (!readout) {
-        el.replaceChildren(textEl('span', 'graph-readout-hint', 'Hover the graph for values'));
+        el.replaceChildren(textEl('span', 'graph-readout-hint', 'Tap or click the graph for values'));
         return;
       }
       const head = textEl('div', 'graph-readout-freq', fmtFreq(readout.freq));
@@ -611,6 +910,12 @@
     resample,
     traceValues,
     readoutRows,
+    legendItems,
+    ROUNDING_STRONG_DB,
+    parseRoundingNote,
+    classifyNotes,
+    readingText,
+    stepIndex,
     autoRange,
     defaultRange,
     ySplits,

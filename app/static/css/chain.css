@@ -1,0 +1,125 @@
+/* The output and input pages' header block, chain tab bar and plain editors (phase 9 design §8, §9). */
+
+/* --- header block ------------------------------------------------------------------------------------------------- */
+
+.chain-head { border-top: 3px solid var(--chan, var(--border)); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.chain-top { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem 1rem; }
+.chain-rename > summary { display: inline-flex; align-items: center; cursor: pointer; list-style: none; }
+.chain-rename > summary::-webkit-details-marker { display: none; }
+.chain-rename[open] > summary { margin-bottom: 0.4rem; }
+.chain-meter { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; min-width: min(20rem, 100%); }
+.chain-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.5rem; margin: 0.6rem 0 0.3rem; }
+.chain-sentence { font-size: 1.02rem; }
+.chain-fed { margin: 0.2rem 0; color: var(--text-muted); }
+.chain-fed a { margin-left: 0.4rem; }
+.chain-headroom { margin: 0.2rem 0; color: var(--text-muted); }
+.chain-headroom.health-caution { color: var(--warn); }
+.chain-headroom.health-problem { color: var(--bad); }
+.chain-head .output-reason { margin: 0.2rem 0; }
+.chain-head .output-reason.health-check, .chain-head .output-reason.health-overload { color: var(--warn); }
+
+/* --- the chain: one chip per setting, "·" between them (desktop wraps; phone scrolls sideways, design §8.3) ---- */
+
+.chain-label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin: 0.8rem 0 0.35rem; }
+.chain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0; }
+.chain-list > li { display: inline-flex; align-items: center; }
+.chain-list > li + li::before { content: "·" / ""; color: var(--text-muted); padding: 0 0.35rem; }
+.chain-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; min-height: 2.25rem; padding: 0.2rem 0.7rem;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg-input); color: var(--text);
+  text-decoration: none; white-space: nowrap; font-size: 0.92rem;
+}
+.chain-chip:hover { border-color: var(--accent); }
+.chain-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chain-chip.is-default { color: var(--text-muted); }
+.chain-chip.is-caution { border-color: rgba(240, 180, 41, 0.6); }
+.chain-chip.is-caution .chain-glyph { color: var(--warn); }
+.chain-chip.is-problem { border-color: var(--bad); }
+.chain-chip.is-problem .chain-glyph { color: var(--bad); }
+.chain-chip.is-current {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600;
+}
+.chain-chip.is-current .chain-glyph, .chain-chip.is-current .chain-sync { color: inherit; }
+.chain-chip.is-disabled { color: var(--text-muted); border-style: dashed; }
+.chain-sync { font-size: 0.85em; }
+
+.tab-panel { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; scroll-margin-top: 0.5rem; }
+.tab-panel:focus { outline: none; }
+
+@media (max-width: 599px) {
+  .chain-top { flex-wrap: nowrap; align-items: center; }
+  .chain-rename[open] { flex: 1 1 100%; }
+  .chain-top:has(.chain-rename[open]) { flex-wrap: wrap; }
+  .chain-meter { flex: 1 1 0; min-width: 0; }
+  .chain-meter .home-meter-value { min-width: 0; }
+  .chain-list {
+    flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity; gap: 0.4rem;
+    padding-bottom: 0.3rem; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  }
+  .chain-list > li { scroll-snap-align: start; }
+  .chain-list > li + li::before { content: none; }
+  .chain-chip { min-height: 44px; }
+  .tab-panel { scroll-margin-top: calc(var(--hdr-phone-h, 48px) + 0.5rem); }
+}
+
+/* --- Level tab ------------------------------------------------------------------------------------------------------ */
+
+.level-stepper { display: flex; align-items: center; gap: 0.5rem; }
+.level-stepper .param-gain { flex: 1 1 auto; min-width: 0; }
+.level-step { min-width: 2.75rem; min-height: 2.75rem; padding: 0; font-size: 1.2rem; line-height: 1; flex: none; }
+.level-notes { margin: 0.6rem 0; }
+.level-notes p { margin: 0.3rem 0; }
+.level-limit-note { color: var(--warn); }
+.level-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.level-switches { display: flex; flex-wrap: wrap; gap: 0.9rem 2rem; margin-top: 0.8rem; }
+
+/* --- Delay tab ------------------------------------------------------------------------------------------------------ */
+
+.line-up { margin-top: var(--gap); }
+.line-up .helper-row select, .line-up .helper-row input { max-width: 100%; }
+.line-up-result { margin: 0.5rem 0; font-weight: 600; }
+.line-up-result.is-bad { color: var(--warn); font-weight: 400; }
+.helper-more { margin-top: var(--gap); }
+
+/* --- Band tab ------------------------------------------------------------------------------------------------------- */
+
+.xover-sentence { margin: 0 0 0.6rem; font-size: 1.02rem; }
+.xover > .xover-presets { margin-bottom: var(--gap); }
+.xover-advanced { margin-top: 0.5rem; }
+.xover-advanced > summary, .helper-more > summary { cursor: pointer; color: var(--text-muted); padding: 0.3rem 0; min-height: 1.75rem; }
+.xover-advanced > summary { font-size: 0.9rem; }
+.graph-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem; margin: var(--gap) 0 0.3rem; font-size: 0.85rem; }
+
+/* --- EQ tab and Compressor tab -------------------------------------------------------------------------------------- */
+
+.eq-head { flex-wrap: wrap; }
+.eq-head h2 .muted { font-size: 0.9rem; font-weight: 400; }
+.eq-entry { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.comp-words { margin: var(--gap) 0; }
+
+/* EQ table on a phone (design §8.3, §16 phone rule 3): one card per band, no sideways scroll; unused bands fold away
+   behind "Show all". */
+.peq-unused-toggle { display: none; }
+@media (max-width: 599px) {
+  .peq-editor .table-scroll { overflow-x: visible; }
+  .peq-table, .peq-table > tbody, .peq-table tr { display: block; width: 100%; min-width: 0; }
+  .peq-table select { max-width: none; }
+  .peq-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .peq-table > tbody { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 0.6rem; padding: 0.4rem 0.6rem; }
+  .peq-table > tbody > tr:first-child {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem 0.6rem; align-items: center;
+  }
+  .peq-table > tbody > tr > th, .peq-table > tbody > tr > td { display: flex; align-items: center; gap: 0.4rem; border: 0; padding: 0; min-width: 0; }
+  .peq-table > tbody > tr > th { grid-column: 1 / -1; font-weight: 600; }
+  .peq-table > tbody > tr > td[data-label]::before { content: attr(data-label); color: var(--text-muted); font-size: 0.8rem; flex: none; }
+  .peq-table > tbody > tr > td input.num, .peq-table > tbody > tr > td select { width: 100%; min-width: 0; }
+  .peq-table > tbody > tr > td.row-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .peq-table > tbody > tr > td.source:empty { display: none; }
+  .peq-table > tbody > tr.peq-drawer-row > td { display: block; }
+  .peq-table:not(.is-showing-all) > tbody.is-unused:not(.is-selected) { display: none; }
+  .peq-unused-toggle { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; }
+}
+
+@media (max-width: 599px), (pointer: coarse) {
+  .xover-advanced > summary, .helper-more > summary { min-height: 44px; padding: 0.6rem 0; }
+}

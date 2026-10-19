@@ -22,7 +22,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from app.model.device_profile import DeviceProfile
-from app.sync.summary import Action, InputSummary, OutputSummary, Part, PresetSummary, Problem, session_summary
+from app.sync.summary import Action, InputSummary, OutputSummary, PresetSummary, Problem, session_summary
 from app.web import devices
 from app.web.glossary import term
 from app.web.templating import templates
@@ -179,28 +179,27 @@ class Block:
     aria_label: str
 
 
-def _spoken(text: str) -> str:
-    """Chip text as a screen reader should say it: "20–80 Hz" -> "20 to 80 hertz", "−36" -> "minus 36"."""
-    text = text.replace("▲max", "at its limit").replace("–", " to ").replace("°", " degrees")
-    text = re.sub(r"(\d):1\b", r"\1 to 1", text)
-    text = re.sub(r"\bkHz\b", "kilohertz", text)
-    text = re.sub(r"\bHz\b", "hertz", text)
-    text = text.replace(MINUS, "minus ")
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _value_text(key: str, part: Part) -> str:
-    """The chip's value without its block name: "Band 20–80 Hz" -> "20–80 Hz", "Comp. off" -> "off"."""
-    label = part.label
-    for prefix in (BLOCK_NAMES[key] + ":", BLOCK_NAMES[key], "Comp.", "FIR"):
-        if label.startswith(prefix):
-            label = label[len(prefix) :].strip()
-            break
-    if key == "delay":
-        label += " milliseconds"
+def block_name(key: str, label: str, state: str, sync: str = "") -> str:
+    """A block's accessible name. It starts with the chip's visible text, so speech input ("click Polarity 0°") finds it
+    (WCAG 2.5.3 Label in Name; the PR 17 Lighthouse run flagged "Polarity, 0 degrees" for the chip "Polarity 0°"),
+    then says what the chip leaves out: the block's full name, the unit, the state, an unsent status and what opens.
+    "Level +16 ▲max" -> "Level +16 max, total in dB, at its limit, check. Go to its level." """
+    at_limit = "▲max" in label
+    name = re.sub(r"\s+", " ", label.replace("▲max", "max")).strip()
+    words = []
+    if not name.startswith(BLOCK_NAMES[key]):
+        name += f" ({BLOCK_NAMES[key]})"  # "Comp. off (Compressor)", "Full range (Band)"
     if key == "level":
-        label = label.replace(" ▲max", " dB total, ▲max") if "▲max" in label else label + " dB total"
-    return label or part.label
+        words.append("total in dB")
+        if at_limit:
+            words.append("at its limit")
+    elif key == "delay" and not name.endswith("ms"):
+        words.append("in milliseconds")
+    if not label.endswith(f" {state}"):  # no "Comp. off, off"
+        words.append(state)
+    if sync:
+        words.append(sync)
+    return ", ".join([name, *words]) + f". {BLOCK_OPENS[key]}."
 
 
 def block_sync(key: str, by_block: Mapping[str, str], waiting: bool) -> str | None:
@@ -239,10 +238,7 @@ def output_blocks(
         state = part.state if part.state in STATE_WORDS else "on"
         sync = block_sync(key, out.sync.by_block, waiting)
         sync_glyph, sync_word = SYNC_GLYPHS.get(sync or "", ("", ""))
-        spoken = f"{BLOCK_NAMES[key]}, {_spoken(_value_text(key, part))}, {STATE_WORDS[state]}"
-        if sync:
-            spoken += f", {sync_word.lower()}"
-        aria = f"{spoken}. {BLOCK_OPENS[key]}."
+        aria = block_name(key, part.label, STATE_WORDS[state], sync_word.lower() if sync else "")
         blocks.append(
             Block(
                 key=key,

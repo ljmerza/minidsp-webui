@@ -45,6 +45,7 @@ from app.sync.session import (
     UnknownPreset,
 )
 from app.sync.status import badge_statuses
+from app.web.graph_reading import graph_reading, output_phrase, tactile_outputs
 from app.web.sync_ui import confirmation_text
 from app.web.ui_common import channel_color, channel_label, device_preset, is_htmx, load_state, manager_of
 
@@ -95,22 +96,23 @@ class CrossoverPresetBody(_Body):
     preset: Literal["sub_lp80", "tactile", "flat"]
 
 
-# Crossover presets of the Crossover tab (docs 05 §4): group designs (None = leave the group alone) and bypass flags.
+# Crossover templates of the Band tab (docs 05 §4; plain labels, phase 9 design §8.1): group designs
+# (None = leave the group alone) and bypass flags.
 CROSSOVER_PRESETS: dict[str, dict[str, Any]] = {
     "sub_lp80": {
-        "label": "Sub LP 80 LR4",
+        "label": "Sub: below 80 Hz",
         "groups": (CrossoverDesign(kind="lp", family="lr", order=4, freq=80), None),
         "bypass": (False, True),
     },
     "tactile": {
-        "label": "Tactile band 20–80 LR4",
+        "label": "Shakers: 20–80 Hz",
         "groups": (
             CrossoverDesign(kind="lp", family="lr", order=4, freq=80),
             CrossoverDesign(kind="hp", family="lr", order=4, freq=20),
         ),
         "bypass": (False, False),
     },
-    "flat": {"label": "Flat (bypass)", "groups": (None, None), "bypass": (True, True)},
+    "flat": {"label": "Full range (off)", "groups": (None, None), "bypass": (True, True)},
 }
 
 
@@ -661,7 +663,10 @@ async def output_response(
         color=color,
         input_names=input_names,
     )
-    return _json({"serial": serial, "preset": preset, "output": channel, "inputs": feeding, **result})
+    # The Response tab draws a muted output as if un-muted (its note says so); the reading says it too.
+    reading = output_phrase(doc, channel, name, feeding, input_names) + "."
+    data = {"serial": serial, "preset": preset, "output": channel, "inputs": feeding, **result, "reading": reading}
+    return _json(data)
 
 
 def system_traces(
@@ -720,7 +725,12 @@ async def system_response(
         system_traces, doc, selected, freqs, profile.sample_rate, taps=taps, names=names, colors=colors
     )
     title = " + ".join(names[n] for n in selected) if selected else "no un-muted output"
-    return _json({"serial": serial, "preset": preset, "outputs": selected, "title": title, **result})
+    input_names = [channel_label(session, "input", i) for i in range(profile.n_inputs)]
+    extra = {
+        "reading": graph_reading(doc, selected, names, inputs=(0,), input_names=input_names),
+        "tactile": tactile_outputs(getattr(session, "channel_meta", None), selected),
+    }
+    return _json({"serial": serial, "preset": preset, "outputs": selected, "title": title, **result, **extra})
 
 
 __all__ = [

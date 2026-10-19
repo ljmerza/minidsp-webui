@@ -1,0 +1,40 @@
+{#- The Routing page's summary parts (phase 9 design §10.1 / §10.2, app/web/routing_ui.py). Rendered in the page and
+    again by partials/routing_summary.html, which swaps them in out-of-band after every change. -#}
+
+{#- An output's health badge, next to its name. -#}
+{%- macro route_badge(r, oob=false) -%}
+  <span{% if oob %} hx-swap-oob="true"{% endif %} class="route-badge health-badge health-{{ r.badge }}" id="route-badge-{{ r.index }}" data-health-badge="{{ r.badge }}">
+    <span class="health-glyph" aria-hidden="true">{{ r.badge_glyph }}</span> {{ r.badge_word }}
+  </span>
+{%- endmacro -%}
+
+{#- What the output plays in the end: Level, total, its sources and the breakdown; "nothing" with the fix when no input
+    feeds it; "Muted" with what it would be. -#}
+{%- macro route_total_body(r, edit_url, preset) -%}
+  {%- if r.state == "on" -%}
+    <span class="rg-total-main"><strong class="rg-total-num">{{ r.text }}</strong> <span class="rg-total-from">{{ r.sources }}</span></span>
+    <span class="rg-total-detail">{{ r.detail }}</span>
+    {%- if r.headroom %}
+    <span class="rg-total-headroom headroom-{{ r.headroom_level }}"><span aria-hidden="true">&#9888;</span> {{ r.headroom }}</span>
+    {%- endif -%}
+  {%- elif r.state == "muted" -%}
+    <span class="rg-total-main"><strong class="rg-total-num"><span aria-hidden="true">&#128263;</span> Muted</strong></span>
+    <span class="rg-total-detail">{{ r.detail }}</span>
+  {%- else -%}
+    <span class="rg-total-main"><strong class="rg-total-num rg-total-nothing">nothing</strong></span>
+    <span class="rg-total-detail">{{ r.detail }}</span>
+    {%- for fx in r.fixes %}
+    <button type="button" class="btn-small rg-fix" data-shell-fix data-url="{{ edit_url }}" data-preset="{{ preset }}"
+            data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
+    {%- endfor -%}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- "In 2 isn't sent to any output." per input that feeds nothing. -#}
+{%- macro notes_list(notes, oob=false) -%}
+  <ul class="route-notes" id="route-notes"{% if oob %} hx-swap-oob="true"{% endif %}{% if not notes %} hidden{% endif %}>
+    {%- for n in notes %}
+    <li><span aria-hidden="true">&#9432;</span> {{ n.text }}</li>
+    {%- endfor %}
+  </ul>
+{%- endmacro -%}

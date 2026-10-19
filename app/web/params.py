@@ -32,6 +32,8 @@ from app.sync.session import (
     UnknownPreset,
 )
 from app.sync.status import badge_statuses, status_view
+from app.sync.summary import session_summary
+from app.web import chain, routing_ui, shell
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
     EDIT_TOPICS,
@@ -58,16 +60,22 @@ MAX_EDIT_VALUES = 64
 SPEED_OF_SOUND_M_S = 343.0
 DEFAULT_DISTANCE_M = 3.0
 
-# Output page tabs, in order. A tab is enabled once its partial exists in templates/output/<key>.html, so later
-# phases light up a tab just by adding the template. ``fir`` is also hidden unless the profile supports FIR.
+# Output page tabs, in the chain's order (phase 9 design §8: the tab bar is the chain, Level first). A tab is enabled
+# once its partial exists in templates/output/<key>.html, so later phases light up a tab just by adding the template.
+# ``fir`` is also hidden unless the profile supports FIR. The keys are the ``?tab=`` values and never change.
 OUTPUT_TABS: tuple[tuple[str, str], ...] = (
-    ("delay", "Delay"),
+    ("level", "Level"),
     ("crossover", "Band (crossover)"),
     ("peq", "EQ"),
+    ("delay", "Delay"),
+    ("polarity", "Polarity"),
     ("compressor", "Compressor (limiter)"),
     ("fir", "FIR"),
     ("response", "Response"),
 )
+# Input page tabs (design §9): Level · EQ. The bare URL opens EQ, as it always showed the EQ editor.
+INPUT_TABS: tuple[str, ...] = ("level", "peq")
+INPUT_DEFAULT_TAB = "peq"
 
 
 def output_tabs(session: DeviceSession) -> list[dict[str, Any]]:
@@ -221,7 +229,31 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     ctx["sse_url"] = url(request, "/api/v1/events", topics=",".join((*EDIT_TOPICS, "levels")), serial=session.serial)
     status = session.status
     ctx["initial_output_levels"] = list(status.output_levels) if status else []
+    ctx.update(_routing_summary(request, session, p))
     return render(request, "routing.html", ctx)
+
+
+def _routing_summary(request: Request, session: DeviceSession, preset: int) -> dict[str, Any]:
+    """The Routing page's badges, Total row, input notes and rule text (app/web/routing_ui.py), plus where it
+    re-fetches them."""
+    n_out = session.profile.n_outputs
+    ceilings = [session.channel_ceiling("output", o) for o in range(n_out)]
+    ctx = routing_ui.routing_context(
+        session_summary(session, preset), ceilings, channel_names(session, "input"), channel_names(session, "output")
+    )
+    ctx["route_summary_url"] = url(request, f"/ui/devices/{session.serial}/presets/{preset}/routing/summary")
+    return ctx
+
+
+@router.get("/ui/devices/{serial}/presets/{preset}/routing/summary", response_class=HTMLResponse)
+async def routing_summary(request: Request, serial: int, preset: int) -> Response:
+    """The Routing page's summary parts, swapped in out-of-band (the switches themselves are never re-rendered)."""
+    session = await _preset_session(request, serial, preset)
+    if isinstance(session, Response):
+        return session
+    ctx = {"serial": serial, "preset": preset, "edit_url": url(request, f"/ui/devices/{serial}/presets/{preset}/edit")}
+    ctx.update(_routing_summary(request, session, preset))
+    return render(request, "partials/routing_summary.html", ctx)
 
 
 # /inputs and /outputs are the overview pages (phase 9 design §4.5, app/web/home.py); they used to redirect to the
@@ -245,8 +277,24 @@ def _channel_ctx(request: Request, session: DeviceSession, kind: str, index: int
     }
 
 
+def _chain_ctx(request: Request, session: DeviceSession, kind: str, index: int, current: str | None) -> dict[str, Any]:
+    """What the header block and the chain tab bar share on the output and input pages (design §8, §9)."""
+    status = session.status
+    return {
+        "chain_key": f"{kind[0]}{index}",
+        "chain_names": {"inputs": channel_names(session, "input"), "outputs": channel_names(session, "output")},
+        "chain_levels": {
+            "i": list(status.input_levels) if status else [],
+            "o": list(status.output_levels) if status else [],
+        },
+        "tab_name": chain.TAB_NAMES.get(current or "", ""),
+    }
+
+
 @router.get("/inputs/{number}", response_class=HTMLResponse, name="input_page")
-async def input_page(request: Request, number: int, serial: int | None = None, preset: int | None = None) -> Response:
+async def input_page(
+    request: Request, number: int, serial: int | None = None, preset: int | None = None, tab: str | None = None
+) -> Response:
     session, p, ctx = await _page_setup(request, serial, preset, f"In {number}")
     if session is not None and p is not None and not 1 <= number <= session.profile.n_inputs:
         ctx = edit_page_context(request, session, "Input")
@@ -257,7 +305,22 @@ async def input_page(request: Request, number: int, serial: int | None = None, p
     index = number - 1
     title = channel_label(session, "input", index)
     ctx = _base_ctx(request, session, p, title, f"/inputs/{number}")
-    ctx["channel"] = _channel_ctx(request, session, "input", index)
+    current = tab if tab in INPUT_TABS else INPUT_DEFAULT_TAB
+
+    def link(key: str) -> str:
+        return url(request, f"/inputs/{number}", serial=request.query_params.get("serial"), preset=p + 1, tab=key)
+
+    summary = chain.edited_summary(session, p)
+    info = summary.inputs[index] if summary is not None and index < len(summary.inputs) else None
+    ctx.update(
+        channel=_channel_ctx(request, session, "input", index),
+        tab=current,
+        tab_template=f"input/{current}.html",
+        tab_link=link,
+        in_summary=info,
+        chips=chain.input_chips(info, chain.input_eq_label(session, p, index), link) if info is not None else [],
+        **_chain_ctx(request, session, "input", index, current),
+    )
     return render(request, "input.html", ctx)
 
 
@@ -279,14 +342,28 @@ async def output_page(
     enabled = [t["key"] for t in tabs if t["enabled"]]
     current = tab if tab in enabled else (enabled[0] if enabled else None)
     prof = session.profile
+
+    def link(key: str) -> str:
+        return url(request, f"/outputs/{number}", serial=request.query_params.get("serial"), preset=p + 1, tab=key)
+
+    summary = chain.edited_summary(session, p)
+    out = summary.outputs[index] if summary is not None and index < len(summary.outputs) else None
+    doc_out = session.desired(p).outputs[index]
     ctx.update(
         channel=_channel_ctx(request, session, "output", index),
         output_tabs=tabs,
         tab=current,
         tab_template=f"output/{current}.html" if current else None,
-        tab_link=lambda key: url(
-            request, f"/outputs/{number}", serial=request.query_params.get("serial"), preset=p + 1, tab=key
-        ),
+        tab_link=link,
+        out_summary=out,
+        chips=chain.output_chips(out, tabs, link) if out is not None else [],
+        fed_by=chain.fed_by(out) if out is not None else "",
+        chain_reason=chain.badge_reason(out) if out is not None else None,
+        level_view=chain.level_view(out, prof.gain_min_db) if out is not None else None,
+        bass=chain.is_bass(doc_out, out.tactile if out is not None else False),
+        louder_href=_task_link(request, "louder", number),
+        lower_href=_task_link(request, "louder", number, method="others"),
+        **_chain_ctx(request, session, "output", index, current),
         sample_rate=prof.sample_rate,
         delay_max_ms=prof.delay_max_ms,
         delay_max_samples=prof.delay_max_samples,
@@ -294,6 +371,14 @@ async def output_page(
         default_distance_m=DEFAULT_DISTANCE_M,
     )
     return render(request, "output.html", ctx)
+
+
+def _task_link(request: Request, task_id: str, output: int, **params: str) -> str | None:
+    """A guided task's link for one output (the dialog opens it), None while the wizard isn't served."""
+    href = shell.task_href(request, task_id)
+    if not href or not href.startswith("/tasks/"):
+        return None
+    return url(request, href, output=output, **params)
 
 
 # --- edits ------------------------------------------------------------------------------------------------------------
@@ -561,4 +646,4 @@ async def activate(request: Request, serial: int, preset: int, page: str | None 
     return response
 
 
-__all__ = ["OUTPUT_TABS", "output_tabs", "patch_from_values", "router", "simple_values"]
+__all__ = ["INPUT_TABS", "OUTPUT_TABS", "output_tabs", "patch_from_values", "router", "simple_values"]

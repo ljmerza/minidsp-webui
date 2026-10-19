@@ -1,0 +1,8 @@
+{#- Output page, Polarity tab (phase 9 design §8.1: the chain's Polarity chip). The same switch is on the Level tab. -#}
+{% import "partials/params_macros.html" as m %}
+{%- set inv_path = "outputs." ~ channel.index ~ ".invert" -%}
+<h2>Polarity</h2>
+{{ m.toggle("invert-" ~ channel.index, inv_path, values[inv_path], "Polarity", "180°", "0°",
+            statuses, failed_reasons, term="polarity") }}
+<p class="hint">0° is normal. If the bass gets thinner when {{ channel.name }} plays together with another output, try
+  180° on one of them. It adds no delay and is harmless to try.</p>

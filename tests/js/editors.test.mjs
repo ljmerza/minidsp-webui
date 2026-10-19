@@ -412,3 +412,27 @@ describe('crossoverEditor', () => {
     assert.deepEqual(toasts, ['Filter 1: nope']);
   });
 });
+
+// --- the EQ width hint (phase 9 design §8.2) ----------------------------------------------------------------------
+
+describe('widthHint', () => {
+  const { widthRange, widthHint } = window.mdsp.filters;
+
+  test("matches the design's and the q help entry's examples", () => {
+    assert.equal(widthHint(40, 4), 'Width (Q 4) at 40 Hz: affects about 35–45 Hz');
+    assert.equal(widthHint(40, 1.4), 'Width (Q 1.4) at 40 Hz: affects about 28–57 Hz');
+    assert.equal(widthHint(40, 8), 'Width (Q 8) at 40 Hz: affects about 38–43 Hz');
+    const [lo, hi] = widthRange(40, 0.7);
+    assert.ok(Math.abs(lo - 20.6) < 0.1 && Math.abs(hi - 77.7) < 0.1, `${lo}–${hi}`);
+  });
+
+  test('the edges sit symmetrically on a log scale, and high frequencies round to 10 Hz', () => {
+    const [lo, hi] = widthRange(1000, 2);
+    assert.ok(Math.abs(lo * hi - 1000 * 1000) < 1e-6);
+    assert.equal(widthHint(3000, 2), 'Width (Q 2) at 3000 Hz: affects about 2340–3840 Hz');
+  });
+
+  test('says nothing for a missing or non-positive frequency or Q', () => {
+    for (const [f, q] of [[null, 4], [40, 0], [40, ''], ['', 4], [-40, 4]]) assert.equal(widthHint(f, q), '');
+  });
+});

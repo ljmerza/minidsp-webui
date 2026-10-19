@@ -18,9 +18,16 @@
   {% endif %}
   <section id="sync" class="card sync-card" aria-labelledby="sync-title">
     <h2 id="sync-title">Status{{ help("status") }}</h2>
+    {% if sync_panel %}
+      {% with bar=sync_panel.bar, view=sync_panel.view, message=sync_panel.message, verify_url=sync_panel.verify_url,
+              check_supported=sync_panel.check_supported %}
+        {% include "partials/sync_panel.html" %}
+      {% endwith %}
+    {% else %}
     <div hx-get="{{ ui }}/sync-panel{% if q and q.isdigit() %}?preset={{ q }}{% endif %}" hx-trigger="load" hx-swap="outerHTML">
       <p class="muted">Loading&hellip;</p>
     </div>
+    {% endif %}
     <div id="verify" class="verify-section" role="region" aria-labelledby="verify-title">
       <h3 id="verify-title" class="verify-title">Last check{{ help("check-device") }}</h3>
       {#- The Check device button above replaces #verify-panel; a nightly or API run re-renders it. That background

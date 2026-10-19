@@ -64,7 +64,7 @@
   {%- set response_cfg = {
     "url": root ~ "/ui/devices/" ~ serial ~ "/response", "key": "dashboard.response", "view": response_view,
     "preset": none,
-    "refresh": ["sync", "master"], "height": 240, "title": "…"
+    "refresh": ["sync", "master"], "height": 240, "title": "…", "label": "Calculated response"
   } %}
   <section class="card response-card" aria-labelledby="response-title"
            x-data='responseView({{ response_cfg|tojson }})' hx-trigger="sse:sync, sse:master">
@@ -77,6 +77,11 @@
       </span>
     </div>
     {%- set range_text = "10 Hz–20 kHz" if response_view == "full" else "5–300 Hz" %}
+    <p class="graph-reading" x-show="reading" x-text="reading" x-cloak></p>
+    <div class="response-options" x-show="hasSum" x-cloak>
+      <label class="check"><input type="checkbox" x-model="showSum" @change="setSum()"> Show the sum</label>
+      <span class="muted">The sum adds outputs as if they played from one spot.{{ help("calc-response") }}</span>
+    </div>
     <div class="graph-box" x-ref="graph" aria-label="Calculated response of the un-muted outputs, {{ range_text }}"></div>
     {{ fx.warnings() }}
     <p class="field-error" x-show="error" x-text="error" x-cloak></p>

@@ -114,7 +114,7 @@ input[type="range"] { accent-color: var(--accent); min-height: 2.5rem; margin: 0
 .hdr-source { display: flex; align-items: center; gap: 0.4rem; }
 
 .mute { display: inline-flex; align-items: center; gap: 0.35rem; }
-.mute.is-muted { background: var(--bad); border-color: var(--bad); color: #fff; }
+.mute.is-muted { background: var(--bad); border-color: var(--bad); color: #000; } /* dark text: white on red is 2.8:1 */
 .icon { width: 1.2em; height: 1.2em; }
 
 .hdr-volume { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 22rem; min-width: 0; }
@@ -196,9 +196,7 @@ input[type="range"] { accent-color: var(--accent); min-height: 2.5rem; margin: 0
   min-height: 2rem; width: 100%; padding: 0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
   color: var(--text-muted); background: var(--bg-input); border-color: var(--border);
 }
-.clip-led span { opacity: 0.7; }
-.clip-led.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #fff; }
-.clip-led.is-on span { opacity: 1; }
+.clip-led.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #000; }
 
 .meter-track {
   position: relative; width: 100%; max-width: 2.4rem; height: 14rem;
@@ -344,7 +342,7 @@ h1 .muted { font-size: 0.9rem; }
 .switch input:checked { background: var(--bad); border-color: var(--bad); }
 .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch span { position: absolute; left: 0; right: 0; text-align: center; pointer-events: none; font-weight: 600; font-size: 0.9rem; }
-.switch .switch-on { display: none; color: #fff; }
+.switch .switch-on { display: none; color: #000; }
 .switch input:checked ~ .switch-on { display: block; }
 .switch input:checked ~ .switch-off { display: none; }
 [id^="invert-"]:checked { background: var(--warn); border-color: var(--warn); }
@@ -476,7 +474,10 @@ textarea { width: 100%; font-family: var(--mono); font-size: 0.85rem; resize: ve
 .peq-table select { min-height: 2.2rem; max-width: 11rem; }
 .peq-table input.num { min-height: 2.2rem; width: 5.6rem; text-align: right; }
 .peq-table tbody.is-selected > tr:first-child { background: rgba(78, 161, 255, 0.08); }
-.peq-table tbody.is-bypassed > tr:first-child .source, .peq-table tbody.is-bypassed > tr:first-child th { opacity: 0.6; }
+/* Dimmed with a lighter text colour, not opacity, so it still meets 4.5:1 (design §16.2). */
+.peq-table tbody.is-bypassed > tr:first-child .source, .peq-table tbody.is-bypassed > tr:first-child th {
+  color: var(--text-muted);
+}
 .peq-table tbody.is-external > tr:first-child { opacity: 0.55; }
 .peq-table tr.is-invalid input.num { border-color: var(--bad); }
 .peq-table .band-on { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); }

@@ -259,6 +259,11 @@ def output_results(
                     fixes,
                 )
             )
+        elif peak is not None and has_signal(peak, th) and peak >= TARGET_HIGH_DBFS:
+            # Within a few dB of CLIP: not "OK" (the PR 17 re-run saw −1.8 dBFS marked ✓ next to a headroom warning).
+            fixes = _output_fixes(o, gain_min=gain_min, doc=doc)
+            text = f"{o.name} peaks at {dbfs(peak)}: just below CLIP."
+            out.append(Reading(o.index, o.name, CLOSE, text, peak, 0, o.headroom.text, fixes))
         elif has_signal(peak, th):
             assert peak is not None
             out.append(

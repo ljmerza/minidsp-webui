@@ -8,7 +8,8 @@ from tests.e2e.axe import assert_accessible, axe_violations
 from tests.e2e.pages import visit
 from tests.e2e.server import AppServer
 
-# Every page, as it is linked from the navigation.
+# Every page, as it is linked from the navigation, every editor tab and every guided task's page (PR 17: axe on
+# every page, with no allowlist).
 PAGES = [
     "/",
     "/meters",
@@ -17,25 +18,27 @@ PAGES = [
     "/outputs/1",
     "/outputs/1?tab=crossover",
     "/outputs/1?tab=peq",
+    "/outputs/1?tab=delay",
+    "/outputs/1?tab=polarity",
     "/outputs/1?tab=compressor",
     "/outputs/1?tab=response",
     "/inputs/1",
+    "/inputs/1?tab=level",
     "/routing",
     "/system",
     "/profiles",
     "/device",
     "/settings",
     "/help",
+    "/tasks",
+    "/tasks/diagnose",
+    "/tasks/louder",
+    "/tasks/eq-cut",
+    "/tasks/line-up",
+    "/tasks/set-levels",
+    "/tasks/profiles",
+    "/tasks/adopt",
 ]
-
-# axe findings in today's UI that later phase 9 PRs fix (design §16.2: "dimmed blocks use a lighter text colour, not
-# opacity"; PR 15 reworks the graphs, PR 17 runs axe on every page). Anything else on these pages fails the test.
-KNOWN_VIOLATIONS: dict[str, set[str]] = {
-    "/meters": {"color-contrast"},  # the dim CLIP lamps on the meters
-    "/outputs/1?tab=peq": {"color-contrast"},  # dimmed (bypassed) PEQ rows
-    "/inputs/1": {"color-contrast"},  # dimmed (bypassed) PEQ rows
-    "/system": {"aria-prohibited-attr"},  # aria-label on the graph's plain <div>
-}
 
 
 def test_the_app_runs_the_bundled_daemon_with_only_the_mock(app: AppServer):
@@ -76,7 +79,7 @@ def test_the_header_shows_the_mock_device_on_both_screens(screen: Page, shoot):
 @pytest.mark.parametrize("path", PAGES)
 def test_pages_have_no_new_accessibility_violations(screen: Page, path: str):
     visit(screen, path)
-    assert_accessible(screen, allow=KNOWN_VIOLATIONS.get(path, ()))
+    assert_accessible(screen)
 
 
 def test_the_axe_helper_finds_a_violation(desktop: Page):

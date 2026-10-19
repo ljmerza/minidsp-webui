@@ -1,0 +1,13 @@
+{#- Input page, Level tab (phase 9 design §9): the input level and mute. -#}
+{% import "partials/params_macros.html" as m %}
+{%- set side = "inputs." ~ channel.index -%}
+{%- set gain_path = side ~ ".gain_db" -%}
+{%- set mute_path = side ~ ".mute" -%}
+<h2>Level{{ help("input-level") }}</h2>
+{% include "partials/level_stepper.html" %}
+<div class="level-switches">
+  {{ m.toggle("mute-input-" ~ channel.index, mute_path, values[mute_path], "Mute", "Muted", "Unmuted", statuses,
+              failed_reasons, undo_name=channel.name, term="mute") }}
+</div>
+<p class="hint">The input level affects every output {{ channel.name }} is sent to.
+  <a href="{{ root }}/routing?preset={{ preset + 1 }}">Routing</a> chooses which outputs those are.</p>

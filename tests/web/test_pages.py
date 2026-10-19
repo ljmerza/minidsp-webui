@@ -26,7 +26,10 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     # persistent header
     assert f"#{SERIAL}" in html and "2x4HD" in html
     assert 'class="conn conn-ok"' in html and "Connected" in html
-    assert 'value="-20.0"' in _attr(html, "master-volume")
+    # the dB-weighted slider (design §10.3): its value is a track position, aria-valuetext and the field say the dB
+    assert 'value="716.667"' in _attr(html, "master-volume")  # −20 dB
+    assert 'data-volume-scale="-127.0 0.0 0.5"' in _attr(html, "master-volume")
+    assert 'value="-20.0"' in _attr(html, "master-volume-num")
     assert 'hx-trigger="input changed delay:80ms"' in _attr(html, "master-volume")
     assert f'hx-post="/ui/devices/{SERIAL}/master/volume"' in _attr(html, "master-volume")
     assert 'aria-valuetext="−20.0 dB"' in _attr(html, "master-volume")
