@@ -20,7 +20,10 @@ def test_adopt_sample_is_the_test_fixture():
 
 async def test_device_page_loads_the_new_sections(ctx):
     html = (await ctx.http.get("/device?preset=2")).text
-    assert f'hx-get="/ui/devices/{SERIAL}/sync-panel?preset=2"' in html
+    # The status panel is part of the page (no layout shift when it would load), showing the asked-for preset.
+    assert 'id="sync-panel"' in html and f'hx-get="/ui/devices/{SERIAL}/sync-panel' not in html
+    selected = '<a class="preset-tab is-selected" href="/device?preset=2" aria-label="Preset 2" aria-current="page">'
+    assert selected in html
     assert f'hx-get="/ui/devices/{SERIAL}/adopt"' in html
     assert f'hx-get="/ui/devices/{SERIAL}/events"' in html
     topics = "master%2Cdevice%2Csync%2Clog%2Cverify%2Clevels"  # levels: the header's CLIP light (phase 9 §3.1)

@@ -84,7 +84,7 @@
               <option value="{{ o.index }}"{% if o.index == preset %} selected{% endif %}>{{ o.label }}{% if o.active %} (playing){% endif %}</option>
             {% endfor %}
           </select></label>
-        <label>Name <input type="text" name="name" required maxlength="80" placeholder="Movies" autocomplete="off"></label>
+        <label>Name <input type="text" name="name" required maxlength="80" placeholder="e.g. Movies" autocomplete="off"></label>
         <label>Description <input type="text" name="description" maxlength="500" placeholder="optional" autocomplete="off"></label>
         <div class="row"><button type="submit">Save profile<span class="htmx-indicator spinner" aria-hidden="true"></span></button>
           <a class="btn-link btn-small" href="{{ root }}/tasks/profiles?do=save" data-task="profiles">Save with a check first&hellip;</a></div>

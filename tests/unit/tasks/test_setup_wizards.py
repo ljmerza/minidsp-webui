@@ -80,6 +80,16 @@ def test_an_output_that_clipped_gets_three_fixes():
     assert (results[2].status, results[2].text) == (NONE, "Out 3: no signal (it is muted).")
 
 
+def test_an_output_just_below_clip_is_close_not_ok():
+    # PR 17 persona re-run: −1.8 dBFS was marked ✓ OK next to a headroom warning.
+    s = run(walkthrough())
+    results = {r.index: r for r in output_results(s, [-1.8, -40.0, None, None], [0] * 4, TH, gain_min=-72.0)}
+    shakers = results[0]
+    assert shakers.status == CLOSE and shakers.word == "Close to CLIP"
+    assert shakers.text == "Shakers peaks at −1.8 dBFS: just below CLIP."
+    assert [f.id for f in shakers.fixes] == ["out", "route", "comp"]
+
+
 def test_unused_outputs_are_left_out_of_the_results():
     flags = {
         **NAMES,

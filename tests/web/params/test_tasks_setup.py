@@ -104,6 +104,7 @@ async def test_load_into_preset_2_needs_one_confirm_with_the_raise_checkbox_and_
     assert ctx.session.desired(1).outputs[0].gain_db == 0.0
     loaded = text(await _post(ctx, "profiles", step="5", op="apply", **base, **{box.group(1): box.group(2)}))
     assert "“Movies” is in preset 2 (waiting until you switch to it)." in loaded
+    assert "Waiting until preset 2 plays" not in loaded  # said once, not twice (PR 17 persona re-run)
     assert ctx.session.desired(1).outputs[0].gain_db == 12.0
     # The chosen preset is kept for the next load (P11), and Switch now is offered.
     assert 'name="target" value="2"' in loaded and "Load another profile into preset 2" in loaded

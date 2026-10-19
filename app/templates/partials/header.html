@@ -72,18 +72,18 @@
           {%- if staged %}{% set ns.waiting = ns.waiting + [(p, staged)] %}{% endif %}
           <button type="button" id="preset-{{ p + 1 }}" class="preset{% if active %} is-active{% endif %}{% if staged %} has-staged{% endif %}"
                   aria-pressed="{{ 'true' if active else 'false' }}"
-                  aria-label="Preset {{ p + 1 }}{% if active %} (playing){% endif %}{% if staged %}, {{ staged }} change{{ 's' if staged != 1 }} waiting{% endif %}"
+                  {%- set desc = "Playing" if active else (staged ~ " change" ~ ("s" if staged != 1 else "") ~ " waiting") if staged else "Not playing" %}
                   aria-keyshortcuts="{{ p + 1 }}"
                   data-preset-key="{{ p + 1 }}"
                   {%- if not controls_enabled or active %} disabled{% endif %}
                   hx-post="{{ base }}/preset" hx-vals='{"preset": {{ p }}}'
                   hx-confirm="Switch to preset {{ p + 1 }}? Audio may drop out for a few seconds while the device reloads.">
-            {{- p + 1 -}}
-            {%- if active %}<span class="preset-mark" aria-hidden="true">&#9654;</span>{% endif -%}
-            {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true">&#9208;</span>{% endif -%}
-            <span class="preset-desc" aria-hidden="true">
-              {%- if active %}Playing{% elif staged %}{{ staged }} waiting{% else %}Not playing{% endif -%}
-            </span>
+            {#- Named by its content, "Preset 2, not playing", which holds the phone sheet's visible line (WCAG 2.5.3
+                 Label in Name); on desktop that line is only for screen readers. -#}
+            <span class="visually-hidden">Preset </span>{{ p + 1 }}
+            {%- if active %}<span class="preset-mark" aria-hidden="true"> &#9654;</span>{% endif -%}
+            {%- if staged %}<span class="preset-mark is-waiting" aria-hidden="true"> &#9208;</span>{% endif -%}
+            <span class="preset-desc"><span class="visually-hidden">, </span>{{ desc }}</span>
           </button>
         {% endfor %}
         <p class="hdr-sheet-note">Switching asks first. Audio may drop out for a few seconds while the device reloads.</p>
@@ -160,8 +160,11 @@
       </div>
       {#- Re-render the header when sync status changes (on pages whose feed carries "sync", or after a sync action).
            Throttled while a bulk write runs, so "Sending n of N" counts, and once more after the writes stop. -#}
+      {#- Rendered while sending: once the feed is open, look again, in case the writes finished before it connected
+           (app.js, data-resync-on-open). -#}
       <span hidden hx-get="{{ root }}/ui/header?serial={{ serial }}"
-            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms"
+            hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms, mdsp-resync"
+            {%- if sv.state == "sending" %} data-resync-on-open{% endif %}
             hx-target="#app-header" hx-swap="innerHTML"></span>
     {% else %}
     <div class="hdr-sync">

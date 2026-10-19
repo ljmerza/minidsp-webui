@@ -276,9 +276,14 @@ async def device_page(request: Request, serial: int | None = None) -> HTMLRespon
     if serial is not None and session is None:
         return _not_found_page(request, serial)
     ctx = page_context(request, session, DEVICE_TOPICS)
-    ctx.update(
-        title="Device & sync", sync_preset=_shown_preset(request, session), **device_info_context(request, session)
-    )
+    shown = _shown_preset(request, session)
+    ctx.update(title="Device & sync", sync_preset=shown, **device_info_context(request, session))
+    if session is not None and shown is not None and getattr(session, "loaded", False):
+        # The status panel is part of the page, not loaded after it: loading it pushed everything below down by a
+        # third of the screen (PR 17 Lighthouse: layout shift 0.57), right where a phone user is about to tap.
+        from app.web.sync_ui import sync_panel_context  # local: sync_ui builds on modules that import this one
+
+        ctx["sync_panel"] = sync_panel_context(request, session, shown)
     return templates.TemplateResponse(request, "device.html", ctx)
 
 

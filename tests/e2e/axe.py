@@ -14,6 +14,9 @@ from playwright.sync_api import Page
 
 # WCAG 2.x A and AA, plus axe's best practices (e.g. one main landmark, headings in order).
 DEFAULT_TAGS = ("wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice")
+# axe rules tagged "experimental" that are off by default but check a WCAG A criterion: 2.5.3 Label in Name (a
+# control's accessible name contains its visible text, so speech input can name it; Lighthouse runs it).
+EXTRA_RULES = ("label-content-name-mismatch",)
 
 
 def axe_violations(
@@ -31,7 +34,11 @@ def axe_violations(
             context["include"] = [include] if isinstance(include, str) else list(include)
         if exclude:
             context["exclude"] = [exclude] if isinstance(exclude, str) else list(exclude)
-    options = {"resultTypes": ["violations"], "runOnly": {"type": "tag", "values": list(tags)}}
+    options = {
+        "resultTypes": ["violations"],
+        "runOnly": {"type": "tag", "values": list(tags)},
+        "rules": {rule: {"enabled": True} for rule in EXTRA_RULES},
+    }
     if not page.evaluate("() => typeof window.axe === 'object'"):
         page.evaluate(AXE_SCRIPT)
     results = page.evaluate("([context, options]) => axe.run(context || document, options)", [context, options])

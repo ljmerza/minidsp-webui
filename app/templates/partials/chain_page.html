@@ -33,7 +33,8 @@
         </div>
 
         <div id="chain-live" class="chain-live" hx-get="{{ tab_link(tab) }}" hx-select="#chain-live" hx-target="this"
-             hx-swap="outerHTML" hx-trigger="sse:desired delay:400ms, sse:sync delay:400ms, sse:verify delay:400ms">
+             hx-swap="outerHTML" hx-trigger="sse:desired delay:400ms, sse:sync delay:400ms, sse:verify delay:400ms, mdsp-resync"
+             {%- if o and o.sync.worst == "pending" %} data-resync-on-open{% endif %}>
           {% if o %}
             <p class="chain-summary">
               <span class="health-badge health-{{ o.badge }}" data-health-badge="{{ o.badge }}">

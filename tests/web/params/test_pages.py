@@ -210,7 +210,11 @@ async def test_header_sync_summary_and_staged_dots(ctx):
     await ctx.session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})
     html = (await ctx.http.get("/routing")).text
     button = _tag(html, 'id="preset-2"')
-    assert "has-staged" in button and "1 change waiting" in button and "title=" not in button
+    assert "has-staged" in button and "title=" not in button
+    # Named by its content ("Preset 2, 1 change waiting"), which holds the phone sheet's visible line (WCAG 2.5.3).
+    body = html.split('id="preset-2"', 1)[1].split("</button>", 1)[0]
+    assert '<span class="visually-hidden">Preset </span>2' in body
+    assert '<span class="preset-desc"><span class="visually-hidden">, </span>1 change waiting</span>' in body
     assert "has-staged" not in _tag(html, 'id="preset-1"')
     assert re.search(r'aria-label="Preset 2, 1 change\(s\) waiting"', html)
     assert "Preset 2: 1 waiting" in html

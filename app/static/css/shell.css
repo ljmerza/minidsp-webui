@@ -15,7 +15,12 @@
 .hdr-sheet { position: relative; display: flex; align-items: center; }
 .hdr-sheet-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; }
 .hdr-preset-toggle, .vol-open { display: none; }
-.preset-desc, .hdr-sheet-note { display: none; }
+.hdr-sheet-note { display: none; }
+/* Desktop: the preset button's line ("Not playing") is for screen readers only; the phone sheet shows it. */
+.preset-desc {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 .st-short { display: none; }
 
 /* Mute all keeps one width whether muted or not (P20). */
@@ -66,7 +71,7 @@
 .hdr-clip-led {
   font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--text-muted); white-space: nowrap;
 }
-.hdr-clip-led.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #fff; }
+.hdr-clip-led.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #000; }
 .hdr-clip-pop { left: auto; right: 0; }
 
 /* --- the amber band: editing a preset that isn't playing (design §3.5) ------------------------------------------- */
@@ -159,7 +164,10 @@
   .hdr-presets .preset {
     display: flex; flex-wrap: wrap; align-items: baseline; min-height: 3.5rem; padding: 0.4rem 0.7rem; text-align: left;
   }
-  .hdr-presets .preset-desc { display: block; flex-basis: 100%; font-size: 0.8rem; font-weight: normal; }
+  .hdr-presets .preset-desc {
+    position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal;
+    display: block; flex-basis: 100%; font-size: 0.8rem; font-weight: normal;
+  }
   .hdr-presets .hdr-sheet-note { display: block; grid-column: 1 / -1; margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 
   .hdr-source { min-width: 0; margin-right: auto; }

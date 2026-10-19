@@ -141,7 +141,7 @@ def test_every_block_opens_the_right_tab(desktop: Page):
         expect(block).to_have_attribute("data-block", key)
         expect(block).to_contain_text(label)
         expect(block).to_have_attribute("href", href)
-    expect(blocks.nth(1)).to_have_accessible_name("Band, 20 to 80 hertz, on. Open band settings.")
+    expect(blocks.nth(1)).to_have_accessible_name("Band 20–80 Hz, on. Open band settings.")
     expect(blocks.nth(4)).to_have_class(re.compile(r"\bis-default\b"))
     expect(blocks.nth(0)).to_have_class(re.compile(r"\bis-caution\b"))
 

@@ -1,84 +1,31 @@
 # minidsp-webui
 
-minidsp-webui is a self-hosted web UI for miniDSP devices (built around the **2x4 HD**) that runs on top of
-[minidsp-rs](https://github.com/mrene/minidsp-rs)'s `minidspd` daemon on Linux, for example on a Raspberry Pi. The
-Docker image bundles `minidspd` and talks to the miniDSP over USB itself, so one container is all you need.
-It gives you live meters, every per-channel DSP setting and draggable PEQ/crossover response graphs in the browser, plus
-Home Assistant entities over MQTT discovery, so you don't need the Windows plugin app.
+minidsp-webui is a self-hosted web UI for the miniDSP 2x4 HD that runs in one Docker container on Linux (a Raspberry Pi
+is plenty) and talks to the device over USB through a bundled [minidsp-rs](https://github.com/mrene/minidsp-rs) daemon.
+It explains in plain words what every output is doing and walks you through fixing problems, while still giving you
+every DSP setting, live meters and response graphs, with no Windows plugin app needed.
 
-<p align="center"><img src=".github/assets/dashboard.png" alt="minidsp-webui dashboard" width="900"></p>
+<p align="center"><img src=".github/assets/dashboard.png" alt="minidsp-webui home screen" width="900"></p>
 
 ## Features
 
-### Master controls and meters
-- **Persistent header** on every page: master volume (slider, ±0.5 dB steps, numeric entry), mute, input source and
-  preset 1–4.
-- **Live level meters** for every input and output, with 1.5 s peak hold and a latching clip light at −1 dBFS.
-- **Changes made elsewhere show up** within a couple of seconds: IR remote, front panel, the `minidsp` CLI, Home Assistant.
+### New: guidance and problem-solving
+- **A home screen that explains itself.** A health line says what's wrong in plain words ("Sub is silent: no input is
+  routed to it") with a one-tap fix, and every output card says what it does ("Plays 20–80 Hz, fed by Receiver In,
+  waits 9 ms").
+- **Guided tasks:** Something wrong?, Make one louder, Fix a boom, Line up shakers, Set levels, Save or load a setup,
+  and Set up this device. Each one previews the change, sends nothing until you press Apply, and offers Undo.
+- **Signal-flow diagram** from inputs to outputs, with live levels and problems drawn where they are.
+- **"?" help on every term** (PEQ, crossover, dBFS, routing…) plus a glossary page.
 
-### Routing and channels
-- **Routing matrix:** enable each input → output path, with a gain per path.
-- **Per channel:** gain, mute and polarity. Output delay comes with a distance helper (metres/feet → ms at 343 m/s) and
-  shows the delay in samples.
-- **Channel names and colours** ("Shakers", "Sub") are used everywhere, including Home Assistant.
-
-### Filters and graphs
-- **10-band PEQ per input and output:** peaking, shelves, low/high-pass, band-pass, notch, all-pass, Linkwitz Transform
-  or raw biquads. Edit them in a table or by dragging handles on the response graph (drag for frequency and gain, scroll
-  for Q).
-- **Crossovers:** two groups of four biquads per output, designed as Butterworth, Linkwitz-Riley or Bessel up to
-  48 dB/oct. A "biquads used" indicator and a raw coefficient table are included.
-- **Response graphs:** magnitude, phase and group delay for each filter, each channel's full chain, and a **system view**
-  that sums several outputs electrically (delay and polarity included) to show where they add or cancel.
-- Responses are computed with the device's float32 coefficients, with a warning when rounding moves the curve.
-
-### Compressor and FIR
-- **Compressor per output:** threshold, ratio, attack and release, with a transfer-curve graph and presets such as
-  "Tactile limiter".
-- **FIR loading from a 96 kHz WAV**, with impulse and response preview. It's experimental on the 2x4 HD and hidden
-  until you enable it.
-
-### Import and export
-- **`minidsp` CLI scripts** (`minidsp -f` format), **REW** biquad files for PEQ banks and crossovers, and a full
-  **JSON backup** of the whole setup.
-- **Nightly SQLite backups**, keeping the newest 14, restorable from Settings.
-
-### Profiles and history
-- **Named profiles:** save the current preset, load a profile into any preset slot, and diff any two configurations.
-- **Revision history per preset** with one-click revert.
-
-### Sync, adopt and verify
-- **The app keeps the configuration**, because the miniDSP can't report most DSP settings back. Every setting shows
-  whether it is synced, pending, failed or unknown.
-- **Staged edits:** changes to an inactive preset are written when that preset becomes active.
-- **Adopt an existing setup:** trust what's on the device, push a known config, or import a CLI script. Known filter
-  coefficients are recognised and shown as "LR4 LP 80 Hz" rather than raw numbers. Trusting the plain defaults (no
-  script) needs an explicit "my device really is at factory defaults" confirmation (`confirm_defaults` in the API).
-- **Verify device:** reads the active preset's readable settings back from DSP memory and flags anything that changed
-  behind the app's back. It never writes; drifted settings can be marked unknown and pushed from the sync table, or
-  their device values accepted as the desired ones. It can also run nightly (`VERIFY_NIGHTLY`). The result is `ok`
-  only when settings were confirmed and none differ; `mismatch` means never-confirmed settings (for example after a
-  power cycle) differ from the desired config, and `unverified` that nothing could be confirmed. The same readback
-  re-confirms the active preset after a reconnect, and seeds the readable settings of an adopt with "trust".
-- **Event log** of user actions, apply results, reconnects and every master change, with who made it
-  (`ui`, `ha`, `api`, `external`).
-
-### Home Assistant (MQTT discovery)
-- Master volume, mute, source and preset; per-output gain, mute and delay; a profile select; a push-all button; and
-  connectivity, sync, config drift (from Verify device) and (optional) level sensors.
-- Entities appear automatically under one "miniDSP" device. The app publishes availability, so they go unavailable when
-  the app stops.
-
-### Safety and footprint
-- **Gain limits:** global gain limits plus a ceiling per channel. Raising a level by more than a set step asks for
-  confirmation.
-- **Big master-volume drops** in the UI ask for confirmation too.
-- **Filter writes are guarded:** unstable biquads are refused, a PEQ band is never un-bypassed before its coefficients
-  are on the device, and bulk applies mute the affected outputs while they run.
-- **SD-card friendly:** debounced SQLite writes, no disk writes while idle, and logs to stdout only. It runs in about
-  80–90 MB of RAM on a Raspberry Pi 3.
-- **Works offline and on phones:** every JavaScript/CSS library is vendored, and there is no JavaScript build step.
-- **Several devices:** everything is keyed by device serial, and a switcher appears when more than one device is found.
+### Everything else
+- Every DSP setting per channel: routing matrix, gain, mute, delay, polarity, 10-band PEQ, crossovers
+  (Butterworth / Linkwitz-Riley / Bessel) with response graphs, and a compressor.
+- Live level meters with clip lights; master volume, mute, source and presets.
+- Keeps the app and device in sync, checks them against a readback, and adopts an existing setup.
+- Profiles and history with undo; import/export of REW filters, `minidsp` CLI scripts and JSON backups.
+- Home Assistant entities through MQTT discovery.
+- One container with USB passthrough, easy on SD cards, and usable on a phone.
 
 Works with minidspd 0.1.12, the current minidsp-rs release.
 
@@ -224,7 +171,7 @@ the check off, for example behind a reverse proxy that already only forwards its
 - The bundled daemon shows up as `daemon_mode` (`embedded` or `external`), `daemon_process` (`running`, `restarting`,
   `failed`, `starting`, `stopped`, or `external` in external mode), `daemon_restarts`, `daemon_pid` and
   `daemon_last_exit`. USB is reported as `usb_device_visible`, `usb_access` (`ok`, `denied`, `not_mounted`, `absent`
-  or `unknown`) and a readable `usb_detail`. The Device page shows the same.
+  or `unknown`) and a readable `usb_detail`. The Device & sync page shows the same.
 - If `minidspd` exits, the app restarts it after 1 s, backing off to 30 s while it keeps failing. Five restarts within
   five minutes log an error and turn `daemon_process` to `failed` until a run lasts.
 - `daemon_process_error` is the current problem: why the daemon isn't running, or, while it runs, a failed HTTP

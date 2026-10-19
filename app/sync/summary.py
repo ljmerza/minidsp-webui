@@ -646,11 +646,12 @@ class _Ctx:
                 )
             )
         if n := self.changed_by.get((kind, index)):
+            them = "it" if n == 1 else "them"
             found.append(
                 Problem(
                     "changed_on_device",
                     CAUTION,
-                    f"{_plural(n, 'setting')} on {name} changed on the device since the app sent them.",
+                    f"{_plural(n, 'setting')} on {name} changed on the device since the app sent {them}.",
                     kind,
                     index,
                     (
@@ -1085,7 +1086,8 @@ def _output_summary(ctx: _Ctx, doc: ConfigDoc, n: int) -> OutputSummary:
     if master_mute:
         silencing.append(_master_problem())
     own_issues = [p for p in mine if p.level in (PROBLEM, CAUTION) and not p.silences and p.code != "clip"]
-    not_sent = sum(1 for values in blocks.values() for s in values if s in ("unknown", "failed"))
+    failed = sum(1 for values in blocks.values() for s in values if s == "failed")
+    unknown = sum(1 for values in blocks.values() for s in values if s == "unknown")
     reason: str | None = None
     if out.mute and unused:
         badge = "not_in_use"
@@ -1099,8 +1101,13 @@ def _output_summary(ctx: _Ctx, doc: ConfigDoc, n: int) -> OutputSummary:
         badge = "muted"
     elif own_issues:
         badge, reason = "check", own_issues[0].text
-    elif not_sent:
-        badge, reason = "check", f"{_plural(not_sent, 'setting')} on {name} not sent yet."
+    elif failed:
+        badge, reason = "check", f"{_plural(failed, 'setting')} on {name} didn't reach the device."
+    elif unknown:
+        # Same words as the status model (Unknown): not "not sent yet", which reads as if the app forgot to send.
+        verb, it = ("is", "it") if unknown == 1 else ("are", "them")
+        reason = f"{_plural(unknown, 'setting')} on {name} {verb} unknown: the app hasn't sent or read {it} yet."
+        badge = "check"
     else:
         badge = "ready"
     glyph, word = BADGES[badge]
