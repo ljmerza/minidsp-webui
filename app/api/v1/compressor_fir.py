@@ -41,12 +41,12 @@ Session = Annotated[DeviceSession, Depends(get_session)]
 COMPRESSOR_FIELDS = tuple(COMPRESSOR_RANGES)
 COMPRESSOR_PRESETS: dict[str, dict[str, Any]] = {
     "tactile_limiter": {
-        "label": "Tactile limiter",
+        "label": "Shaker protection",
         "values": {"threshold_db": -36.0, "ratio": 50.0, "attack_ms": 15.0, "release_ms": 30.0},
         "note": "From the minidsp-rs docs example: a near-limiter for shaker amps",
     },
     "beq_safety": {
-        "label": "BEQ safety",
+        "label": "Safety limit",
         "values": {"threshold_db": 0.0, "ratio": 50.0, "attack_ms": 15.0, "release_ms": 30.0},
         "note": "Limits only at full scale: a guard against bass-EQ boosts clipping",
     },

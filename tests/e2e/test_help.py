@@ -145,7 +145,8 @@ def test_pages_with_toggletips_open_have_no_accessibility_violations(screen: Pag
 def test_terms_have_toggletips_on_the_editing_pages(screen: Page, shoot):
     """A sweep over the pages this PR touched: each shows its "?"s (screenshots for the PR when enabled)."""
     for path, name, terms in [
-        ("/outputs/1", "output-delay", ["Output level", "Polarity", "Samples", "Delay"]),
+        ("/outputs/1", "output-level", ["Output level", "Polarity", "Mute"]),
+        ("/outputs/1?tab=delay", "output-delay", ["Samples", "Delay", "Line up with…"]),
         ("/outputs/1?tab=crossover", "output-band", ["Band (crossover)", "Templates", "Steepness"]),
         ("/outputs/1?tab=peq", "output-eq", ["EQ", "Filter type", "Width (Q)", "Cut / Boost"]),
         ("/outputs/1?tab=compressor", "output-compressor", ["Compressor (limiter)", "dBFS"]),

@@ -187,10 +187,19 @@
   // The view a graph opens in when none was remembered for it: Settings' default range, else the page's own.
   const pageView = (fallback) => (mdsp().graph ? mdsp().graph.defaultView(fallback) : fallback);
 
+  // Where an output's graph opens (phase 9 design §8.2): the view last chosen on this channel (cfg.viewKey), else
+  // 5–300 Hz on a bass or Shakers (tactile) output (cfg.bass), else the editor kind's last choice, else the page's.
+  function startView(key, cfg, fallback) {
+    const own = cfg && cfg.viewKey ? remember(cfg.viewKey) : null;
+    if (own) return own;
+    if (cfg && cfg.bass) return 'sub';
+    return remember(key) || pageView(fallback);
+  }
+
   const helpers = {
     ICON, RANK, BAND_COLORS, request, send, errorText, parseEvent, worst, applySync, remember, biquadFromForm,
-    stability, fullPrecision, createPlot, pageView, pointerData, roundFreq, roundQ, roundGain, clamp, parseSigned,
-    fieldText,
+    stability, fullPrecision, createPlot, pageView, startView, pointerData, roundFreq, roundQ, roundGain, clamp,
+    parseSigned, fieldText,
   };
   window.mdsp = Object.assign(window.mdsp || {}, { filters: helpers });
 
@@ -260,7 +269,7 @@
       selected: null,
       drawer: null,
       raw: { b0: '', b1: '', b2: '', a1: '', a2: '' },
-      view: remember(`peq.view.${cfg.side}`) || pageView(cfg.view || 'full'),
+      view: startView(`peq.view.${cfg.side}`, cfg, cfg.view || 'full'),
       prefix: `${cfg.side}.${cfg.channel}.peq`,
 
       init() {
@@ -446,6 +455,7 @@
       setView(view) {
         this.view = view;
         remember(`peq.view.${cfg.side}`, view);
+        if (cfg.viewKey) remember(cfg.viewKey, view);
         if (ctl.plot) ctl.plot.setView(view);
         this.render();
       },
@@ -821,7 +831,9 @@
 
     return {
       title: cfg.title || '',
-      view: stored('view', pageView(cfg.view || 'full')),
+      view: cfg.viewKey
+        ? startView(`${cfg.key}.view`, cfg, cfg.view || 'full')
+        : stored('view', pageView(cfg.view || 'full')),
       mode: stored('mode', 'magnitude'),
       unwrap: stored('unwrap', 'false') === 'true',
       parts: stored('parts', 'false') === 'true',
@@ -911,6 +923,7 @@
       setView(view) {
         this.view = view;
         remember(`${cfg.key}.view`, view);
+        if (cfg.viewKey) remember(cfg.viewKey, view);
         if (ctl.plot) ctl.plot.setView(view);
         this.load();
       },

@@ -1,9 +1,11 @@
 {#- Output page, Response tab (docs 05 §4): this output's full chain, computed by the server (stored FIR taps
-    included), with magnitude / phase / group-delay modes and optional per-stage contributions. -#}
+    included), with magnitude / phase / group-delay modes and optional per-stage contributions. Opens at 5–300 Hz on
+    bass and Shakers (tactile) outputs (phase 9 design §8.2). Its scripts load once with the page (output.html). -#}
 {% import "components/peq_editor.html" as fx with context %}
 {%- set cfg = {
   "url": root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/response",
-  "key": "response", "view": "full", "preset": preset, "inputs": true, "refresh": ["desired"]
+  "key": "response", "view": "sub" if bass else "full", "preset": preset, "inputs": true, "refresh": ["desired"],
+  "bass": bass, "viewKey": "response.view.outputs." ~ channel.index
 } -%}
 <div class="response-view" x-data='responseView({{ cfg|tojson }})' hx-trigger="sse:desired">
   <div class="card-head">
@@ -31,4 +33,3 @@
   <p class="hint">Calculated response of the whole chain: routing and input EQ, output EQ, band filters, FIR, polarity,
     delay and level. Speakers, shakers, amplifiers and the room are not included. Contributions are drawn dashed.</p>
 </div>
-{{ fx.assets() }}

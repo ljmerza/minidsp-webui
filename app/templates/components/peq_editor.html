@@ -67,11 +67,13 @@
   </optgroup>
 {%- endmacro %}
 
-{% macro editor(side, index, color, name, view="full") -%}
+{% macro editor(side, index, color, name, view="full", bass=false) -%}
 {%- set base = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/" ~ side ~ "/" ~ index ~ "/peq" -%}
+{#- bass: the graph opens at 5–300 Hz unless this channel's own view was chosen before (phase 9 design §8.2). -#}
 {%- set cfg = {
   "side": side, "channel": index, "preset": preset, "color": color, "name": name, "view": view,
-  "fs": session.profile.sample_rate, "stateUrl": base, "bandUrl": base ~ "/{band}", "bankUrl": base
+  "fs": session.profile.sample_rate, "stateUrl": base, "bandUrl": base ~ "/{band}", "bankUrl": base,
+  "bass": bass, "viewKey": "peq.view." ~ side ~ "." ~ index
 } -%}
 <div class="peq-editor" data-peq-editor="{{ side }}.{{ index }}" x-data='peqEditor({{ cfg|tojson }})'
      hx-trigger="sse:sync, sse:desired">
@@ -85,8 +87,14 @@
     for measured setups.</p>
   <p class="field-error" x-show="error" x-text="error" x-cloak></p>
 
-  <div class="table-scroll">
-    <table class="data-table peq-table">
+  {#- On a phone the table turns into one card per band and unused bands fold away (phase 9 design §8.3). -#}
+  <div class="table-scroll" x-data="{ showAll: false }">
+    <p class="peq-unused-toggle" x-show="bands.some((b) => isOff(b))" x-cloak>
+      <span x-text="`${bands.filter((b) => isOff(b)).length} of ${bands.length} bands not in use`"></span>
+      <button type="button" class="btn-small" @click="showAll = !showAll" :aria-expanded="showAll.toString()"
+              x-text="showAll ? 'Hide unused' : 'Show all ▸'"></button>
+    </p>
+    <table class="data-table peq-table" :class="{ 'is-showing-all': showAll }">
       <caption class="visually-hidden">{{ name }} EQ bands</caption>
       <thead>
         <tr>
@@ -97,14 +105,15 @@
         </tr>
       </thead>
       <template x-for="band in bands" :key="band.index">
-        <tbody :class="{ 'is-selected': selected === band.index, 'is-bypassed': !isActive(band), 'is-external': band.external }">
+        <tbody :class="{ 'is-selected': selected === band.index, 'is-bypassed': !isActive(band), 'is-external': band.external,
+                         'is-unused': isOff(band) }">
           <tr @click="select(band.index)" :class="{ 'is-invalid': band.invalid }">
             <th scope="row">
               <span class="band-swatch" :style="`background: ${color(band.index)}`" aria-hidden="true"></span>
               <span x-text="band.index + 1"></span>
               <span x-show="band.external" class="lock" role="img" aria-label="Managed by another tool (read-only)">&#128274;</span>
             </th>
-            <td>
+            <td data-label="On">
               {#- The label is the 44 px touch target around the checkbox (phase 9 design §16). -#}
               <label class="band-on-hit">
                 <input type="checkbox" class="band-on" :checked="!band.bypass" @change="setEnabled(band, $event.target.checked)"
@@ -112,14 +121,14 @@
                        :aria-label="`Band ${band.index + 1} on`">
               </label>
             </td>
-            <td>
+            <td data-label="Type">
               <select x-model="band.form.type" @change="onTypeChange(band)" :disabled="band.external"
                       :aria-label="`Band ${band.index + 1} type`">{{ type_options() }}</select>
             </td>
-            <td><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
+            <td data-label="Hz"><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
                        x-model.number="band.form.freq" @input="onFieldInput(band)" @change="commitForm(band)"
                        :disabled="band.external || !uses(band, 'freq')" :aria-label="`Band ${band.index + 1} frequency in Hz`"></td>
-            <td><input type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
+            <td data-label="Width Q"><input type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
                        x-model.number="band.form.q" @input="onFieldInput(band)" @change="commitForm(band)"
                        :disabled="band.external || !uses(band, 'q')" :aria-label="`Band ${band.index + 1} Q`"></td>
             <td>
@@ -134,7 +143,7 @@
               </div>
             </td>
             {#- Text, not type=number: a number field reports a lone "-" as empty and Alpine wiped it, so "-4" became +4. -#}
-            <td><input type="text" class="num mag" inputmode="decimal" autocomplete="off" spellcheck="false"
+            <td data-label="dB"><input type="text" class="num mag" inputmode="decimal" autocomplete="off" spellcheck="false"
                        x-model="band.form.mag" @input="onGainInput(band)" @change="commitGain(band)"
                        :disabled="band.external || !uses(band, 'gain')"
                        :aria-label="`Band ${band.index + 1}: dB to ${band.form.cut ? 'cut' : 'boost'}`"></td>

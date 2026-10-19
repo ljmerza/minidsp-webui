@@ -4,9 +4,7 @@
   "channel": channel.index, "preset": preset,
   "url": root ~ "/api/v1/devices/" ~ serial ~ "/presets/" ~ preset ~ "/outputs/" ~ channel.index ~ "/fir"
 } -%}
-<link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
-<script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
-<script src="{{ root }}/static/js/fir.js?v={{ asset_version }}"></script>
+{#- uPlot and fir.js load once with the page (output.html), so the tab can be swapped in place (phase 9 design §8). -#}
 
 <div class="fir" x-data='firEditor({{ cfg|tojson }})' hx-trigger="sse:sync, sse:desired">
   <div class="card-head">

@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% import "partials/params_macros.html" as m %}
 
+{% block head %}
+{#- Every editor's assets load once here (phase 9 design §8): the chain tabs swap in place, so a tab's partial must not
+    bring its own scripts. -#}
+<link rel="stylesheet" href="{{ root }}/static/vendor/uplot/uPlot.min.css?v={{ asset_version }}">
+<link rel="stylesheet" href="{{ root }}/static/css/home.css?v={{ asset_version }}">
+<link rel="stylesheet" href="{{ root }}/static/css/chain.css?v={{ asset_version }}">
+{% endblock %}
+
 {% block content %}
 {% if session is none or state_error or page_error %}
   <h1>Output</h1>
@@ -9,35 +17,30 @@
 <h1><span class="chan-dot" style="--chan: {{ channel.color }}" aria-hidden="true"></span>{{ channel.name }}
   <span class="muted">output {{ channel.index + 1 }}</span></h1>
 {% include "partials/adopt_banner.html" %}
+{#- hx-history="false": htmx keeps no snapshot of this page (Alpine-rendered markup must not be restored); Back
+    re-opens the previous tab through static/js/chain.js instead. -#}
 <div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
-     data-sample-rate="{{ sample_rate }}" hx-trigger="sse:sync, sse:desired, sse:verify">
+     data-sample-rate="{{ sample_rate }}" hx-trigger="sse:sync, sse:desired, sse:verify" hx-history="false">
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
-  {% include "partials/channel_strip.html" %}
-
-  <nav class="tabs" aria-label="{{ channel.name }} sections">
-    {% for t in output_tabs %}
-      {% if t.enabled %}
-        <a class="tab{% if t.key == tab %} is-current{% endif %}" href="{{ tab_link(t.key) }}"
-           {%- if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
-      {% else %}
-        <span class="tab is-disabled">{{ t.label }} <span class="muted">(not available)</span></span>
-      {% endif %}
-    {% endfor %}
-  </nav>
-
-  {%- set current_tab = output_tabs|selectattr("key", "equalto", tab)|first if tab else none %}
-  <section class="card tab-panel" aria-label="{{ current_tab.label if current_tab else 'Sections' }}">
-    {% if tab_template %}
-      {% include tab_template %}
-    {% else %}
-      <p class="muted">No sections available yet.</p>
-    {% endif %}
-  </section>
+  {% include "partials/chain_page.html" %}
 </div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ root }}/static/js/params.js?v={{ asset_version }}"></script>
+{% if session is not none and not state_error and not page_error %}
+<script src="{{ root }}/static/vendor/uplot/uPlot.iife.min.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/dsp.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/graph.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/peq_editor.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/crossover.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/compressor.js?v={{ asset_version }}"></script>
+{%- if session.profile.fir_supported %}
+<script src="{{ root }}/static/js/fir.js?v={{ asset_version }}"></script>
+{%- endif %}
+<script src="{{ root }}/static/js/meters.js?v={{ asset_version }}"></script>
+<script src="{{ root }}/static/js/chain.js?v={{ asset_version }}"></script>
+{% endif %}
 {% endblock %}

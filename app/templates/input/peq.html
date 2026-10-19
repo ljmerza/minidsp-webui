@@ -1,0 +1,6 @@
+{#- Input page, EQ tab (phase 9 design §9): the same EQ component as the outputs'. -#}
+{% import "components/peq_editor.html" as fx with context %}
+<h2 id="peq-title">EQ <span class="muted">{{ session.profile.peq_per_input }} bands</span>{{ help("eq") }}</h2>
+{{ fx.editor("inputs", channel.index, channel.color, channel.name, view="full") }}
+<p class="hint">The graph is this input's EQ only; its level and mute are not included. Every output this input is routed
+  to hears it.</p>

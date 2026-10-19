@@ -145,13 +145,15 @@ def test_every_block_opens_the_right_tab(desktop: Page):
     expect(blocks.nth(4)).to_have_class(re.compile(r"\bis-default\b"))
     expect(blocks.nth(0)).to_have_class(re.compile(r"\bis-caution\b"))
 
+    # The output page's chain (phase 9 design §8): the block's tab is the current chip, its editor below.
     tabs = {"band": "Band (crossover)", "eq": "EQ", "delay": "Delay", "compressor": "Compressor (limiter)"}
     for key, tab in tabs.items():
         visit(desktop, "/")
         row(desktop, "Shakers").locator(f'[data-block="{key}"]').click()
         desktop.wait_for_url(re.compile(r"/outputs/1\?tab="))
         settle(desktop)
-        expect(desktop.locator(".tabs .tab.is-current")).to_have_text(tab)
+        expect(desktop.locator(".chain-chip.is-current")).to_have_count(1)
+        expect(desktop.locator("#tab-panel h2").first).to_contain_text(tab)
     visit(desktop, "/")
     row(desktop, "Shakers").locator('[data-block="polarity"]').click()
     desktop.wait_for_url(re.compile(r"/outputs/1#invert-0$"))
