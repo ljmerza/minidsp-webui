@@ -229,6 +229,14 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     ctx["sse_url"] = url(request, "/api/v1/events", topics=",".join((*EDIT_TOPICS, "levels")), serial=session.serial)
     status = session.status
     ctx["initial_output_levels"] = list(status.output_levels) if status else []
+    # The row heads' input meters (static/js/meters.js) on the same stream show which inputs carry signal.
+    settings = getattr(session, "settings", None) or request.app.state.settings
+    ctx["input_meters"] = {
+        "inputs": ctx["input_names"],
+        "outputs": [],
+        "initial": {"i": list(status.input_levels) if status else []},
+        "floor": float(getattr(settings, "guidance_no_signal_dbfs", -90.0)),
+    }
     ctx.update(_routing_summary(request, session, p))
     return render(request, "routing.html", ctx)
 

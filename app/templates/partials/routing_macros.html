@@ -38,3 +38,22 @@
     {%- endfor %}
   </ul>
 {%- endmacro -%}
+
+{#- An input's live meter (design §10.1 drawing, §5.3): bar, peak-hold tick, the reading ("no signal" below the Settings
+    floor) and its CLIP light, bound to the page's levelMeters component (static/js/meters.js). Not a live region.
+    compact: a phone card's copy, whose CLIP light only shows once it has latched. -#}
+{%- macro input_meter(key, name, compact=false) -%}
+  <span class="rg-meter" role="meter" aria-label="{{ name }} level" aria-valuemin="-120" aria-valuemax="0"
+        aria-valuenow="-120" :aria-valuenow="meterNow('{{ key }}')" :aria-valuetext="namedReading('{{ key }}')">
+    <span class="rg-meter-track" aria-hidden="true">
+      <span class="rg-meter-bar" :style="hbarStyle('{{ key }}')"></span>
+      <span class="rg-meter-peak" style="display: none" :style="hpeakStyle('{{ key }}')"></span>
+    </span>
+    <span class="rg-meter-value" aria-hidden="true" x-text="signalText('{{ key }}')">&mdash;</span>
+  </span>
+  <button type="button" class="rg-clip" :class="{ 'is-on': clip.{{ key }} }" @click="resetClip('{{ key }}')"
+          {%- if compact %} x-show="clip.{{ key }}" x-cloak{% endif %}
+          aria-label="{{ name }} CLIP light" :aria-label="clipLabel('{{ key }}')">
+    <span aria-hidden="true">CLIP <span x-text="clip.{{ key }} ? '●' : '○'">&#9675;</span></span>
+  </button>
+{%- endmacro -%}

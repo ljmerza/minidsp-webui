@@ -1,6 +1,7 @@
 """The Routing page's summary parts (phase 9 design §10.1 / §10.2, P21): column badges, the Total row, the input notes
 and the rule text, all from the summary engine, plus the out-of-band refresh endpoint."""
 
+import json
 import re
 
 from app.sync.session import AdoptMode
@@ -105,3 +106,25 @@ def test_rule_text_names_each_limit_when_they_differ():
     mixed = rule_text([12.0, 6.0], ["Shakers", "Sub"])
     assert "(Shakers +12 dB and Sub +6 dB)" in mixed
     assert rule_text([], []) == ""
+
+
+async def test_row_heads_carry_input_meters_on_the_levels_stream(ctx):
+    """Design §10.1 drawing: each input's live meter in its row head (and in the phone cards' input headers), bound to
+    a levelMeters component on the page's existing levels stream, with the Settings no-signal floor."""
+    await _walkthrough(ctx)
+    ctx.settings.guidance_no_signal_dbfs = -80.0
+    html = (await ctx.http.get("/routing")).text
+    assert "/static/js/meters.js" in html
+    match = re.search(r"x-data='levelMeters\((\{.*?\})\)'", html)
+    assert match, "no levelMeters component"
+    cfg = json.loads(match.group(1))
+    assert cfg["inputs"] == ["In 1", "In 2"] and cfg["outputs"] == [] and cfg["floor"] == -80.0
+    assert "levels" in re.search(r'sse-connect="([^"]+)"', html).group(1)  # the stream the routing guard already uses
+    grid = html.split('class="route-grid"', 1)[1].split('id="route-notes"', 1)[0]
+    for key, name in (("i0", "In 1"), ("i1", "In 2")):
+        # one in the row head and one in each of the four output cards, named for screen readers
+        assert len(re.findall(rf":aria-valuetext=\"namedReading\((?:'|&#39;){key}(?:'|&#39;)\)\"", grid)) == 1 + 4
+        assert grid.count(f'aria-label="{name} level"') == 1 + 4
+    heads = re.findall(r'<span class="rg-in" .*?</button>', grid, re.S)
+    assert len(heads) == 2 and all('role="meter"' in h and "rg-clip" in h for h in heads)
+    assert "aria-live" not in grid  # meters are never live regions

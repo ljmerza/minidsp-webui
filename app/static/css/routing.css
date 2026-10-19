@@ -13,6 +13,7 @@
 .rg-in, .route-grid .route-cell, .rg-total, .rg-total-label { grid-row: var(--row); }
 
 .rg-in, .rg-total-label { display: flex; align-items: center; gap: 0.1rem; padding: 0 0.4rem; font-weight: 600; white-space: nowrap; }
+.rg-in { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.2rem; }
 .rg-total-label { align-items: flex-start; padding-top: 0.45rem; }
 .rg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; padding: 0.25rem 0.4rem; }
 .rg-head h3 { margin: 0; font-size: 0.95rem; white-space: nowrap; }
@@ -42,6 +43,30 @@
 .rg-total-headroom { font-size: 0.85rem; color: var(--warn); }
 .rg-total-headroom.headroom-problem { color: var(--bad); }
 
+/* Each input's live meter (design §10.1 drawing): the row head on a wide screen, under the input's name in each phone
+   card. The bar uses the dashboard's colour zones; a white tick holds the peak. */
+.rg-in-meter, .rg-cell-meter { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 400; }
+.rg-cell-meter { display: none; }
+.rg-meter { display: inline-flex; align-items: center; gap: 0.35rem; }
+.rg-meter-track {
+  position: relative; width: 4.5rem; height: 0.55rem; background: #0a0c0f;
+  border: 1px solid var(--border); border-radius: 3px; overflow: hidden;
+}
+.rg-meter-bar {
+  position: absolute; inset: 0; clip-path: inset(0 100% 0 0);
+  background: linear-gradient(to right, var(--meter-green) 0%, var(--meter-green) 77.5%, var(--meter-yellow) 77.5%,
+    var(--meter-yellow) 94.4%, var(--meter-red) 94.4%);
+  transition: clip-path 0.12s linear;
+}
+.rg-meter-peak { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; }
+.rg-meter-value { font-size: 0.75rem; color: var(--text-muted); min-width: 4.6rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .rg-meter-bar { transition: none; } }
+.rg-clip {
+  min-height: 1.6rem; padding: 0 0.4rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--text-muted); background: var(--bg-input); border-color: var(--border);
+}
+.rg-clip.is-on { background: var(--meter-red); border-color: var(--meter-red); color: #000; }
+
 .route-notes { list-style: none; margin: 0.75rem 0 0; padding: 0; color: var(--text-muted); }
 .route-notes li { margin: 0.2rem 0; }
 
@@ -59,6 +84,12 @@
   .route-grid .route-cell { order: 2; flex-wrap: wrap; justify-content: space-between; }
   .rg-total-label-inline { display: inline; color: var(--text-muted); }
   .rg-cell-in { display: inline; font-weight: 600; }
+  /* The input's meter sits beside its name (the card's input header); the route level goes on the line below. */
+  .rg-cell-meter { display: flex; flex: 1 1 7rem; min-width: 0; justify-content: flex-end; }
+  .rg-cell-meter .rg-meter { flex: 1 1 auto; min-width: 0; max-width: 12rem; }
+  .rg-cell-meter .rg-meter-track { width: auto; flex: 1 1 auto; min-width: 2.5rem; }
+  .route-grid .route-cell .route-level { flex: 1 0 100%; }
+  .rg-cell-meter .rg-clip { min-height: 44px; min-width: 44px; }
   .route-toggle { min-height: 44px; min-width: 44px; padding-right: 0.3rem; }
   .route-step { width: 44px; height: 44px; font-size: 1.15rem; }
   .route-grid .route-gain input { width: 4.5rem; min-height: 44px; }
