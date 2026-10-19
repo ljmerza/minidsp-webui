@@ -1,5 +1,7 @@
 // Output crossover designer (docs 05 §4): two group cards (type, family, slope, frequency, enabled), the biquads each
-// design needs, presets, and a raw-coefficient drawer per group with stability indicators and "flatten".
+// design needs, presets, and a raw-coefficient drawer per group with stability indicators and "flatten". Phase 9
+// (design §8.1): plain words ("Keeps sound below 80 Hz", the band sentence) and one Steepness select; family, any slope
+// and the raw coefficients sit under Advanced.
 //
 // Needs peq_editor.js (window.mdsp.filters), dsp.js and graph.js. Typing a frequency previews the group with dsp.js;
 // a committed change goes to the server, whose coefficients replace the preview. Bessel designs are compiled by the
@@ -54,6 +56,88 @@
     return d;
   }
 
+  // --- plain words (phase 9 design §8.1, P14) ---------------------------------------------------------------------
+
+  // The Steepness select: three common Linkwitz-Riley slopes, the current design when it is none of them, and
+  // "Other…" (which opens Advanced: any family and any slope the 4 filter stages allow).
+  const STEEPNESS = [
+    { key: 'lr2', family: 'lr', order: 2, label: 'Gentle, 12 dB/oct (LR2)' },
+    { key: 'lr4', family: 'lr', order: 4, label: 'Steep, 24 dB/oct (LR4)' },
+    { key: 'lr8', family: 'lr', order: 8, label: 'Very steep, 48 dB/oct (LR8)' },
+  ];
+  const FAMILY_NAMES = { lr: 'Linkwitz-Riley', bw: 'Butterworth', bessel: 'Bessel' };
+  const KIND_NAMES = { lp: 'Low-pass', hp: 'High-pass', bp: 'Band-pass' };
+
+  function steepKey(form) {
+    const hit = STEEPNESS.find((s) => s.family === form.family && s.order === Number(form.order));
+    return hit ? hit.key : 'custom';
+  }
+
+  function steepOptions(form, nBiquads) {
+    const options = STEEPNESS.map((s) => ({
+      key: s.key,
+      label: s.label + (orderProblem({ ...form, family: s.family }, s.order, nBiquads) ? ' (too steep here)' : ''),
+      disabled: orderProblem({ ...form, family: s.family }, s.order, nBiquads) !== null,
+    }));
+    if (steepKey(form) === 'custom') {
+      const name = FAMILY_NAMES[form.family] || form.family;
+      options.push({ key: 'custom', label: `Custom: ${name} ${Number(form.order) * 6} dB/oct`, disabled: false });
+    }
+    options.push({ key: 'other', label: 'Other…', disabled: false });
+    return options;
+  }
+
+  const EN_DASH = '\u2013';
+  function hzNumber(freq) {
+    const f = Number(freq);
+    if (f >= 1000) return [`${Math.round((f / 1000) * 100) / 100}`, 'kHz'];
+    return [`${Math.round(f * 10) / 10}`, 'Hz'];
+  }
+  const hz = (freq) => hzNumber(freq).join(' ');
+  function hzRange(lo, hi) {
+    const [a, ua] = hzNumber(lo);
+    const [b, ub] = hzNumber(hi);
+    return ua === ub ? `${a}${EN_DASH}${b} ${ub}` : `${a} ${ua}${EN_DASH}${b} ${ub}`;
+  }
+
+  // What the output plays, from the band filters as stored (on, recognised designs): "This output plays 20–80 Hz.
+  // Below 20 Hz and above 80 Hz it fades by 24 dB per octave." Mirrors app/sync/summary.py analyse_band.
+  function bandSentence(groups) {
+    let hp = null;
+    let lp = null;
+    let custom = false;
+    const edge = (freq, order) => ({ freq: Number(freq), slope: 6 * Number(order) });
+    for (const g of groups || []) {
+      if (g.bypass) continue;
+      const d = g.design;
+      if (!d) {
+        if (g.biquads_used) custom = true;
+        continue;
+      }
+      if (d.kind === 'hp' || d.kind === 'bp') {
+        if (!hp || Number(d.freq) > hp.freq) hp = edge(d.freq, d.order);
+      }
+      if (d.kind === 'lp' || d.kind === 'bp') {
+        const f = d.kind === 'bp' ? d.freq_hi || d.freq : d.freq;
+        if (!lp || Number(f) < lp.freq) lp = edge(f, d.order);
+      }
+    }
+    if (custom) return "This output plays through a custom filter (coefficients the app doesn't recognise).";
+    if (hp && lp && hp.freq >= lp.freq) {
+      return `This output plays nothing: its high-pass (${hz(hp.freq)}) is above its low-pass (${hz(lp.freq)}).`;
+    }
+    if (hp && lp) {
+      const head = `This output plays ${hzRange(hp.freq, lp.freq)}.`;
+      if (hp.slope === lp.slope) {
+        return `${head} Below ${hz(hp.freq)} and above ${hz(lp.freq)} it fades by ${hp.slope} dB per octave.`;
+      }
+      return `${head} Below ${hz(hp.freq)} it fades by ${hp.slope} dB per octave, above ${hz(lp.freq)} by ${lp.slope}.`;
+    }
+    if (lp) return `This output plays everything below ${hz(lp.freq)}. Above it, sound fades by ${lp.slope} dB per octave.`;
+    if (hp) return `This output plays everything above ${hz(hp.freq)}. Below it, sound fades by ${hp.slope} dB per octave.`;
+    return 'This output plays the full range: nothing is filtered out.';
+  }
+
   const rawRows = (compiled) => compiled.map((bq) => F().fullPrecision(bq));
   const sameRows = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -71,8 +155,9 @@
       drawer: null,
       rows: [],
       orders: ORDERS,
-      view: F().remember('xover.view') || F().pageView('sub'),
+      view: F().startView ? F().startView('xover.view', cfg, 'sub') : F().remember('xover.view') || F().pageView('sub'),
       prefix: `outputs.${cfg.channel}.crossover`,
+      advanced: {}, // group index -> Advanced fold open (unset: open when the design isn't a Steepness choice)
 
       init() {
         this.$el.addEventListener('sse:sync', (e) => this.onSync(e));
@@ -174,6 +259,42 @@
         if (group.preview || group.inflight) return 'editing…';
         return group.label;
       },
+      kindName(group) {
+        if (!group.design) return group.biquads_used ? 'Custom' : 'Flat (passes everything)';
+        return KIND_NAMES[group.design.kind] || group.design.kind;
+      },
+      sentence() {
+        return bandSentence(this.groups);
+      },
+      steepness(group) {
+        return steepOptions(group.form, cfg.nBiquads);
+      },
+      steepKey(group) {
+        return steepKey(group.form);
+      },
+      isAdvanced(group) {
+        const open = this.advanced[group.index];
+        return open === undefined ? Boolean(group.design) && steepKey(group.form) === 'custom' : open;
+      },
+      // One Steepness choice = Linkwitz-Riley at that slope, the same design as picking the family and slope under
+      // Advanced. "Other…" only opens Advanced.
+      setSteepness(group, key, select = null) {
+        const choice = STEEPNESS.find((s) => s.key === key);
+        if (!choice) {
+          if (key === 'other') this.advanced = { ...this.advanced, [group.index]: true };
+          if (select) select.value = steepKey(group.form);
+          return;
+        }
+        const problem = orderProblem({ ...group.form, family: choice.family }, choice.order, cfg.nBiquads);
+        if (problem) {
+          toast(`Filter ${group.index + 1}: ${problem}`);
+          if (select) select.value = steepKey(group.form);
+          return;
+        }
+        group.form.family = choice.family;
+        group.form.order = choice.order;
+        this.commit(group);
+      },
 
       // --- graph -----------------------------------------------------------------------------------------------
 
@@ -207,6 +328,7 @@
       setView(view) {
         this.view = view;
         F().remember('xover.view', view);
+        if (cfg.viewKey) F().remember(cfg.viewKey, view);
         if (ctl.plot) ctl.plot.setView(view);
         this.render();
       },
@@ -372,6 +494,7 @@
     };
   }
 
+  window.mdsp = Object.assign(window.mdsp || {}, { crossover: { bandSentence, steepKey, steepOptions, STEEPNESS } });
   document.addEventListener('alpine:init', () => {
     window.Alpine.data('crossoverEditor', crossoverEditor);
   });

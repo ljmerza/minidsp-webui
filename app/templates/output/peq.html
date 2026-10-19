@@ -1,9 +1,16 @@
-{#- Output page, EQ (PEQ) tab: the shared PEQ editor (docs 05 §5) for this output's bands. -#}
+{#- Output page, EQ (PEQ) tab (phase 9 design §8.2): the shared EQ editor for this output's bands, with the guided
+    entry points and the 5–300 Hz graph on bass and Shakers (tactile) outputs. -#}
 {% import "components/peq_editor.html" as fx with context %}
-<h2>EQ <span class="muted">{{ session.profile.peq_per_output }} bands</span>{{ help("eq") }}</h2>
-{%- if "eq-cut" in task_ids %}
-<p class="task-entry"><a href="{{ root }}/tasks/eq-cut?output={{ channel.index + 1 }}">+ Add a cut</a>
-  <span class="muted">(guided: Fix a boom)</span></p>
-{%- endif %}
-{{ fx.editor("outputs", channel.index, channel.color, channel.name, view="full") }}
-{{ fx.assets() }}
+{%- set bands = session.desired(preset).outputs[channel.index].peq -%}
+{%- set in_use = bands|rejectattr("bypass")|rejectattr("design.type", "equalto", "passthrough")|list|length -%}
+<div class="card-head eq-head">
+  <h2>EQ{{ help("eq") }} <span class="muted">{{ bands|length }} bands, {{ in_use }} in use</span></h2>
+  {%- if "eq-cut" in task_ids %}
+  <span class="eq-entry">
+    <a class="btn-link btn-small" href="{{ root }}/tasks/eq-cut?output={{ channel.index + 1 }}">+ Add a cut&hellip;</a>
+    <a class="btn-link btn-small" href="{{ root }}/tasks/eq-cut?output={{ channel.index + 1 }}&amp;kind=boost">+ Add a boost&hellip;</a>
+    <span class="muted">(guided)</span>
+  </span>
+  {%- endif %}
+</div>
+{{ fx.editor("outputs", channel.index, channel.color, channel.name, view="sub" if bass else "full", bass=bass) }}

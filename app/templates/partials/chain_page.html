@@ -1,0 +1,93 @@
+{#- The output and input pages' header block, chain tab bar and tab panel (phase 9 design §8, §9). Context from
+    app/web/params.py (output_page / input_page) and app/web/chain.py.
+
+    #chain-box never changes; static/js/chain.js swaps #output-chain inside it when a chip is chosen (the URL follows,
+    Back returns). #chain-live (badge, sentence, routes, chips) re-renders itself on desired / sync / verify events;
+    the Rename form and the meter sit outside it so a refresh never interrupts typing. The meter binds to the
+    levelMeters component around everything (static/js/meters.js). -#}
+{%- set is_output = channel.kind == "output" -%}
+{%- set o = out_summary if is_output else none -%}
+{%- set i = in_summary if not is_output else none -%}
+<div class="chain-page" data-chain-page
+     x-data='levelMeters({{ {"inputs": chain_names.inputs, "outputs": chain_names.outputs, "initial": chain_levels}|tojson }})'
+     hx-trigger="sse:levels">
+  <div id="chain-box" data-chain-box>
+    <div id="output-chain" class="chain-wrap">
+      <section class="card chain-head" aria-label="{{ channel.name }}: what it does" style="--chan: {{ channel.color }}">
+        <div class="chain-top">
+          <details class="chain-rename" data-chain-rename>
+            <summary class="btn-small">Rename<span class="visually-hidden"> {{ channel.name }}</span></summary>
+            {% include "partials/channel_name.html" %}
+          </details>
+          <div class="chain-meter">
+            <span class="home-meter" role="meter" aria-label="{{ channel.name }} level" aria-valuemin="-120" aria-valuemax="0"
+                  aria-valuenow="-120" :aria-valuenow="meterNow('{{ chain_key }}')" :aria-valuetext="readout('{{ chain_key }}')">
+              <span class="home-meter-track" aria-hidden="true"><span class="home-meter-bar" :style="hbarStyle('{{ chain_key }}')"></span></span>
+              <span class="home-meter-value" aria-hidden="true" x-text="readout('{{ chain_key }}')">&mdash;</span>
+            </span>{{ help("meter") }}
+            <button type="button" class="home-clip" :class="{ 'is-on': clip.{{ chain_key }} }" @click="resetClip('{{ chain_key }}')"
+                    aria-label="{{ channel.name }} CLIP light" :aria-label="clipLabel('{{ chain_key }}')">
+              <span aria-hidden="true">CLIP <span x-text="clip.{{ chain_key }} ? '●' : '○'">&#9675;</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="chain-live" class="chain-live" hx-get="{{ tab_link(tab) }}" hx-select="#chain-live" hx-target="this"
+             hx-swap="outerHTML" hx-trigger="sse:desired delay:400ms, sse:sync delay:400ms, sse:verify delay:400ms">
+          {% if o %}
+            <p class="chain-summary">
+              <span class="health-badge health-{{ o.badge }}" data-health-badge="{{ o.badge }}">
+                <span class="health-glyph" aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}
+              </span>
+              {%- if o.badge == "silent" %}{{ help("b-silent") }}{% elif o.badge == "overload" %}{{ help("b-overload") }}
+              {%- elif o.badge == "muted" %}{{ help("b-muted") }}{% elif o.badge == "not_in_use" %}{{ help("b-not-in-use") }}
+              {%- elif o.badge == "check" %}{{ help("b-check") }}{% elif o.badge == "ready" %}{{ help("b-ready") }}
+              {%- elif o.badge == "unknown" %}{{ help("st-unknown") }}{% endif %}
+              <span class="chain-sentence">{{ o.sentence }}</span>
+            </p>
+            {% if chain_reason %}<p class="output-reason health-{{ o.badge }}">{{ chain_reason }}</p>{% endif %}
+            <p class="chain-fed">{{ fed_by }}{% if o.total.routes %}.{% endif %}
+              <a href="{{ root }}/routing?preset={{ preset + 1 }}">Change routing</a></p>
+            {% if o.headroom.level != "none" %}
+              <p class="chain-headroom health-{{ o.headroom.level }}">
+                {%- if o.headroom.level in ("caution", "problem") %}<span aria-hidden="true">&#9888;</span> {% endif %}{{ o.headroom.text }}{{ help("headroom") }}
+              </p>
+            {% endif %}
+          {% elif i %}
+            <p class="chain-summary"><span class="chain-sentence">{{ i.name }}: {{ i.sentence }}</span></p>
+          {% endif %}
+
+          <h2 class="chain-label" id="chain-label">Settings on this {{ "output" if is_output else "input" }}</h2>
+          <nav class="chain" aria-labelledby="chain-label">
+            <ul class="chain-list">
+              {% for c in chips %}
+                <li>
+                  {%- if c.enabled %}
+                  <a class="chain-chip is-{{ c.state }}{% if c.key == tab %} is-current{% endif %}" href="{{ c.href }}"
+                     data-chain-tab="{{ c.key }}"{% if c.key == tab %} aria-current="page"{% endif %}>
+                    {%- if c.glyph %}<span class="chain-glyph" aria-hidden="true">{{ c.glyph }}</span> {% endif -%}
+                    <span class="chain-text">{{ c.label }}</span>
+                    {%- if c.sync %} <span class="chain-sync sync-{{ c.sync }}" aria-hidden="true">{{ c.sync_glyph }}</span>{% endif -%}
+                    {%- if c.spoken %}<span class="visually-hidden">, {{ c.spoken }}</span>{% endif -%}
+                  </a>
+                  {%- else %}
+                  <span class="chain-chip is-disabled">{{ c.label }} <span class="muted">(not available)</span></span>
+                  {%- endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </nav>
+        </div>
+      </section>
+
+      <section id="tab-panel" class="card tab-panel" data-tab="{{ tab or '' }}" tabindex="-1"
+               aria-label="{{ tab_name or 'Sections' }}">
+        {% if tab_template %}
+          {% include tab_template %}
+        {% else %}
+          <p class="muted">No sections available yet.</p>
+        {% endif %}
+      </section>
+    </div>
+  </div>
+</div>

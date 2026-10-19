@@ -13,6 +13,9 @@ SHAKERS_PEQ = "/outputs/1?tab=peq"
 
 def open_peq(page: Page) -> None:
     visit(page, SHAKERS_PEQ)
+    show_all = page.get_by_role("button", name="Show all ▸")  # phones fold the bands not in use (design §8.3)
+    if show_all.is_visible():
+        show_all.click()
     expect(page.get_by_label("Band 10 type")).to_be_visible()  # the bands have loaded
 
 
@@ -93,7 +96,7 @@ def test_unused_bands_say_off(screen: Page):
 
 def test_typing_a_negative_compressor_threshold_key_by_key(desktop: Page, api):
     visit(desktop, "/outputs/1?tab=compressor")
-    field = desktop.get_by_label("Threshold", exact=True)
+    field = desktop.get_by_label("Starts at (threshold)", exact=True)
     expect(field).to_have_value("0")
     field.fill("")
     field.press_sequentially("-10", delay=60)

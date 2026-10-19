@@ -21,6 +21,29 @@
 
   const toast = (message, level) => window.mdsp && window.mdsp.toast && window.mdsp.toast(message, level);
 
+  const MINUS = '\u2212';
+  const num = (v) => {
+    const n = Math.round(Number(v) * 10) / 10;
+    return n < 0 ? `${MINUS}${-n}` : `${n}`;
+  };
+
+  // The tab's plain-language line (phase 9 design §8.2): "Above −36 dBFS, every 4 dB louder comes out only 1 dB
+  // louder."
+  function inWords(threshold, ratio, bypass) {
+    if (bypass) return 'Off: this output passes through unchanged.';
+    const r = Number(ratio);
+    if (!(r > 1)) return `Ratio 1:1 changes nothing, even above ${num(threshold)} dBFS.`;
+    const text = `Above ${num(threshold)} dBFS, every ${num(r)} dB louder comes out only 1 dB louder.`;
+    return r >= 20 ? `${text} At this ratio it acts as a limiter.` : text;
+  }
+
+  // A template button: "Shaker protection (−36, 50:1, 15, 30)".
+  function presetText(preset) {
+    const v = (preset && preset.values) || {};
+    if (!('threshold_db' in v)) return (preset && preset.label) || '';
+    return `${preset.label} (${num(v.threshold_db)}, ${num(v.ratio)}:1, ${num(v.attack_ms)}, ${num(v.release_ms)})`;
+  }
+
   // Hard-knee static curve: out = in up to the threshold, T + (in - T) / ratio above. Ratios below 1 draw as 1:1.
   function transferCurve(threshold, ratio, lo = CURVE_LO, hi = CURVE_HI, step = 1) {
     const r = Math.max(Number(ratio) || 1, 1);
@@ -224,6 +247,12 @@
         const r = Math.max(Number(this.form.ratio) || 1, 1);
         return t >= 0 ? 0 : -t * (1 - 1 / r);
       },
+      inWords() {
+        return inWords(this.form.threshold_db, this.form.ratio, this.bypass);
+      },
+      presetText(preset) {
+        return presetText(preset);
+      },
       ratioText() {
         const r = Number(this.form.ratio);
         return r >= 50 ? `${r}:1 (limiter)` : `${r}:1`;
@@ -382,9 +411,9 @@
     };
   }
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = { transferCurve };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { transferCurve, inWords, presetText };
   if (typeof window === 'undefined') return;
-  window.mdsp = Object.assign(window.mdsp || {}, { compressor: { transferCurve } });
+  window.mdsp = Object.assign(window.mdsp || {}, { compressor: { transferCurve, inWords, presetText } });
   document.addEventListener('alpine:init', () => {
     window.Alpine.data('compressorEditor', compressorEditor);
   });

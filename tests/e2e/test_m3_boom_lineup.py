@@ -126,7 +126,7 @@ def test_fix_a_boom_on_the_sub_adds_one_band_in_one_request_and_undo_removes_it(
 def test_line_up_sets_8_75_ms_for_3_m_fine_tunes_and_undo_all(screen: Page, api: Api, shoot):
     assert shakers(api)["delay_ms"] == 0
     visit(screen, "/outputs/1?tab=delay")
-    screen.get_by_role("link", name="Line up shakers with the sub…").click()
+    screen.get_by_role("link", name="Line up shakers (guided)…").click()
     wait_step(screen, "Which two?")
     expect(dialog(screen).get_by_role("combobox", name="Felt in my seat")).to_have_value("1")
     expect(dialog(screen).get_by_role("combobox", name="Heard from across the room")).to_have_value("2")

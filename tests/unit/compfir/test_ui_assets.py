@@ -35,14 +35,15 @@ def test_compressor_partial():
     html = render("output/_compressor.html")
     assert f"/base/api/v1/devices/{SERIAL}/presets/1/outputs/2/compressor" in html
     assert "compressorEditor(" in html and 'hx-trigger="sse:sync, sse:desired"' in html
-    assert "/base/static/js/compressor.js?v=t" in html and "uPlot.iife.min.js" in html
+    # The scripts load once with the output page (phase 9 design §8), so the swapped-in tab brings none.
+    assert "<script src=" not in html
     assert "approximate, hard knee" in html
 
 
 def test_fir_partial():
     html = render("output/_fir.html")
     assert f"/base/api/v1/devices/{SERIAL}/presets/1/outputs/2/fir" in html
-    assert "firEditor(" in html and "/base/static/js/fir.js?v=t" in html
+    assert "firEditor(" in html and "<script src=" not in html
     assert "96 kHz mono" in html and "max 4096 taps" in html
     assert "audio drops out briefly" in html
 

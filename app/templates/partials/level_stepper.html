@@ -1,0 +1,15 @@
+{#- A level slider with − / + steppers (phase 9 design §8.2, §16 phone rule 4: no minus key needed). Needs channel,
+    values, statuses, failed_reasons and gain_path; static/js/chain.js drives the steppers through params.js. -#}
+{% import "partials/params_macros.html" as m %}
+{%- set label = "Output level" if channel.kind == "output" else "Input level" -%}
+<div class="level-stepper" data-level-stepper>
+  <button type="button" class="step-btn level-step" data-chain-step="{{ gain_path }}" data-step="-0.5"
+          data-min="{{ channel.gain_min }}" data-max="{{ channel.ceiling }}"
+          aria-label="{{ channel.name }}: {{ label|lower }} 0.5 dB lower"><span aria-hidden="true">&minus;</span></button>
+  {{ m.gain_control("gain-" ~ channel.kind ~ "-" ~ channel.index, gain_path, values[gain_path], label,
+                    channel.gain_min, channel.ceiling, channel.gain_max, statuses, failed_reasons,
+                    term="level" if channel.kind == "output" else none) }}
+  <button type="button" class="step-btn level-step" data-chain-step="{{ gain_path }}" data-step="0.5"
+          data-min="{{ channel.gain_min }}" data-max="{{ channel.ceiling }}"
+          aria-label="{{ channel.name }}: {{ label|lower }} 0.5 dB higher"><span aria-hidden="true">+</span></button>
+</div>
