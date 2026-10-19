@@ -52,8 +52,10 @@
   .chain-top:has(.chain-rename[open]) { flex-wrap: wrap; }
   .chain-meter { flex: 1 1 0; min-width: 0; }
   .chain-meter .home-meter-value { min-width: 0; }
+  /* position: relative makes the strip the containing block of the chips' .visually-hidden (absolute) words, so its
+     overflow clips them; otherwise they escape it and widen the page before the device is set up. */
   .chain-list {
-    flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity; gap: 0.4rem;
+    position: relative; flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity; gap: 0.4rem;
     padding-bottom: 0.3rem; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
   }
   .chain-list > li { scroll-snap-align: start; }
