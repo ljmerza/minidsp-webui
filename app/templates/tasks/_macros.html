@@ -1,0 +1,80 @@
+{#- Building blocks of a wizard step (app/web/tasks.py). Import with context: they read the shell's ``w``, ``s``,
+    ``mode``, ``page_url``, ``fragment_url`` and ``serial_param``. -#}
+
+{#- Every answer so far, as hidden fields (``skip``: the ones this step asks for itself). -#}
+{%- macro hidden(params, skip=()) -%}
+  {%- for k, v in params.items() if k not in skip and k != "step" and v is not none %}
+  <input type="hidden" name="{{ k }}" value="{{ v }}">
+  {%- endfor %}
+  {%- if serial_param is not none %}<input type="hidden" name="serial" value="{{ serial_param }}">{% endif %}
+  <input type="hidden" name="mode" value="{{ mode }}">
+{%- endmacro -%}
+
+{#- A step's form: GET moves between steps (works as a plain page without JavaScript), POST writes (Apply, a fix,
+    Undo; HTMX only, as every write of the UI). The reply replaces the step in the dialog or on the page. ``main``: the
+    step's own form, which the Back / Next bar (outside it, so it can stick to the bottom of the sheet) submits. -#}
+{%- macro form(method="get", cls="", main=false) -%}
+  {%- set fid = ' id="task-main-' ~ mode ~ '"' if main else "" -%}
+  {%- if method == "post" -%}
+  <form{{ fid|safe }} class="task-form {{ cls }}" method="post" action="{{ fragment_url }}" hx-post="{{ fragment_url }}"
+        hx-target="closest [data-task-host]" hx-swap="innerHTML">{{ caller() }}</form>
+  {%- else -%}
+  <form{{ fid|safe }} class="task-form {{ cls }}" method="get" action="{{ page_url }}" hx-get="{{ fragment_url }}"
+        hx-target="closest [data-task-host]" hx-swap="innerHTML">{{ caller() }}</form>
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- The step's heading: focus moves here on every step change (design §14.1). -#}
+{%- macro heading() -%}
+  <h2 id="task-heading-{{ mode }}" class="task-heading" tabindex="-1">
+    <span class="visually-hidden">{{ w.label }}: step {{ s.number }} of {{ total }}, </span>{{ s.title }}</h2>
+{%- endmacro -%}
+
+{#- The sticky Back / Next (or Apply) bar, after the step's main form. ``back`` / ``next``: step numbers (None: no
+    button); ``apply``: the primary button applies (the main form is a POST); ``close``: a Done button. Back is a link
+    to the previous step with the same answers. -#}
+{%- macro nav(back=none, next=none, next_label="Next", apply=none, close=false) -%}
+  <div class="task-nav">
+    {%- if back is not none %}
+    {%- set q = dict(s.params, step=back)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+    <a class="btn-link task-back" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+       hx-target="closest [data-task-host]" hx-swap="innerHTML"><span aria-hidden="true">&#9664;</span> Back</a>
+    {%- else %}<span></span>{% endif %}
+    {%- if apply %}
+    <button type="submit" form="task-main-{{ mode }}" name="op" value="apply" class="btn-primary task-next">{{ apply }}</button>
+    {%- elif next is not none %}
+    <button type="submit" form="task-main-{{ mode }}" name="step" value="{{ next }}" class="btn-primary task-next">{{ next_label }} <span aria-hidden="true">&#9654;</span></button>
+    {%- elif close %}
+    {%- if mode == "dialog" %}
+    <button type="button" class="btn-primary task-next" data-task-close>Done</button>
+    {%- else %}
+    <a class="btn-link btn-primary task-next" href="{{ root }}/">Done</a>
+    {%- endif %}
+    {%- endif %}
+  </div>
+{%- endmacro -%}
+
+{#- Undo of what this run wrote (field by field; offered for 30 s). -#}
+{%- macro undo_form(params) -%}
+  {%- if undo_json %}
+  {%- call form("post", "task-undo-form") %}
+    {{ hidden(params, skip=("undo",)) }}
+    <input type="hidden" name="step" value="{{ s.number }}">
+    <input type="hidden" name="undo" value="{{ undo_json }}">
+    <button type="submit" name="op" value="undo" class="task-undo" data-undo-left="{{ undo_left }}">Undo</button>
+  {%- endcall %}
+  {%- endif %}
+{%- endmacro -%}
+
+{%- macro message(text, error=false) -%}
+  {%- if text %}<p class="task-msg{% if error %} task-msg-error{% endif %}" role="{{ 'alert' if error else 'status' }}">{{ text }}</p>{% endif -%}
+{%- endmacro -%}
+
+{%- macro nothing_sent() -%}
+  <p class="task-nothing-sent"><strong>Nothing is sent until you press Apply.</strong></p>
+{%- endmacro -%}
+
+{%- macro no_device() -%}
+  <p class="task-msg task-msg-error" role="alert">The app hasn't loaded the device's settings yet, so this can't run.
+    Check the header: it shows when the device is connected.</p>
+{%- endmacro -%}

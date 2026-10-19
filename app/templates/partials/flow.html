@@ -15,17 +15,23 @@
   {%- endif -%}
 {%- endmacro -%}
 
-{%- macro popover(id, title, text, fixes, more, root) -%}
+{%- macro popover(id, title, text, fixes, more, root, diagnose=none) -%}
   <span id="{{ id }}" class="tt-pop flow-pop" role="dialog" aria-labelledby="{{ id }}-t" data-tt-pop hidden>
     <strong class="tt-title" id="{{ id }}-t">{{ title }}</strong>
     <span class="tt-text">{{ text }}</span>
-    {%- if fixes %}
-      <span class="flow-pop-actions">{% for fx in fixes %}{{ fix_button(fx) }}{% endfor %}</span>
+    {%- if fixes or diagnose %}
+      <span class="flow-pop-actions">{% for fx in fixes %}{{ fix_button(fx) }}{% endfor %}
+        {%- if diagnose %}<a class="btn-small flow-fix-link" href="{{ diagnose }}">Something wrong?</a>{% endif %}</span>
     {%- endif %}
     {%- if more %}
       <a class="tt-more" href="{{ root }}/help#{{ more }}">More <span aria-hidden="true">&rarr;</span><span class="visually-hidden"> about {{ title }}</span></a>
     {%- endif %}
   </span>
+{%- endmacro -%}
+
+{#- "Something wrong?" with this output preselected (design §14.3 entry points), once its wizard is served. -#}
+{%- macro diagnose_link(o) -%}
+  {%- if task_ids is defined and "diagnose" in task_ids -%}{{ root }}/tasks/diagnose?what=one&amp;output={{ o.index + 1 }}{%- endif -%}
 {%- endmacro -%}
 
 {%- macro meter(key, name, cls="") -%}
@@ -162,7 +168,7 @@
                   <span aria-hidden="true">{{ o.badge_glyph }}</span> {{ o.badge_word }}
                 </button>
               </h3>
-              {{ popover(o.pid ~ "-badge", o.name ~ ": " ~ o.badge_word, o.badge_text, o.badge_fixes, o.badge_term, root) }}
+              {{ popover(o.pid ~ "-badge", o.name ~ ": " ~ o.badge_word, o.badge_text, o.badge_fixes, o.badge_term, root, diagnose_link(o) if o.badge == "silent" else none) }}
               <p class="flow-fed">
                 {%- if o.sources %}Fed by
                   {% for s in o.sources -%}
@@ -198,7 +204,7 @@
               <span class="flow-stub flow-pop-wrap">
                 <button type="button" class="flow-stub-btn" data-tt-btn aria-expanded="false" aria-controls="{{ o.pid }}-stub"
                         data-flow-key="{{ o.key }}:stub"><span aria-hidden="true">✕</span> no input<span class="visually-hidden">: what to do about {{ o.name }}</span></button>
-                {{ popover(o.pid ~ "-stub", o.name ~ " has no input", o.stub.text, o.stub_fixes, "b-silent", root) }}
+                {{ popover(o.pid ~ "-stub", o.name ~ " has no input", o.stub.text, o.stub_fixes, "b-silent", root, diagnose_link(o)) }}
               </span>
             {%- endif %}
           </section>

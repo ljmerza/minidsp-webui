@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{#- Guided tasks (design §3.4, §14): every task with what it does. A task with a wizard opens it in the dialog (or as a
+    page without JavaScript); the others go to the page where that job is done today. -#}
+{% block content %}
+<h1>Guided tasks</h1>
+<p class="hint task-index-hint">Each task says in words what it is about to do, sends nothing until you press Apply,
+  and offers Undo afterwards.</p>
+<ul class="task-index">
+  {% for t in guided %}
+  <li class="card task-index-item">
+    <h2><a href="{{ t.href }}" data-task="{{ t.id }}">{{ t.label }}</a></h2>
+    <p>{{ t.intro or t.hint }}</p>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

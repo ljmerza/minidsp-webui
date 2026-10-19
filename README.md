@@ -294,6 +294,7 @@ there take precedence over the environment.
 | `MINIDSPD_MODE` | `embedded` | `embedded` runs the bundled `minidspd`; `external` uses `MINIDSPD_URL`. Unset with `MINIDSPD_URL` set means `external` |
 | `MINIDSPD_URL` | `http://127.0.0.1:5380` | External mode: the minidspd HTTP API. Ignored in embedded mode |
 | `MINIDSPD_MOCK` | `false` | Embedded mode: add minidspd's mock 2x4HD (demo without hardware) |
+| `MINIDSPD_MOCK_LEVELS` | `off` | With `MINIDSPD_MOCK`: replace the mock's flat −60 dBFS meters with a pattern that follows the routing (`signal`: In 1 around −20 dBFS; `hot`: around −6 dBFS, so loud outputs clip; `silent`: no signal). For tests and demos; never applied to a real device |
 | `MINIDSPD_HTTP_BIND` | `127.0.0.1:5380` | Embedded mode: where the daemon's API listens inside the container. `0.0.0.0:5380` to publish it (loopback only!) |
 | `MINIDSPD_DISCOVERY` | `false` | Embedded mode: pick up network devices (WI-DG) that advertise themselves |
 | `MINIDSPD_EXTRA_CONFIG` | _(empty)_ | Embedded mode: raw TOML merged into the generated [daemon config](https://github.com/mrene/minidsp-rs/blob/master/docs/config.example.toml), e.g. a `[[static_device]]` |

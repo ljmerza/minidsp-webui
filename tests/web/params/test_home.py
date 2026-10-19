@@ -263,8 +263,10 @@ async def test_guided_tasks_card_lists_the_seven_tasks(ctx):
         "Save or load a setup",
         "Set up this device",
     ]
-    # until its wizard exists, "Something wrong?" is Home's own health line, not a link back to Home
-    assert 'href="#home-health-title" data-task="diagnose"' in tasks
+    # PR 11: the two first wizards open from here; the others keep today's page until their wizard exists
+    assert 'href="/tasks/diagnose" data-task="diagnose"' in tasks
+    assert 'href="/tasks/louder" data-task="louder"' in tasks
+    assert 'href="/outputs/1?tab=peq" data-task="eq-cut"' in tasks
 
 
 async def test_meters_and_graph_keep_the_old_dashboard(ctx):

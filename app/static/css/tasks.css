@@ -1,0 +1,127 @@
+/* Guided tasks (phase 9 design §14): the wizard dialog (a full-screen sheet on phones), its steps, the /tasks pages,
+   and the flow diagram's "wizard target" highlight (§5.2). */
+
+.task-dialog {
+  width: min(35rem, calc(100vw - 1.5rem)); /* 560 px */
+  max-height: calc(100vh - 2rem); overflow: auto; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); color: var(--text); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.task-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.task-host { position: relative; }
+.task-dialog .task-step { padding: 0 1.1rem; }
+
+.task-titlebar {
+  display: flex; align-items: center; gap: 0.6rem; min-height: 3rem;
+  border-bottom: 1px solid var(--border); margin: 0 -1.1rem 0.6rem; padding: 0.3rem 0.6rem 0.3rem 1.1rem;
+}
+.task-dialog .task-titlebar { position: sticky; top: 0; z-index: 2; background: var(--bg-raised); }
+.task-page .task-titlebar { margin: 0 0 0.6rem; padding: 0 0 0.4rem; }
+.task-title-name { font-weight: 600; }
+.task-title-count { color: var(--text-muted); font-size: 0.85rem; margin-right: auto; }
+.task-close { min-width: 2.75rem; min-height: 2.75rem; background: transparent; border-color: transparent; font-size: 1.1rem; }
+
+.task-progress { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; list-style: none; margin: 0 0 0.6rem; padding: 0; font-size: 0.8rem; color: var(--text-muted); }
+.task-progress .is-current { color: var(--text); font-weight: 600; }
+.task-progress .is-done .task-dot, .task-progress .is-current .task-dot { color: var(--accent); }
+
+.task-heading { margin: 0.2rem 0 0.6rem; font-size: 1.15rem; }
+.task-heading:focus { outline: none; }
+.task-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.task-question { margin: 0 0 0.6rem; color: var(--text-muted); }
+
+.task-form { margin: 0; }
+.task-choices, .task-segmented { border: 0; margin: 0 0 0.8rem; padding: 0; }
+.task-segmented legend { font-weight: 600; margin-bottom: 0.3rem; padding: 0; }
+.task-choice { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.55rem 0.4rem; min-height: 2.75rem; border-radius: var(--radius); cursor: pointer; }
+.task-choice + .task-choice { border-top: 1px solid var(--border); }
+.task-choice input[type="radio"] { margin-top: 0.2rem; flex: none; width: 1.1rem; height: 1.1rem; }
+.task-choice-with { flex-wrap: wrap; align-items: center; }
+.task-choice-with label { display: inline-flex; align-items: center; gap: 0.55rem; cursor: pointer; }
+.task-choice-with select, .task-field select { min-height: 2.75rem; }
+.task-choice.is-unavailable { cursor: default; color: var(--text-muted); }
+.task-why { display: block; font-size: 0.85rem; margin-top: 0.2rem; }
+.task-recommended { color: var(--ok); font-size: 0.85rem; }
+.task-segmented { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.task-segmented legend { flex: 0 0 100%; }
+.task-segmented label {
+  display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.75rem; padding: 0 0.8rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); cursor: pointer;
+}
+.task-segmented label:has(input:checked) { border-color: var(--accent); }
+.task-field { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
+.task-field input[type="number"] { width: 6rem; min-height: 2.75rem; }
+.task-confirm { display: flex; align-items: flex-start; gap: 0.55rem; margin: 0.6rem 0; padding: 0.5rem 0.6rem; border: 1px solid var(--warn); border-radius: var(--radius); cursor: pointer; }
+.task-confirm input { margin-top: 0.2rem; flex: none; width: 1.1rem; height: 1.1rem; }
+.task-nothing-sent { margin: 0.6rem 0; }
+.task-result { margin: 0 0 0.6rem; padding-left: 1.2rem; }
+
+.task-msg { margin: 0 0 0.6rem; padding: 0.45rem 0.7rem; border: 1px solid var(--ok); border-radius: var(--radius); background: rgba(60, 207, 122, 0.08); }
+.task-msg-error { border-color: var(--bad); background: rgba(255, 92, 92, 0.1); }
+.task-undo-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0 0 0.8rem; }
+.task-undo-row .task-form { display: inline; }
+.task-undo, .task-more { min-height: 2.75rem; }
+
+/* The sticky Back / Next bar: at the bottom of the dialog's scroll box. */
+.task-nav {
+  display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 1rem; padding: 0.7rem 0 1rem;
+  border-top: 1px solid var(--border);
+}
+.task-dialog .task-nav { position: sticky; bottom: 0; z-index: 2; background: var(--bg-raised); margin-left: -1.1rem; margin-right: -1.1rem; padding-left: 1.1rem; padding-right: 1.1rem; }
+.task-nav button, .task-nav a.btn-link { min-height: 3rem; min-width: 6rem; }
+a.btn-link.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
+/* The checks of "Something wrong?" */
+.task-checks-group { margin: 0 0 0.6rem; }
+.task-group-title { font-size: 1rem; margin: 0.6rem 0 0.2rem; }
+.task-checks { list-style: none; margin: 0; padding: 0; }
+.task-check { display: grid; grid-template-columns: 1.4rem 1fr; gap: 0 0.3rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+.task-check > :not(.task-check-glyph):not(.visually-hidden) { grid-column: 2; }
+.task-check-glyph { grid-column: 1; grid-row: 1 / span 3; font-weight: 700; text-align: center; }
+.task-check.is-ok .task-check-glyph { color: var(--ok); }
+.task-check.is-fail .task-check-glyph { color: var(--bad); }
+.task-check.is-unknown .task-check-glyph { color: var(--warn); }
+.task-check.is-pending { color: var(--text-muted); }
+.task-check-detail { margin: 0.2rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+.task-check-fixes summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; min-height: 2.75rem; list-style: none; }
+.task-check-fixes summary::-webkit-details-marker { display: none; }
+.task-fix-toggle { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.3rem 0.7rem; background: var(--bg-input); white-space: nowrap; }
+.task-check-fixes[open] .task-fix-toggle { border-color: var(--accent); }
+.task-fix-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.4rem 0 0.4rem; }
+.task-fix { padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.task-fix-preview { margin: 0 0 0.4rem; }
+.task-apply-fix { min-height: 2.75rem; }
+.task-fix-link { align-self: flex-start; }
+.task-done-lines, .task-done-left, .task-outside { margin: 0 0 0.8rem; padding-left: 1.2rem; }
+.task-all-fine { font-weight: 600; }
+.task-done-card { padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 0.8rem; }
+.task-done-card p { margin: 0.2rem 0; }
+
+/* /tasks and /tasks/<id> */
+.task-page-title { margin-bottom: 0.2rem; }
+.task-page-back { margin: 0 0 0.8rem; }
+.task-page { max-width: 40rem; }
+.task-index { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--gap, 0.75rem); grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); }
+.task-index-item h2 { font-size: 1.05rem; margin: 0 0 0.3rem; }
+.task-index-item p { margin: 0; color: var(--text-muted); }
+.task-index-hint { margin-bottom: 0.8rem; }
+
+/* The flow diagram's blocks a wizard will change (design §5.2 "Wizard target"). */
+.flow-block.is-wizard-target { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .flow-block.is-wizard-target { animation: task-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes task-pulse { 50% { outline-color: transparent; } }
+
+@media (max-width: 599px) {
+  .task-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; }
+  .task-dialog .task-step { padding: 0 0.8rem; }
+  .task-titlebar { margin: 0 -0.8rem 0.6rem; padding-left: 0.8rem; }
+  .task-dialog .task-nav { margin-left: -0.8rem; margin-right: -0.8rem; padding: 0.6rem 0.8rem calc(0.6rem + env(safe-area-inset-bottom, 0px)); }
+  .task-nav button, .task-nav a.btn-link { flex: 1 1 8rem; }
+}
+@media (prefers-contrast: more) {
+  .flow-block.is-wizard-target { outline-width: 4px; }
+}
+
+.task-back { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }

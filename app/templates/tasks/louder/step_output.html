@@ -1,0 +1,16 @@
+{#- Make one louder step 1 (design §14.4): which output, with each one's total now. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("output",)) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Which output?</legend>
+    {%- for r in rows %}
+    <label class="task-choice"><input type="radio" name="output" value="{{ r.n }}"{% if r.n == chosen %} checked{% endif %}>
+      {{ r.text }}{% if r.note %} <span class="muted">({{ r.note }})</span>{% endif %}</label>
+    {%- endfor %}
+  </fieldset>
+  <p class="hint">Level, total{{ help("total") }} = input level + route level + output level.</p>
+{%- endcall %}
+{{ t.nav(next=2) }}

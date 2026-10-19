@@ -1,0 +1,8 @@
+{#- The guided tasks' dialog (design §14.1): one per page, empty until static/js/tasks.js opens a wizard in it. A modal
+    <dialog> (focus trap, Esc) 560 px wide on desktop and a full-screen sheet on phones. ``data-tasks`` lists the
+    wizards it can open; links to them (``/tasks/<id>``) and ``?task=<id>`` deep links open here. -#}
+<dialog id="task-dialog" class="task-dialog" aria-labelledby="task-heading-dialog"
+        data-tasks="{{ task_ids|join(' ') }}" data-root="{{ root }}">
+  <div class="task-host" data-task-host data-mode="dialog"></div>
+</dialog>
+<div id="task-live" class="visually-hidden" role="status" aria-live="polite"></div>

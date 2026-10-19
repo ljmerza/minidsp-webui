@@ -1,0 +1,27 @@
+{#- Something wrong? step 3 (design §14.3): what was fixed (with Undo), what is left, or the outside-the-box checklist. -#}
+{{ t.heading() }}
+{%- if no_device %}{{ t.no_device() }}{% endif %}
+{{ t.message(message) }}
+{%- if lines %}
+  <ul class="task-done-lines">{% for line in lines %}<li><span aria-hidden="true">✓</span> {{ line }}</li>{% endfor %}</ul>
+  {%- if undo_json %}<div class="task-undo-row">{{ t.undo_form(s.params) }}</div>{% endif %}
+{%- endif %}
+{%- if remaining %}
+  <p>Still to fix:</p>
+  <ul class="task-done-left">{% for c in remaining %}<li><span aria-hidden="true">✗</span> {{ c.text }}</li>{% endfor %}</ul>
+{%- elif not no_device %}
+  {%- if not lines %}<p class="task-all-fine"><span aria-hidden="true">✓</span> Everything the app can check looks fine.</p>{% endif %}
+  {%- if what != "distorted" %}
+  <p>If it's still silent, check what the app can't see:</p>
+  <ul class="task-outside">
+    <li>The cable from the miniDSP's output to the amplifier.</li>
+    <li>The amplifier: its power, the input it is set to, and its volume.</li>
+    <li>The speaker (or shaker) and its cable.</li>
+    <li>The player: is it playing, not paused, and is its own volume up?</li>
+  </ul>
+  {%- else %}
+  <p>If it still sounds distorted, lower the player's or AV receiver's level first: the miniDSP can't undo clipping that
+    happens before it. <a href="{{ task_href('set-levels') }}">Set levels…</a></p>
+  {%- endif %}
+{%- endif %}
+{{ t.nav(back=2, close=true) }}

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     minidspd_mode: Literal["embedded", "external"] | None = None
     minidspd_url: str = "http://127.0.0.1:5380"
     minidspd_mock: bool = False  # embedded: add minidspd's mock 2x4HD (demo / dev without hardware)
+    # The mock's meters (app/daemon/mock_levels.py): "off" keeps its flat −60 dBFS; "signal", "hot" or "silent" replace
+    # them with a pattern that follows the routing (tests of the meter checks). Never applies to a real device.
+    minidspd_mock_levels: Literal["off", "signal", "hot", "silent"] = "off"
     minidspd_http_bind: str = DEFAULT_HTTP_BIND  # embedded: where the daemon's HTTP API listens inside the container
     minidspd_discovery: bool = False  # embedded: let the daemon pick up network devices (WI-DG) that advertise
     minidspd_extra_config: str = ""  # embedded: raw TOML merged into the generated daemon config (escape hatch)

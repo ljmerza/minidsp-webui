@@ -1,0 +1,26 @@
+{#- One wizard step inside its shell (app/web/tasks.py shell_context): the title bar (✕ in the dialog), the progress
+    line and the step's own template. static/js/tasks.js reads the data-* attributes: the step's URL, the polite
+    announcement, the flow diagram's blocks to highlight, and after a write, the toast with Undo. -#}
+{%- import "tasks/_macros.html" as t with context -%}
+<div class="task-step" data-task-step data-task="{{ w.id }}" data-step="{{ s.number }}"
+     data-task-url="{{ step_url }}" data-task-query="{{ step_query }}" data-announce="{{ announce }}"
+     data-highlight='{{ s.highlight|list|tojson }}'
+     {%- if s.applied %} data-applied="true"{% endif %}
+     {%- if s.toast %} data-toast="{{ s.toast }}"{% endif %}
+     {%- if undo_json %} data-undo="{{ undo_json }}" data-undo-left="{{ undo_left }}"{% endif %}>
+  <div class="task-titlebar">
+    <span class="task-title-name">{{ w.label }}</span>
+    <span class="task-title-count" aria-hidden="true">{{ s.number }} of {{ total }}</span>
+    {%- if mode == "dialog" %}
+    <button type="button" class="task-close" data-task-close>
+      <span aria-hidden="true">&#10005;</span><span class="visually-hidden">Close {{ w.label }}</span></button>
+    {%- endif %}
+  </div>
+  <ol class="task-progress" aria-hidden="true">
+    {%- for name in w.steps %}
+    <li class="{{ 'is-done' if loop.index < s.number else 'is-current' if loop.index == s.number else '' }}">
+      <span class="task-dot">{{ "●" if loop.index <= s.number else "○" }}</span> {{ name }}</li>
+    {%- endfor %}
+  </ol>
+  {% include s.template %}
+</div>

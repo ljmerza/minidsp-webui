@@ -39,7 +39,8 @@
   <p class="output-sentence">{{ o.sentence }}</p>
   {% if c.reason %}
     <p class="output-reason health-{{ o.badge }}">{{ c.reason.text }}
-      {%- if c.reason_fixes %}<span class="home-card-fixes">{% for fx in c.reason_fixes %} {{ card_fix(fx, edit_url, preset) }}{% endfor %}</span>{% endif -%}
+      {%- if c.reason_fixes or (o.badge == "silent" and task_ids is defined and "diagnose" in task_ids) %}<span class="home-card-fixes">{% for fx in c.reason_fixes %} {{ card_fix(fx, edit_url, preset) }}{% endfor %}
+        {%- if o.badge == "silent" and task_ids is defined and "diagnose" in task_ids %} <a class="btn-link btn-small home-fix" href="{{ root }}/tasks/diagnose?what=one&amp;output={{ o.index + 1 }}">Something wrong?</a>{% endif %}</span>{% endif -%}
     </p>
   {% endif %}
 
