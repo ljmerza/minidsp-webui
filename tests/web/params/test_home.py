@@ -244,9 +244,10 @@ async def test_presets_and_profiles_say_what_plays_and_what_waits(ctx):
     assert "Preset 2: 1 change waiting" in html and 'href="/device?preset=2#sync">What\'s waiting?' in html
     switch = re.search(r'<button[^>]*hx-post="[^"]*/master/preset"[^>]*>', html, re.S).group(0)
     assert "hx-confirm=" in switch and '"preset": 1' in switch and 'hx-target="#app-header"' in switch
-    # a profile button opens the load step (the Profiles page until the wizard exists); it never loads in one tap
+    # a profile button opens the load wizard (design §14.8); it never loads in one tap
     link = re.search(r'<a class="btn-link home-profile" href="([^"]+)"', html).group(1)
-    assert re.fullmatch(r"/profiles#profile-\d+", link)
+    assert re.fullmatch(r"/tasks/profiles\?profile=\d+", link)
+    assert 'href="/tasks/profiles?do=save"' in html  # "+ Save current as…" starts the Save path
     assert "hx-post" not in html.split("home-profile-list", 1)[1]
 
 

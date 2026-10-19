@@ -37,6 +37,7 @@
     <div class="profile-actions" x-data="{ target: targetFor({{ p.id }}, '{{ l.active_preset if l.active_preset is not none else 0 }}') }"
          x-init="$watch('target', (v) => rememberTarget({{ p.id }}, v))">
       {% if p.loadable %}
+        <a class="btn-link btn-small" href="{{ p.load_href }}" data-task="profiles">Load&hellip;<span class="visually-hidden"> {{ p.name }}, step by step</span></a>
         <label class="visually-hidden" for="load-{{ p.id }}">Store {{ p.name }} in</label>
         <select id="load-{{ p.id }}" x-model="target">
           {% for o in l.preset_options %}

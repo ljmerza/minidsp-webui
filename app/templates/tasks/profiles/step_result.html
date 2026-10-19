@@ -1,0 +1,25 @@
+{#- Load, "Result" (design §14.8 step 5): where it is now, Switch now for a stored one, Undo. The chosen preset is kept
+    for the next load (P11). -#}
+{{ t.heading() }}
+{{ t.message(message) }}
+{{ t.message(error, error=true) }}
+<p class="task-msg" role="status"><span aria-hidden="true">&#10003;</span> {{ result }}</p>
+<div class="task-undo-row">
+  {%- if s.params.rev and undo_left > 0 %}
+  {%- call t.form("post", "task-undo-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="6">
+    <button type="submit" name="op" value="undo" class="task-undo" data-undo-left="{{ undo_left }}">Undo</button>
+  {%- endcall %}
+  {%- endif %}
+  {%- if waiting %}
+  {%- call t.form("post", "task-switch-form") %}
+    {{ t.hidden(s.params) }}
+    <input type="hidden" name="step" value="6">
+    <button type="submit" name="op" value="switch" class="task-more">Switch to preset {{ target_n }} now</button>
+  {%- endcall %}
+  {%- endif %}
+</div>
+{%- if waiting %}<p class="hint">Switching makes the sound drop for a few seconds while the device changes preset.</p>{% endif %}
+{%- if again_href %}<p class="hint"><a href="{{ again_href }}">Load another profile into preset {{ target_n }}&hellip;</a></p>{% endif %}
+{{ t.nav(close=true) }}

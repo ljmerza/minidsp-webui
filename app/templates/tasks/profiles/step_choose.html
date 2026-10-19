@@ -1,0 +1,23 @@
+{#- Save or load a setup, step 1 (design §14.8): save what a preset holds, or load a saved profile. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("do", "preset")) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Save or load?</legend>
+    <div class="task-choice task-choice-with">
+      <label><input type="radio" name="do" value="save"{% if do == "save" %} checked{% endif %}>
+        Save what a preset holds as a profile{{ help("profile") }}:</label>
+      <label class="visually-hidden" for="prof-source-{{ mode }}">Which preset to save</label>
+      <select id="prof-source-{{ mode }}" name="preset">
+        {%- for p in preset_choices %}<option value="{{ p.n }}"{% if p.n == source %} selected{% endif %}>{{ p.label }}</option>{% endfor %}
+      </select>
+    </div>
+    <label class="task-choice"><input type="radio" name="do" value="load"{% if do == "load" %} checked{% endif %}>
+      Load a saved profile into a device preset</label>
+  </fieldset>
+  <p class="hint">Profiles are saved in this app, not on the miniDSP. Saving writes nothing to the device; loading
+    shows every change and asks once before anything is sent.</p>
+{%- endcall %}
+{{ t.nav(next=2) }}

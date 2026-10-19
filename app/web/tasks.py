@@ -289,6 +289,7 @@ class Step:
     applied: bool = False  # this step follows a write: the page under the dialog refreshes
     toast: str | None = None  # after a write: shown with Undo once the dialog closes
     undo: UndoRecord | None = None
+    steps: tuple[str, ...] | None = None  # this run's step names when the wizard branches (default: the wizard's)
 
 
 @dataclass
@@ -398,11 +399,13 @@ def step_query(step: Step, serial: int | None) -> str:
 def shell_context(ctx: TaskCtx, wizard: Wizard, step: Step) -> dict[str, Any]:
     query = step_query(step, ctx.serial)
     undo_left = step.undo.seconds_left() if step.undo else 0.0
+    steps = step.steps or wizard.steps
     return {
         "w": wizard,
         "s": step,
         "mode": ctx.mode,
-        "total": len(wizard.steps),
+        "steps": steps,
+        "total": len(steps),
         "page_url": f"{ctx.root}/tasks/{wizard.id}",
         "fragment_url": f"{ctx.root}/ui/tasks/{wizard.id}",
         "step_url": f"{ctx.root}/tasks/{wizard.id}?{query}",
@@ -411,7 +414,7 @@ def shell_context(ctx: TaskCtx, wizard: Wizard, step: Step) -> dict[str, Any]:
         "session": ctx.session,
         "undo_json": step.undo.to_json() if step.undo and undo_left > 0 else None,
         "undo_left": int(undo_left),
-        "announce": f"{wizard.label}: step {step.number} of {len(wizard.steps)}, {step.title}",
+        "announce": f"{wizard.label}: step {step.number} of {len(steps)}, {step.title}",
         "task_href": ctx.task_href,
         **step.ctx,
     }

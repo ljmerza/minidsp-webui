@@ -1,0 +1,15 @@
+{#- Load, "Into which preset?" (design §14.8): each device preset with what it holds now. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  <p class="task-question">{% if name %}Loading &ldquo;{{ name }}&rdquo;. {% endif %}Which device preset{{ help("device-preset") }} should hold it?</p>
+  {{ t.hidden(s.params, skip=("target",)) }}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Into which preset?</legend>
+    {%- for r in rows %}
+    <label class="task-choice"><input type="radio" name="target" value="{{ r.n }}"{% if r.n == target %} checked{% endif %}>
+      <span>Preset {{ r.text }}</span></label>
+    {%- endfor %}
+  </fieldset>
+{%- endcall %}
+{{ t.nav(back=2, next=4) }}

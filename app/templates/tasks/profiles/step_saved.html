@@ -1,0 +1,6 @@
+{#- Save, step 4 (design §14.8): saved, shown inside the dialog. The profile now appears on Home. -#}
+{{ t.heading() }}
+<p class="task-msg" role="status"><span aria-hidden="true">&#10003;</span> {{ message }}</p>
+<p class="hint">It is listed under Profiles on Home and on the Profiles page.
+  {%- if load_href %} <a href="{{ load_href }}">Load it into another preset&hellip;</a>{% endif %}</p>
+{{ t.nav(close=true) }}

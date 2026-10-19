@@ -1,0 +1,33 @@
+{#- Set up this device step 4 (design §14.7): one summary-engine sentence per output, "Does this match how it sounds
+    today?". Nothing is written. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.hidden(s.params) }}
+  {%- if how == "software" %}
+  <p>Nothing to preview: the app will treat every setting as Unknown{{ help("st-unknown") }}, then Check device reads what
+    the device can report.</p>
+  {%- else %}
+  {%- for p in previews %}
+  <section class="task-checks-group" aria-label="Preset {{ p.n }}">
+    <h3 class="task-group-title">Preset {{ p.n }}{% if p.playing %} <span class="muted">(playing)</span>{% endif %}</h3>
+    {%- if p.problem %}<p class="task-msg task-msg-error" role="alert">{{ p.problem }}</p>{% endif %}
+    {%- if p.lines %}<ul class="task-result">{% for line in p.lines %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+    {%- if p.covered is not none %}<p class="hint">The script sets {{ p.covered }} of the preset's {{ p.total }} device settings.</p>{% endif %}
+    {%- if p.warnings %}
+    <details><summary>{{ p.warnings|length }} ignored line{{ "s" if p.warnings|length != 1 }}</summary>
+      <ul class="task-result">{% for w in p.warnings %}<li>line {{ w.line }}: {{ w.message }} <code>{{ w.text }}</code></li>{% endfor %}</ul>
+    </details>
+    {%- endif %}
+  </section>
+  {%- endfor %}
+  {%- if not broken %}<p class="task-question"><strong>Does this match how it sounds today?</strong></p>{% endif %}
+  {%- endif %}
+{%- endcall %}
+<div class="task-nav">
+  {%- set q = dict(s.params, step=2)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+  <a class="btn-link task-back" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+     hx-target="closest [data-task-host]" hx-swap="innerHTML"><span aria-hidden="true">&#9664;</span> {{ "Back" if how == "software" or broken else "No, go back" }}</a>
+  {%- if not broken %}
+  <button type="submit" form="task-main-{{ mode }}" name="step" value="5" class="btn-primary task-next">{{ "Next" if how == "software" else "Yes" }} <span aria-hidden="true">&#9654;</span></button>
+  {%- endif %}
+</div>

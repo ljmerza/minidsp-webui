@@ -1,0 +1,16 @@
+{#- Set up this device step 1 (design §14.7): why, and the promise that nothing is written until the last step. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {%- if no_device %}{{ t.no_device() }}{% endif %}
+  {{ t.hidden(s.params) }}
+  {%- if needs %}
+  <p>The app doesn't know what your miniDSP holds yet, so every setting shows as Unknown until it is sent.</p>
+  {%- elif adoption %}
+  <p>This device was set up before (preset {{ (adoption.preset or 0) + 1 }}). You can do it again, for example for
+    another preset or after changing settings with other software.</p>
+  {%- endif %}
+  <p class="task-ok"><strong>Nothing is written until the last step, and only if you choose to.</strong></p>
+  <p class="hint">Set up{{ help("set-up") }} tells the app what the device holds today, so it can show and change it
+    without surprises.</p>
+{%- endcall %}
+{{ t.nav(next=2) }}

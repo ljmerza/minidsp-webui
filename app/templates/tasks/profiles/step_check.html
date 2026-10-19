@@ -1,0 +1,40 @@
+{#- Load, "Check" (design §14.8 step 4): the one confirm. The changes by name, a required checkbox per big raise, the
+    unknown settings in one line, and when it plays. If the state changed meanwhile, this step comes back with the new
+    list (never a raw key, never a second dialog). -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(message) }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params) }}
+  <input type="hidden" name="step" value="5">
+  {%- if not broken %}
+  <p class="task-question">Store &ldquo;{{ name }}&rdquo; in preset {{ target_n }}.</p>
+  {%- if refusals %}
+  <p class="task-msg task-msg-error" role="alert">It can't be loaded:</p>
+  <ul class="task-result">{% for p in refusals %}<li>{{ p }}</li>{% endfor %}</ul>
+  {%- else %}
+  {%- if count %}
+  <p class="task-changes"><strong>{{ count }} change{{ "s" if count != 1 }}:</strong>
+    {{ first|join(" · ") }}{% if not rest %}.{% endif %}</p>
+  {%- if rest %}
+  <details class="task-more-changes">
+    <summary>{{ rest|length }} more <span aria-hidden="true">&#9656;</span></summary>
+    <ul class="task-result">{% for line in rest %}<li>{{ line }}</li>{% endfor %}</ul>
+  </details>
+  {%- endif %}
+  {%- else %}
+  <p>Preset {{ target_n }} already holds &ldquo;{{ name }}&rdquo;: nothing changes.</p>
+  {%- endif %}
+  {%- for c in confirms %}
+  <label class="task-confirm"><input type="checkbox" name="ok_{{ loop.index0 }}" value="{{ c.value }}" required> {{ c.text }}</label>
+  {%- endfor %}
+  {%- if unknown %}
+  <p class="hint">Preset {{ target_n }} also has {{ unknown }} setting{{ "s" if unknown != 1 }} the app hasn't confirmed on
+    the device; {{ "they're all" if unknown != 1 else "it is" }} sent when preset {{ target_n }} plays.</p>
+  {%- endif %}
+  <p>{{ when_text }}</p>
+  <p class="task-nothing-sent"><strong>Nothing is sent until you press Load.</strong></p>
+  {%- endif %}
+  {%- endif %}
+{%- endcall %}
+{%- if broken or refusals %}{{ t.nav(back=4) }}{% else %}{{ t.nav(back=4, apply="Load") }}{% endif %}

@@ -1,0 +1,31 @@
+{#- Load, step 1 of its own (design §14.8 "Which profile?"): every saved profile with what it does; preselected when
+    opened from a profile button. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("profile",)) }}
+  {%- if items %}
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">Which profile?</legend>
+    {%- for p in items %}
+    <div class="task-choice task-profile{% if not p.loadable %} is-unavailable{% endif %}">
+      <label class="task-profile-pick"><input type="radio" name="profile" value="{{ p.id }}"{% if p.id == chosen %} checked{% endif %}
+        {%- if not p.loadable %} disabled aria-describedby="prof-why-{{ p.id }}-{{ mode }}"{% endif %}>
+        <strong>{{ p.name }}</strong>{% if p.same_text %} <span class="muted">({{ p.same_text }})</span>{% endif %}</label>
+      {%- if p.description %}<p class="task-profile-note">{{ p.description }}</p>{% endif %}
+      {%- if not p.loadable %}<p class="task-why" id="prof-why-{{ p.id }}-{{ mode }}">{% if not p.valid %}Its document isn't valid any more.{% elif not p.model_ok %}It is for a {{ p.product_name }}.{% else %}The device's settings aren't loaded yet.{% endif %}</p>{% endif %}
+      {%- if p.lines %}
+      <details class="task-profile-lines">
+        <summary>What it does</summary>
+        <ul>{% for line in p.lines %}<li>{{ line }}</li>{% endfor %}</ul>
+      </details>
+      {%- endif %}
+      {%- if p.valid %}<a class="btn-link btn-small task-compare" href="{{ compare }}{{ p.id }}">Compare with what's playing<span class="visually-hidden">: {{ p.name }}</span></a>{% endif %}
+    </div>
+    {%- endfor %}
+  </fieldset>
+  {%- elif not error %}
+  <p class="task-question">No saved profiles yet.{% if save_href %} <a href="{{ save_href }}">Save one first&hellip;</a>{% endif %}</p>
+  {%- endif %}
+{%- endcall %}
+{%- if chosen %}{{ t.nav(back=1, next=3) }}{% else %}{{ t.nav(back=1) }}{% endif %}

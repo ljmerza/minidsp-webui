@@ -36,9 +36,10 @@ async def test_task_pages_and_links_light_up(ctx):
     assert 'href="/tasks/diagnose"' in page.text and 'href="/tasks/louder"' in page.text
     assert "Guided tasks" in page.text
     home = (await ctx.http.get("/")).text
-    assert 'data-tasks="diagnose louder eq-cut line-up"' in home  # the dialog on every page
+    assert 'data-tasks="diagnose louder eq-cut line-up set-levels profiles adopt"' in home  # the dialog on every page
     assert 'href="/tasks/diagnose"' in home  # the Help me… menu and Home's Guided tasks
-    assert (await ctx.http.get("/tasks/set-levels")).status_code == 404  # not built yet: its links keep their fallback
+    for task in ("eq-cut", "line-up", "set-levels", "profiles", "adopt"):  # all seven wizards are served now
+        assert (await ctx.http.get(f"/tasks/{task}")).status_code == 200, task
     assert (await ctx.http.get("/ui/tasks/nope")).status_code == 404
 
 

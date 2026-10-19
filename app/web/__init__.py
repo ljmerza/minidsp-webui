@@ -1,6 +1,16 @@
 """HTML pages and HTMX partials. Mount with ``app.include_router(app.web.router)``."""
 
-from app.web import home, task_diagnose, task_eq_cut, task_line_up, task_louder, tasks
+from app.web import (
+    home,
+    task_adopt,
+    task_diagnose,
+    task_eq_cut,
+    task_levels,
+    task_line_up,
+    task_louder,
+    task_profiles,
+    tasks,
+)
 from app.web.routes import router
 from app.web.templating import templates
 
@@ -14,6 +24,9 @@ tasks.register(task_diagnose.WIZARD)
 tasks.register(task_louder.WIZARD)
 tasks.register(task_eq_cut.WIZARD)
 tasks.register(task_line_up.WIZARD)
+tasks.register(task_levels.WIZARD)
+tasks.register(task_profiles.WIZARD)
+tasks.register(task_adopt.WIZARD)
 router.include_router(tasks.router)
 templates.env.globals["possessive"] = tasks.possessive  # "Sub's", "Shakers'"
 templates.env.globals["task_ids"] = tuple(tasks.WIZARDS)  # the wizards the dialog opens (tasks/_dialog.html)

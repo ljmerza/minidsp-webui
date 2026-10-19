@@ -157,7 +157,10 @@ def test_profile_buttons_open_the_load_step_and_never_load(desktop: Page, api: A
     expect(presets).to_contain_text("Device preset 1 is playing. Same as “Movies”.")
     before = api.desired(1)
     presets.get_by_role("link", name=re.compile(r"^Movies…")).click()
-    expect(desktop).to_have_url(re.compile(r"/profiles#profile-\d+$"))
+    # The load wizard opens (design §14.8) with the profile preselected; nothing is loaded.
+    dialog = desktop.locator("#task-dialog")
+    expect(dialog.locator(".task-heading")).to_contain_text("Which profile?")
+    expect(dialog.get_by_role("radio", name=re.compile("Movies"))).to_be_checked()
     assert api.desired(1) == before  # nothing was loaded
 
 

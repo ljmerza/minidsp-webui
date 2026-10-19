@@ -270,6 +270,8 @@ async def list_context(request: Request, session: DeviceSession | None) -> dict[
                 "valid": doc is not None,
                 "loadable": doc is not None and model_ok and state_ok,
                 "model_ok": model_ok,
+                # The guided load (design §14.8): one confirm that names every change; the controls below stay.
+                "load_href": url(request, "/tasks/profiles", do="load", profile=p.id),
                 "export_url": url(request, f"/api/v1/profiles/{p.id}/export"),
                 "script_url": url(request, f"/api/v1/profiles/{p.id}/export/cli-script"),
                 "rename_url": url(request, f"/ui/profiles/{p.id}/rename", serial=ctx["serial"]),

@@ -1,0 +1,21 @@
+{#- Save, step 2 (design §14.8): the problems the summary engine finds in the preset being saved, before it is kept.
+    [Fix first] goes to Something wrong?; [Save anyway] carries on. -#}
+{%- call t.form(main=true) %}
+  {{ t.heading() }}
+  {{ t.hidden(s.params) }}
+  {%- if items %}
+  <p class="task-question">Preset {{ preset_n }} has {{ items|length }} thing{{ "s" if items|length != 1 }} to look at
+    before you keep it:</p>
+  <ul class="task-health" aria-label="Problems in preset {{ preset_n }}">
+    {%- for i in items %}
+    <li class="task-health-item is-{{ i.level }}"><span aria-hidden="true">{{ i.glyph }}</span>
+      <span class="visually-hidden">{{ "Problem" if i.level == "problem" else "Caution" }}: </span>{{ i.text }}</li>
+    {%- endfor %}
+  </ul>
+  {%- if fix_href %}<p><a class="btn-link task-fix-first" href="{{ fix_href }}">Fix first</a></p>{% endif %}
+  <p class="hint">Or save it anyway: a profile keeps exactly what the preset holds, problems included.</p>
+  {%- else %}
+  <p class="task-msg" role="status"><span aria-hidden="true">&#10003;</span> No problems found in preset {{ preset_n }}.</p>
+  {%- endif %}
+{%- endcall %}
+{%- if items %}{{ t.nav(back=1, next=3, next_label="Save anyway") }}{% else %}{{ t.nav(back=1, next=3) }}{% endif %}

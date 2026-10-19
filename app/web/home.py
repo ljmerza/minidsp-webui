@@ -268,6 +268,11 @@ async def cards_context(
     return ctx
 
 
+def _save_href(wizard: str | None) -> str:
+    """ "+ Save current as…": the Save path of the profiles wizard (design §14.8), else the Profiles page."""
+    return f"{wizard}?do=save" if wizard and wizard.startswith("/tasks/") else (wizard or "/profiles")
+
+
 async def presets_context(request: Request, session: DeviceSession | None) -> dict[str, Any]:
     """Presets & profiles (design §4.1): which device preset is playing and which saved profile it matches, what waits
     for the other presets, and the saved profiles (each opens the load wizard; it never loads in one tap)."""
@@ -284,7 +289,7 @@ async def presets_context(request: Request, session: DeviceSession | None) -> di
         "saved_more": 0,
         "saved_error": None,
         "profiles_href": f"{root}/profiles",
-        "save_href": root + (shell.task_href(request, "profiles") or "/profiles"),
+        "save_href": root + _save_href(shell.task_href(request, "profiles")),
         "preset_url": f"{root}/ui/devices/{serial}/master/preset" if serial is not None else None,
     }
     if session is None or not getattr(session, "loaded", False):

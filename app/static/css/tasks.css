@@ -162,3 +162,61 @@ a.btn-link.btn-primary { background: var(--accent); border-color: var(--accent);
 }
 
 .task-back { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
+
+/* Set levels, Save or load a setup, Set up this device (design §14.6-14.8) */
+.task-ok { margin: 0 0 0.6rem; }
+.task-ok > [aria-hidden="true"] { color: var(--ok); }
+.task-live-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0 0 0.8rem; }
+.task-live, .task-fix-first, .task-again { min-height: 2.75rem; }
+a.task-live, a.task-fix-first, a.task-again, a.task-compare { display: inline-flex; align-items: center; }
+.task-applies-now { white-space: nowrap; font-size: 0.8rem; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.5rem; }
+.task-field-wide { display: block; margin: 0.6rem 0 0.25rem; }
+.task-text { width: 100%; min-height: 2.75rem; box-sizing: border-box; }
+textarea.task-text { font-family: var(--mono); font-size: 0.85rem; }
+.task-health { list-style: none; margin: 0 0 0.6rem; padding: 0; }
+.task-health-item { padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+.task-health-item.is-problem > [aria-hidden="true"] { color: var(--bad); }
+.task-health-item.is-caution > [aria-hidden="true"] { color: var(--warn); }
+.task-choice-block { flex-direction: column; align-items: stretch; }
+.task-choice-block > label { display: flex; align-items: flex-start; gap: 0.55rem; cursor: pointer; }
+.task-sub { margin: 0.3rem 0 0 1.65rem; }
+.task-profile { flex-direction: column; align-items: stretch; gap: 0.3rem; }
+.task-profile-pick { display: flex; align-items: flex-start; gap: 0.55rem; cursor: pointer; }
+.task-profile-note { margin: 0 0 0 1.65rem; color: var(--text-muted); }
+.task-profile-lines, .task-profile .task-compare, .task-profile .task-why { margin-left: 1.65rem; }
+.task-profile-lines summary, .task-more-changes summary { cursor: pointer; min-height: 2.75rem; display: flex; align-items: center; }
+.task-profile .task-compare { align-self: flex-start; }
+.task-changes { margin: 0 0 0.4rem; }
+.task-changes-box { margin: 0.8rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: var(--radius); }
+.task-changes-box .task-group-title { margin-top: 0; }
+.task-errors { color: var(--bad); }
+
+/* Set levels' meters: decorative bars, the peak as text (static/js/task_levels.js). */
+.lv-meters { list-style: none; margin: 0.4rem 0 0.6rem; padding: 0; display: grid; gap: 0.45rem; }
+.lv-row { display: grid; grid-template-columns: minmax(4rem, 7rem) 1fr; gap: 0.15rem 0.6rem; align-items: center; }
+.lv-name { font-weight: 600; overflow-wrap: anywhere; }
+.lv-bar { position: relative; height: 1.4rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.lv-zone { position: absolute; top: 0; bottom: 0; background: rgba(60, 207, 122, 0.22); border-left: 1px dashed var(--ok); border-right: 1px dashed var(--ok); }
+.lv-fill { position: absolute; left: 0; top: 0.3rem; bottom: 0.3rem; background: var(--accent); border-radius: 2px; transition: width 0.2s linear; }
+.lv-fill.is-hot { background: var(--bad); }
+.lv-clipmark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); }
+.lv-peak { grid-column: 2; font-size: 0.85rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lv-clips { color: var(--bad); }
+.task-wait { margin: 0.4rem 0 0.6rem; }
+.lv-volume { font-size: 1.05rem; margin: 0.2rem 0 0.4rem; }
+.lv-band { position: relative; height: 0.9rem; margin: 0.3rem 0 0.4rem; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.lv-band-zone { position: absolute; top: 0; bottom: 0; background: rgba(120, 160, 255, 0.25); }
+.lv-band-at, .lv-band-usual { position: absolute; top: -0.25rem; bottom: -0.25rem; width: 3px; margin-left: -1px; }
+.lv-band-at { background: var(--accent); }
+.lv-band-usual { background: var(--ok); }
+.lv-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.4rem 0 0.8rem; }
+.lv-steps .task-live-form { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .lv-fill { transition: none; }
+}
+@media (max-width: 599px) {
+  .lv-row { grid-template-columns: 1fr; }
+  .lv-peak { grid-column: 1; }
+}
+/* A step's write is under way (the main form is posting): the primary button says so. */
+.task-form.htmx-request + .task-nav .task-next { opacity: 0.7; cursor: progress; }

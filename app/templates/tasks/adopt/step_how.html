@@ -1,0 +1,62 @@
+{#- Set up this device step 2 (design §14.7): how was it set up? A backup file, a minidsp command script, miniDSP's
+    own software (or don't know), or factory defaults. The factory-defaults path keeps the adopt guard: what will be
+    remembered is listed and the box must be ticked; a custom channel name is a warning sign. Next posts (a file can
+    be attached); nothing is written. -#}
+{{ t.heading() }}
+{{ t.message(error, error=true) }}
+{%- if errors %}<ul class="task-result task-errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+<form id="task-main-{{ mode }}" class="task-form" method="post" action="{{ fragment_url }}" enctype="multipart/form-data"
+      hx-post="{{ fragment_url }}" hx-encoding="multipart/form-data" hx-target="closest [data-task-host]" hx-swap="innerHTML"
+      x-data='{ how: {{ how|tojson }} }'>
+  {{ t.hidden(s.params, skip=("how", "factory_ok")) }}
+  <input type="hidden" name="step" value="2">
+  <fieldset class="task-choices">
+    <legend class="visually-hidden">How was it set up?</legend>
+    <div class="task-choice task-choice-block">
+      <label><input type="radio" name="how" value="backup" x-model="how"{% if how == "backup" %} checked{% endif %}>
+        With this app before, and I have a backup file</label>
+      <div class="task-sub" x-show="how === 'backup'">
+        <label class="task-field">Backup or profile file (.json)
+          <input type="file" name="backup_file" accept=".json,application/json"></label>
+        {%- if have and how == "backup" %}<p class="hint">Using {{ have }}. Choose another file to replace it.</p>{% endif %}
+        <p class="hint">A backup from Settings → Backup, or a profile you exported. Nothing is written.</p>
+      </div>
+    </div>
+    <div class="task-choice task-choice-block">
+      <label><input type="radio" name="how" value="script" x-model="how"{% if how == "script" %} checked{% endif %}>
+        With <code>minidsp</code> commands</label>
+      <div class="task-sub" x-show="how === 'script'" x-cloak>
+        <label class="task-field task-field-wide" for="adopt-script-{{ mode }}">Paste the commands you ran (one per line)</label>
+        <textarea class="task-text" id="adopt-script-{{ mode }}" name="script" rows="6" spellcheck="false" autocomplete="off">{{ script }}</textarea>
+        <label class="task-field">Or choose the file <input type="file" name="script_file" accept=".txt,.sh,.minidsp,text/plain"></label>
+      </div>
+    </div>
+    <div class="task-choice task-choice-block">
+      <label><input type="radio" name="how" value="software" x-model="how"{% if how == "software" %} checked{% endif %}>
+        With miniDSP's own software, or I don't know</label>
+      <p class="task-sub hint" x-show="how === 'software'" x-cloak>The app will assume nothing (Don't know yet{{ help("dont-know") }})
+        and then check what the device can report. Device &amp; sync can use those values afterwards.</p>
+    </div>
+    <div class="task-choice task-choice-block">
+      <label><input type="radio" name="how" value="factory" x-model="how"{% if how == "factory" %} checked{% endif %}>
+        It's brand new or factory reset</label>
+      <div class="task-sub" x-show="how === 'factory'" x-cloak>
+        {%- if warning %}<p class="task-msg task-msg-error task-named-warning"><span aria-hidden="true">&#9888;</span> {{ warning }}</p>{% endif %}
+        <details>
+          <summary>What will be remembered</summary>
+          <ul class="task-result">{% for line in defaults_summary %}<li>{{ line }}</li>{% endfor %}</ul>
+        </details>
+        <p class="hint">The app can't read routing, on/off switches or compressor timing back, so it takes your word
+          for them. If they aren't really at the defaults, later edits act on whatever the device really holds.</p>
+        <label class="task-confirm"><input type="checkbox" name="factory_ok" value="1"{% if factory_ok %} checked{% endif %}
+               :required="how === 'factory'"> My device really is at factory defaults.</label>
+      </div>
+    </div>
+  </fieldset>
+</form>
+<div class="task-nav">
+  {%- set q = dict(s.params, step=1)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+  <a class="btn-link task-back" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+     hx-target="closest [data-task-host]" hx-swap="innerHTML"><span aria-hidden="true">&#9664;</span> Back</a>
+  <button type="submit" form="task-main-{{ mode }}" name="op" value="source" class="btn-primary task-next">Next <span aria-hidden="true">&#9654;</span></button>
+</div>

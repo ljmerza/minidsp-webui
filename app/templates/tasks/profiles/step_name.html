@@ -1,0 +1,22 @@
+{#- Save, step 3 (design §14.8): the name starts empty, with no placeholder that looks filled in; a note is optional.
+    Save stores it in this app (nothing is sent to the device). -#}
+{%- call t.form("post", main=true) %}
+  {{ t.heading() }}
+  {{ t.message(error, error=true) }}
+  {{ t.hidden(s.params, skip=("name", "note")) }}
+  <input type="hidden" name="step" value="3">
+  <p class="task-question">Saving preset {{ preset_n }}.</p>
+  <label class="task-field task-field-wide" for="prof-name-{{ mode }}">Name (for example Movies, Music, Night)</label>
+  <input class="task-text" id="prof-name-{{ mode }}" type="text" name="name" value="{{ name }}" required maxlength="80"
+         autocomplete="off"{% if error %} aria-invalid="true" aria-describedby="prof-name-error-{{ mode }}"{% endif %}>
+  {%- if error %}<p class="visually-hidden" id="prof-name-error-{{ mode }}">{{ error }}</p>{% endif %}
+  <label class="task-field task-field-wide" for="prof-note-{{ mode }}">Note (optional)</label>
+  <input class="task-text" id="prof-note-{{ mode }}" type="text" name="note" value="{{ note }}" maxlength="500" autocomplete="off">
+  <p class="hint">It is saved in this app. Nothing is sent to the device.</p>
+{%- endcall %}
+<div class="task-nav">
+  {%- set q = dict(s.params, step=2)|urlencode ~ ("&serial=" ~ serial_param if serial_param is not none else "") %}
+  <a class="btn-link task-back" href="{{ page_url }}?{{ q }}" hx-get="{{ fragment_url }}?{{ q }}&amp;mode={{ mode }}"
+     hx-target="closest [data-task-host]" hx-swap="innerHTML"><span aria-hidden="true">&#9664;</span> Back</a>
+  <button type="submit" form="task-main-{{ mode }}" name="op" value="save" class="btn-primary task-next">Save</button>
+</div>
