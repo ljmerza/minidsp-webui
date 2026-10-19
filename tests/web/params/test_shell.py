@@ -7,11 +7,12 @@ from types import SimpleNamespace
 import httpx
 from fastapi import FastAPI
 
+from app.model.master import MasterStatus
 from app.sync.status import Progress
 from app.web import shell
 from app.web.nav import NavItem, nav_groups
 
-from .conftest import UI
+from .conftest import SERIAL, UI
 
 
 def _nav(html: str) -> str:
@@ -142,6 +143,20 @@ async def test_problems_pill_counts_problems_and_lists_them_with_fixes(ctx):
     assert "Something wrong? (full check)" in panel
     announce = re.search(r'data-problems-announce="([^"]*)"', html).group(1)
     assert announce.startswith(f"{count} problem") and "silent" in announce
+
+
+async def test_problems_pill_offers_unmute_all_when_everything_is_muted(ctx):
+    # Review M2: [Unmute all] (no href or task) used to be dropped, so "Everything is muted" had no fix anywhere.
+    ctx.fake.master["mute"] = True
+    ctx.session.monitor.update_master(MasterStatus.model_validate(ctx.fake.master))
+    html = (await ctx.http.get("/ui/header")).text
+    panel = html.split('id="hdr-problems-list"', 1)[1]
+    item = re.search(r'<li class="pill-item pill-problem">.*?Everything is muted.*?</li>', panel, re.S)[0]
+    assert 'data-shell-action="master"' in item and 'data-endpoint="mute"' in item and ">Unmute all</button>" in item
+    assert f'data-master-url="/ui/devices/{SERIAL}/master"' in html
+    # What the button posts: the header's own mute endpoint.
+    response = await ctx.http.post(f"{UI}/master/mute", data={"mute": "false"}, headers={"HX-Request": "true"})
+    assert response.status_code == 200 and ctx.fake.master["mute"] is False
 
 
 async def test_header_rows_mute_all_clip_and_help_me(ctx):

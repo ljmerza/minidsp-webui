@@ -3,9 +3,26 @@
     sync and master events. -#}
 {%- set c = bar.counts -%}
 {%- set total = c.synced + c.pending + c.failed + c.unknown -%}
-{%- set st = "failed" if c.failed else "pending" if c.pending else "unknown" if c.unknown else "synced" -%}
+{#- The words come from the status model (bar.view, app/sync/status.py), as the header's: a setting the last check
+    found changed on the device stays ≠ here too. Without a view (state not loaded) the writer's counts are used. -#}
+{%- if bar.view is defined and bar.view is not none -%}
+  {%- set vc = bar.view.counts -%}
+  {%- set st = {"sent": "synced", "sending": "pending"}.get(bar.view.state, bar.view.state) -%}
+  {%- set parts = [] -%}
+  {%- if vc.failed %}{% set _ = parts.append(vc.failed ~ " failed") %}{% endif -%}
+  {%- if vc.changed %}{% set _ = parts.append(vc.changed ~ " changed on device") %}{% endif -%}
+  {%- if vc.sending %}{% set _ = parts.append(vc.sending ~ " sending") %}{% endif -%}
+  {%- if vc.waiting %}{% set _ = parts.append(vc.waiting ~ " waiting for preset " ~ (bar.preset + 1)) %}{% endif -%}
+  {%- if vc.unknown %}{% set _ = parts.append(vc.unknown ~ " unknown") %}{% endif -%}
+{%- else -%}
+  {%- set st = "failed" if c.failed else "pending" if c.pending else "unknown" if c.unknown else "synced" -%}
+  {%- set parts = [] -%}
+  {%- if c.pending %}{% set _ = parts.append(c.pending ~ (" sending" if bar.is_active else " waiting for preset " ~ (bar.preset + 1))) %}{% endif -%}
+  {%- if c.failed %}{% set _ = parts.append(c.failed ~ " failed") %}{% endif -%}
+  {%- if c.unknown %}{% set _ = parts.append(c.unknown ~ " unknown") %}{% endif -%}
+{%- endif -%}
 <div class="syncbar" id="syncbar" hx-get="{{ bar.syncbar_url }}"
-     hx-trigger="sse:sync throttle:750ms, sse:master throttle:750ms, mdsp-sync-changed from:body"
+     hx-trigger="sse:sync throttle:750ms, sse:master throttle:750ms, sse:verify delay:300ms, mdsp-sync-changed from:body"
      hx-target="this" hx-swap="outerHTML">
   <nav class="preset-tabs" aria-label="Preset to edit">
     <span class="hdr-label" id="syncbar-editing">Editing preset</span>{{ help("editing-preset") }}
@@ -30,7 +47,7 @@
       <span class="sync-icon" aria-hidden="true">{{ status_icon[st] }}</span>
       <span class="sync-text">
         {%- if st == "synced" %}all {{ total }} sent
-        {%- else %}{% if c.pending %}{{ c.pending }} {{ "sending" if bar.is_active else "waiting for preset " ~ (bar.preset + 1) }}{% endif %}{% if c.failed %}{% if c.pending %}, {% endif %}{{ c.failed }} failed{% endif %}{% if c.unknown %}{% if c.pending or c.failed %}, {% endif %}{{ c.unknown }} unknown{% endif %}{% endif -%}
+        {%- else %}{{ parts|join(", ") }}{% endif -%}
       </span>
     </span>
     {{ help("status") }}

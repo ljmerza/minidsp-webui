@@ -27,7 +27,8 @@
           {#- One literal help() per badge, so tests/web/test_glossary.py can check every id. -#}
           {%- if s.badge == "silent" %}{{ help("b-silent") }}{% elif s.badge == "overload" %}{{ help("b-overload") }}
           {%- elif s.badge == "muted" %}{{ help("b-muted") }}{% elif s.badge == "not_in_use" %}{{ help("b-not-in-use") }}
-          {%- elif s.badge == "check" %}{{ help("b-check") }}{% elif s.badge == "ready" %}{{ help("b-ready") }}{% endif %}
+          {%- elif s.badge == "check" %}{{ help("b-check") }}{% elif s.badge == "ready" %}{{ help("b-ready") }}
+          {%- elif s.badge == "unknown" %}{{ help("st-unknown") }}{% endif %}
           <p class="output-sentence">{{ s.sentence }}</p>
           {% if s.badge_reason and s.badge in ("silent", "check", "overload") %}
             {%- set issue = s.problems|selectattr("text", "equalto", s.badge_reason)|first -%}

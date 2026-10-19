@@ -1,4 +1,5 @@
 {#- Persistent header. Rendered inside #app-header on page load and by every /ui/... master partial. -#}
+{%- from "partials/fix_macros.html" import action_fix -%}
 {%- set vol = master.volume if master is not none and master.volume is not none else none -%}
 {%- set muted = master is not none and master.mute -%}
 {%- set base = root ~ "/ui/devices/" ~ serial ~ "/master" if serial is not none else "" -%}
@@ -12,14 +13,16 @@
 {%- set device_choices = devices if devices is defined and devices else [] -%}
 {#- A fix button of the problems list: an inline edit (static/js/shell.js sends it, then offers Undo) or a link. -#}
 {%- macro shell_fix(fx, edit_url, preset) -%}
-  {%- if fx.values -%}
+  {%- if fx.action -%}
+    {{ action_fix(fx, "btn-small", edit_url, preset) }}
+  {%- elif fx.values -%}
     <button type="button" class="btn-small" data-shell-fix data-url="{{ edit_url }}" data-preset="{{ preset }}"
             data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
   {%- elif fx.href -%}
     <a class="btn-link btn-small" href="{{ fx.href }}">{{ fx.label }}</a>
   {%- endif -%}
 {%- endmacro -%}
-<div class="hdr" data-serial="{{ serial if serial is not none else '' }}"
+<div class="hdr" data-serial="{{ serial if serial is not none else '' }}"{% if base %} data-master-url="{{ base }}"{% endif %}
      hx-target="#app-header" hx-swap="innerHTML">
   <div class="hdr-row hdr-top">
     <div class="hdr-device">
@@ -54,7 +57,7 @@
     {#- Desktop: the four preset buttons inline. Phone: "P1 ▾" opens them as a sheet that says what each holds. -#}
     <div class="hdr-sheet hdr-preset-box" x-data="hdrSheet" :class="{ 'is-open': open }"
          @keydown.escape="close(true)" @click.outside="close(false)">
-      <button type="button" class="hdr-sheet-toggle hdr-preset-toggle" @click="toggle()"
+      <button type="button" id="hdr-preset-toggle" class="hdr-sheet-toggle hdr-preset-toggle" @click="toggle()"
               aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-presets">
         <span aria-hidden="true">P{{ active_preset + 1 if active_preset is not none else "?" }} &#9662;</span>
         <span class="visually-hidden">Device preset{% if active_preset is not none %} {{ active_preset + 1 }} is playing{% endif %}. Choose a preset</span>
@@ -99,14 +102,14 @@
 
     {% if problems is not none %}
     {#- The problems pill (design §3.3): problems and cautions of the playing preset; info notes aren't counted. -#}
-    <div class="hdr-sheet hdr-problems{% if not problems.count %} is-clear{% endif %}" x-data="hdrSheet"
+    <div class="hdr-sheet hdr-problems{% if not problems.count %} is-clear{% endif %}{% if problems.first_run %} is-first-run{% endif %}" x-data="hdrSheet"
          :class="{ 'is-open': open }" @keydown.escape="close(true)" @click.outside="close(false)"
          data-problems-announce="{{ problems.announce }}" data-problems-preset="{{ problems.preset }}">
-      <button type="button" class="hdr-sheet-toggle hdr-pill {{ 'pill-warn' if problems.count else 'pill-ok' }}"
+      <button type="button" class="hdr-sheet-toggle hdr-pill {{ 'pill-warn' if problems.count else 'pill-unknown' if problems.first_run else 'pill-ok' }}"
               @click="toggle()" aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-problems-list">
-        <span aria-hidden="true">{{ "⚠" if problems.count else "✓" }}</span>
+        <span aria-hidden="true">{{ "⚠" if problems.count else "?" if problems.first_run else "✓" }}</span>
         {%- if problems.count %} <span class="pill-count">{{ problems.count }}</span><span class="pill-word"> problem{{ "s" if problems.count != 1 }}</span>
-        {%- else %} <span class="pill-word">No problems</span>{% endif %}
+        {%- else %} <span class="pill-word">{{ problems.label }}</span>{% endif %}
       </button>
       <div class="hdr-sheet-panel hdr-pop hdr-problems-list" id="hdr-problems-list" role="region" aria-labelledby="hdr-problems-title">
         {%- set fix_url = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ problems.preset ~ "/edit" %}
@@ -118,6 +121,11 @@
               {%- if item.fixes %}<span class="pill-fixes">{% for fx in item.fixes %}{{ shell_fix(fx, fix_url, problems.preset) }}{% endfor %}</span>{% endif %}</li>
           {% endfor %}
         </ul>
+        {% elif problems.first_run %}
+        {#- 4.4, as Home's health line: before set-up the app has nothing to check. -#}
+        <p class="pill-none" data-pill-first-run><span aria-hidden="true">?</span> Nothing to check yet: the app
+          doesn't know what your miniDSP holds until you set up this device.</p>
+        <p class="pill-more"><a class="btn-link" href="{{ root }}/device#adopt">Set up this device&hellip;</a></p>
         {% else %}
         <p class="pill-none"><span aria-hidden="true">✓</span> Everything the app can check looks fine.</p>
         {% endif %}
@@ -200,7 +208,7 @@
       <button type="button" id="volume-down" class="step" aria-label="Volume down {{ profile.master_volume_step_db|num }} dB"
               {%- if not controls_enabled or vol is none %} disabled{% endif %}
               hx-post="{{ base }}/volume/down">&minus;</button>
-      <button type="button" class="hdr-sheet-toggle vol-open" @click="toggle()"
+      <button type="button" id="hdr-volume-toggle" class="hdr-sheet-toggle vol-open" @click="toggle()"
               aria-expanded="false" :aria-expanded="open.toString()" aria-controls="hdr-volume-sheet">
         <span class="vol-open-label">Volume</span>
         <span class="vol-open-value"{% if vol is not none %} x-text="fmt(v)"{% endif %}>{{ vol|db }}</span>

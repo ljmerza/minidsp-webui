@@ -31,7 +31,7 @@
           <span class="xover-label" x-text="label(group)"></span>
           <span class="sync-badge is-compact" :class="`sync-${status(group)}`">
             <span class="sync-icon" aria-hidden="true" x-text="statusIcon(group)"></span>
-            <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status(group)] || status(group)"></span>
+            <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending', changed: 'changed on device' })[status(group)] || status(group)"></span>
           </span>
           <label class="enable">
             <input type="checkbox" :checked="!group.bypass" @change="setEnabled(group, $event.target.checked)">

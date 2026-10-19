@@ -39,4 +39,22 @@
   }
 
   document.addEventListener("htmx:load", (event) => restore(event.detail && event.detail.elt));
+
+  // A check that finished while the "Use the device's values" confirm was open wasn't shown (device.html skips that
+  // refresh and marks the box data-missed): once the confirm closes, load it.
+  document.addEventListener(
+    "close",
+    (event) => {
+      const dialog = event.target;
+      if (!(dialog instanceof Element) || !dialog.closest("#verify-dialog-slot")) return;
+      setTimeout(() => {
+        const box = document.getElementById("verify-box");
+        if (!box || !box.dataset.missed || !window.htmx) return;
+        if (document.querySelector("#verify-dialog-slot dialog, #verify-panel .htmx-request")) return;
+        delete box.dataset.missed;
+        window.htmx.trigger(box, "sse:verify");
+      }, 0);
+    },
+    true,
+  );
 })();

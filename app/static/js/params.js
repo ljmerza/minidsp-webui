@@ -13,10 +13,15 @@
   const DEBOUNCE_MS = 80;
   const MAX_WAIT_MS = 250; // a continuous drag still sends about 4 values a second, so it can be heard as it moves
   const LOCAL_HOLD_MS = 1500; // ignore echoes of a path for this long after the last local change
-  const RANK = { synced: 0, unknown: 1, pending: 2, failed: 3 };
-  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
+  // The status model's order (app/sync/status.py): Failed > Changed on device > Sending > Waiting > Unknown > Sent.
+  // "changed" (≠, found by the last check) and "waiting" (⏸, a preset that isn't playing) come from the server's
+  // status overlay (status.badge_statuses) and from "verify" events.
+  const RANK = { synced: 0, unknown: 1, waiting: 2, pending: 3, changed: 4, failed: 5 };
+  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?', changed: '≠', waiting: '⏸' };
   // On-screen words for the statuses (phase 9 design §2; app/web/ui_common.py STATUS_TEXT).
-  const WORD = { synced: 'sent', pending: 'sending', failed: 'failed', unknown: 'unknown' };
+  const WORD = {
+    synced: 'sent', pending: 'sending', failed: 'failed', unknown: 'unknown', changed: 'changed on device', waiting: 'waiting',
+  };
   const KEY_STEP = 0.5;
   const KEY_STEP_FINE = 0.1;
   const LEVELS_STALE_MS = 2500; // routing page: output levels older than this don't count as signal
@@ -58,6 +63,8 @@
       this.channels = new Map(); // path -> { timer, inflight, queued }
       this.localAt = new Map(); // path -> time of the last local change
       this.statusAt = new Map(); // path -> time of the last status from the server's event stream
+      this.sentSince = new Set(); // paths sent again since the last device check (no longer "changed on device")
+      this.checkedAt = null; // the last check's time, from "verify" events
       this.dragging = null;
       this.levels = readJsonAttr(root.dataset.outputLevels, []); // routing page only (sse:levels)
       this.levelsAt = this.levels.length ? performance.now() : -Infinity;
@@ -70,6 +77,7 @@
       });
       window.addEventListener('pointerup', () => { this.dragging = null; }, true);
       root.addEventListener('sse:sync', (e) => this.onSyncEvent(e.detail));
+      root.addEventListener('sse:verify', (e) => this.onVerifyEvent(e.detail));
       root.addEventListener('sse:desired', (e) => this.onDesiredEvent(e.detail));
       root.addEventListener('sse:levels', (e) => this.onLevelsEvent(e.detail));
       root.addEventListener('click', (e) => this.onClick(e));
@@ -128,12 +136,15 @@
         const paths = badge.dataset.syncFor.split(' ').filter(Boolean);
         let worst = 'synced';
         let reason = null;
+        const waiting = this.waiting();
         for (const p of paths) {
-          const st = this.status[p] || 'unknown';
+          let st = this.status[p] || 'unknown';
+          if (st === 'pending' && waiting) st = 'waiting';
+          if (!(st in RANK)) st = 'unknown';
           if (RANK[st] > RANK[worst]) worst = st;
           if (!reason && this.reasons[p]) reason = this.reasons[p];
         }
-        badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown)\b/, `sync-${worst}`);
+        badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown|changed|waiting)\b/, `sync-${worst}`);
         const icon = badge.querySelector('.sync-icon');
         const text = badge.querySelector('.sync-text');
         if (icon) icon.textContent = ICON[worst];
@@ -153,6 +164,11 @@
       }
     }
 
+    // The edited preset isn't playing (the sync bar shows the amber band), so its writes wait instead of being sent.
+    waiting() {
+      return !!document.querySelector('#syncbar [data-editing-band]');
+    }
+
     onSyncEvent(event) {
       const data = parseEvent(event);
       if (!data || data.preset !== this.preset) return;
@@ -160,9 +176,29 @@
       for (const [path, st] of Object.entries(data.changes || {})) {
         this.status[path] = st;
         this.statusAt.set(path, now);
+        if (st === 'pending') this.sentSince.add(path);
       }
       for (const path of data.removed || []) delete this.status[path];
       this.reasons = data.failed || {};
+      this.renderBadges();
+    }
+
+    // A device check (or using / undoing the device's values) publishes the paths it found changed on the device: they
+    // read ≠ until they are sent again, used or forgotten (design 11.1), as the header and the sync bar say.
+    onVerifyEvent(event) {
+      const data = parseEvent(event);
+      if (!data || data.preset !== this.preset || data.status === 'error' || !Array.isArray(data.paths)) return;
+      if (data.checked_at !== this.checkedAt) {
+        this.checkedAt = data.checked_at;
+        this.sentSince.clear();
+      }
+      const open = new Set(data.paths.filter((p) => !this.sentSince.has(p)));
+      for (const [path, st] of Object.entries(this.status)) {
+        if (st === 'changed' && !open.has(path)) this.status[path] = 'synced';
+      }
+      for (const path of open) {
+        if (this.status[path] === 'synced') this.status[path] = 'changed';
+      }
       this.renderBadges();
     }
 

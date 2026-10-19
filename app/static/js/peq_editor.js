@@ -8,8 +8,9 @@
 (() => {
   'use strict';
 
-  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
-  const RANK = { synced: 0, unknown: 1, pending: 2, failed: 3 };
+  // The status model's order (app/sync/status.py); "changed" (≠) and "waiting" (⏸) come from the page's status overlay.
+  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?', changed: '≠', waiting: '⏸' };
+  const RANK = { synced: 0, unknown: 1, waiting: 2, pending: 3, changed: 4, failed: 5 };
   const BAND_COLORS = [
     '#4ea1ff', '#ff7a59', '#3ccf7a', '#f0b429', '#a78bfa',
     '#22c3c3', '#f472b6', '#facc15', '#94a3b8', '#fb923c',

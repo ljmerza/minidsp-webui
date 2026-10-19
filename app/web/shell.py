@@ -84,11 +84,12 @@ class ProblemsView:
     items: tuple[PillItem, ...]  # problems, then cautions
     notes: tuple[PillItem, ...]  # info notes ("Notes (not problems)")
     announce: str  # what the polite live region says when this changes
+    first_run: bool = False  # the device isn't set up: there is nothing to check yet (design 4.4)
 
     @property
     def label(self) -> str:
         if not self.count:
-            return "No problems"
+            return "Nothing to check yet" if self.first_run else "No problems"
         return f"{self.count} problem{'s' if self.count != 1 else ''}"
 
 
@@ -119,7 +120,10 @@ def problems_view(request: Request, session: Any, summary: PresetSummary | None 
         announce = f"{len(items)} problem{'s' if len(items) != 1 else ''}: {lead}{more}."
     else:
         announce = "No problems."
-    return ProblemsView(summary.preset, len(items), items, notes, announce)
+    first_run = getattr(session, "needs_adoption", False) is True
+    if first_run and not items:
+        announce = "Nothing to check yet: set up this device first."
+    return ProblemsView(summary.preset, len(items), items, notes, announce, first_run)
 
 
 # --- the phone's status word (design §3.2) ---------------------------------------------------------------------------

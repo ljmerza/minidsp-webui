@@ -269,6 +269,11 @@ class Fix:
     values: dict[str, Any] = field(default_factory=dict)  # an inline edit (path -> value) flow.js sends
     undo: dict[str, Any] = field(default_factory=dict)  # what puts it back
     done: str = ""  # the toast after an inline edit
+    # Inline actions that aren't preset edits (static/js/shell.js, data-shell-action): "master" posts ``values`` (form
+    # fields) to the header's master endpoint ``endpoint`` ("mute", "volume") with ``undo`` for Undo; "post" posts to
+    # the edited preset's ``endpoint`` ("retry"); "clip" resets the CLIP lights.
+    action: str | None = None
+    endpoint: str | None = None
 
 
 def fixes(problem: Problem, root: str, in_names: Sequence[str], out_names: Sequence[str]) -> list[Fix]:
@@ -296,8 +301,36 @@ def _fix(action: Action, root: str, in_names: Sequence[str], out_names: Sequence
         o = int(p["output"])
         path = f"outputs.{o}.mute"
         return Fix(action.id, action.label, values={path: False}, undo={path: True}, done=f"{out_names[o]} un-muted.")
+    if action.id == "reset_filter" and "path" in p and "flat" in p:
+        path = str(p["path"])
+        undo = {path: p["was"]} if "was" in p else {}
+        return Fix(action.id, action.label, values={path: p["flat"]}, undo=undo, done="Filter reset to flat.")
+    if action.id == "unmute_all":
+        undo = {"mute": "true"}
+        done = "Everything un-muted (Mute all is off)."
+        return Fix(
+            action.id, action.label, values={"mute": "false"}, undo=undo, done=done, action="master", endpoint="mute"
+        )
+    if action.id == "set_volume" and "volume" in p:
+        volume = float(p["volume"])
+        undo = {"volume": p["was"]} if isinstance(p.get("was"), int | float) else {}
+        done = f"Volume set to {_db(volume)}."
+        return Fix(
+            action.id, action.label, values={"volume": volume}, undo=undo, done=done, action="master", endpoint="volume"
+        )
+    if action.id == "retry":
+        return Fix(action.id, action.label, done="Retrying.", action="post", endpoint="retry")
+    if action.id == "reset_clip":
+        return Fix(action.id, action.label, done="CLIP lights reset.", action="clip")
     if action.href:
         return Fix(action.id, action.label, href=root + action.href)
+    # No inline version yet: the page that has the button (design 7).
+    if action.id in ("send_app_values", "send_all"):
+        return Fix(action.id, action.label, href=f"{root}/device#sync")
+    if action.id == "switch_preset" and "preset" in p:
+        return Fix(action.id, action.label, href=f"{root}/device?preset={int(p['preset']) + 1}#sync")
+    if action.id == "edit_preset" and "preset" in p:
+        return Fix(action.id, action.label, href=f"{root}/routing?preset={int(p['preset']) + 1}")
     return None
 
 
@@ -461,7 +494,10 @@ def _output_view(
 
 
 def badge_term(badge: str) -> str:
-    """The glossary entry of a health badge (``not_in_use`` -> ``b-not-in-use``)."""
+    """The glossary entry of a health badge (``not_in_use`` -> ``b-not-in-use``). The first run's "? Unknown" has no
+    badge entry of its own in the design's glossary: it is the Unknown status."""
+    if badge == "unknown":
+        return "st-unknown"
     return "b-" + badge.replace("_", "-")
 
 

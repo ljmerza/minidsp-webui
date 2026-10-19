@@ -3,8 +3,11 @@
     row is a <section> with an <h3>; the SVG lines are aria-hidden and every route is repeated as text in its row
     ("Fed by In 1 at +4 dB"). Below 600 px a compact list replaces the diagram, which then opens in its own
     horizontally scrolling box (Details); only one of the two is ever displayed. -#}
+{%- from "partials/fix_macros.html" import action_fix -%}
 {%- macro fix_button(fx, cls="btn-small") -%}
-  {%- if fx.values -%}
+  {%- if fx.action -%}
+    {{ action_fix(fx, cls ~ " flow-fix", flow_edit_url, flow_preset) }}
+  {%- elif fx.values -%}
     <button type="button" class="{{ cls }} flow-fix" data-flow-fix data-values='{{ fx.values|tojson }}'
             data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
   {%- elif fx.href -%}
@@ -39,7 +42,8 @@
 
 {%- macro clip_chip(key, name) -%}
   <button type="button" class="flow-clip" :class="{ 'is-on': clip.{{ key }} }" @click="resetClip('{{ key }}')"
-          aria-label="{{ name }} CLIP light" :aria-label="clip.{{ key }} ? '{{ name }} clipped, press to reset' : '{{ name }} not clipping'">
+          data-name="{{ name }}" aria-label="{{ name }} CLIP light"
+          :aria-label="$el.dataset.name + (clip.{{ key }} ? ' clipped, press to reset' : ' not clipping')">
     <span aria-hidden="true">CLIP <span x-text="clip.{{ key }} ? '●' : '○'">&#9675;</span></span>
   </button>
 {%- endmacro -%}

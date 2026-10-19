@@ -11,7 +11,7 @@
   <span class="muted">input {{ channel.index + 1 }}</span></h1>
 {% include "partials/adopt_banner.html" %}
 <div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
-     hx-trigger="sse:sync, sse:desired">
+     hx-trigger="sse:sync, sse:desired, sse:verify">
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
   {% include "partials/channel_strip.html" %}

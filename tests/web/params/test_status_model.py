@@ -151,3 +151,49 @@ async def test_device_page_layout(ctx, checked):
     for word in ("Sending", "Waiting for preset N", "Failed", "Unknown", "Changed on device", "Can't check"):
         assert word in html.replace("&#39;", "'")
     assert "/static/js/device.js" in html and "/static/css/sync.css" in html
+
+
+# --- the editing pages and /meters read the same model (review M2) ------------------------------------------------
+
+
+def _badge(html: str, path: str) -> str:
+    return re.search(
+        rf'<span class="sync-badge[^"]*" data-sync-for="{re.escape(path)}">.*?</span>\s*</span>', html, re.S
+    )[0]
+
+
+async def test_output_page_sync_bar_and_badge_show_the_change_found_on_the_device(ctx, checked):
+    html = (await ctx.http.get("/outputs/2")).text
+    bar = re.search(r'<div class="syncbar-status">.*?</div>', html, re.S)[0]
+    assert "sync-changed" in bar and "changed on device" in bar and "all " not in bar
+    badge = _badge(html, "outputs.1.gain_db")
+    assert "sync-changed" in badge and "≠" in badge and "changed on device" in badge
+    # The page's own status map (params.js) carries it too, so a re-render of the badges keeps it.
+    assert '"outputs.1.gain_db": "changed"' in html
+    # Routing shows the same bar.
+    routing = (await ctx.http.get("/routing")).text
+    assert "changed on device" in re.search(r'<div class="syncbar-status">.*?</div>', routing, re.S)[0]
+
+
+async def test_sending_the_value_again_clears_the_mark_in_the_edit_reply(ctx, checked):
+    body = {"values": {"outputs.1.gain_db": -6.5}, "commit": True}
+    reply = (await ctx.http.post(f"{UI}/presets/0/edit", json=body, headers=HX)).json()
+    assert reply["sync"]["outputs.1.gain_db"] in ("pending", "synced")
+
+
+async def test_meters_cards_show_the_change_found_on_the_device(ctx, checked):
+    html = (await ctx.http.get(f"/ui/dashboard/outputs?serial={SERIAL}")).text
+    badges = re.findall(r'<span class="sync-badge ([^"]*)" data-sync-badge>(.*?)</span>\s*</span>', html, re.S)
+    assert len(badges) == 4
+    for cls, inner in badges:  # the zero-reading check finds something changed on every output
+        assert cls == "sync-changed" and "≠" in inner and "changed on device" in inner
+
+
+async def test_a_preset_that_isnt_playing_shows_waiting_on_its_badges(ctx):
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
+    await ctx.session.edit(1, {"outputs": {"0": {"gain_db": -3.0}}})
+    html = (await ctx.http.get("/outputs/1", params={"preset": 2})).text
+    badge = _badge(html, "outputs.0.gain_db")
+    assert "sync-waiting" in badge and "waiting" in badge and "sending" not in badge
+    bar = re.search(r'<div class="syncbar-status">.*?</div>', html, re.S)[0]
+    assert "waiting for preset 2" in bar

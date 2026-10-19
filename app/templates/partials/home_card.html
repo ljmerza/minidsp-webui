@@ -2,8 +2,11 @@
     the summary's sentence and badge, Level, total with the −/+ level rule, the at-limit notes, the headroom line, the
     output's meter and CLIP light (bound to the page's levelMeters component), Mute and Adjust ▾.
     static/js/dashboard.js (outputCards) drives the buttons; the data-* attributes carry what it needs. -#}
+{%- from "partials/fix_macros.html" import action_fix -%}
 {%- macro card_fix(fx, edit_url, preset) -%}
-  {%- if fx.values and edit_url -%}
+  {%- if fx.action -%}
+    {{ action_fix(fx, "btn-small home-fix", edit_url, preset) }}
+  {%- elif fx.values and edit_url -%}
     <button type="button" class="btn-small home-fix" data-shell-fix data-url="{{ edit_url }}" data-preset="{{ preset }}"
             data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}' data-done="{{ fx.done }}">{{ fx.label }}</button>
   {%- elif fx.href -%}
@@ -29,7 +32,8 @@
       {#- One literal help() per badge, so tests/web/test_glossary.py can check every id. -#}
       {%- if o.badge == "silent" %}{{ help("b-silent") }}{% elif o.badge == "overload" %}{{ help("b-overload") }}
       {%- elif o.badge == "muted" %}{{ help("b-muted") }}{% elif o.badge == "not_in_use" %}{{ help("b-not-in-use") }}
-      {%- elif o.badge == "check" %}{{ help("b-check") }}{% elif o.badge == "ready" %}{{ help("b-ready") }}{% endif %}
+      {%- elif o.badge == "check" %}{{ help("b-check") }}{% elif o.badge == "ready" %}{{ help("b-ready") }}
+      {%- elif o.badge == "unknown" %}{{ help("st-unknown") }}{% endif %}
     </span>
   </div>
   <p class="output-sentence">{{ o.sentence }}</p>

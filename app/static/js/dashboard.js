@@ -16,7 +16,7 @@
 (() => {
   'use strict';
 
-  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?' };
+  const ICON = { synced: '✓', pending: '⟳', failed: '⚠', unknown: '?', changed: '≠', waiting: '⏸' };
 
   const mdsp = () => window.mdsp || {};
   const toast = (message, level, options) => mdsp().toast && mdsp().toast(message, level, options);
@@ -378,7 +378,7 @@
         }
         const badge = card.querySelector('[data-sync-badge]');
         if (badge) {
-          badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown)\b/, 'sync-pending');
+          badge.className = badge.className.replace(/\bsync-(synced|pending|failed|unknown|changed|waiting)\b/, 'sync-pending');
           const icon = badge.querySelector('.sync-icon');
           const label = badge.querySelector('.sync-text');
           if (icon) icon.textContent = ICON.pending;

@@ -207,6 +207,24 @@ async def test_first_run_replaces_the_cards_until_the_device_is_set_up(ctx):
     assert "Nothing to check yet" in health and "looks fine" not in health
 
 
+async def test_first_run_flow_badges_and_header_say_unknown_not_check(ctx):
+    # Review M2 (design 4.4): before set-up every block and row is "?", never "⚠ Check", and the problems pill doesn't
+    # say "No problems" either.
+    html = (await ctx.http.get("/")).text
+    flow = html.split("data-flow ", 1)[1]
+    badges = re.findall(r'class="health-badge health-(\w+)', flow)
+    assert badges and set(badges) == {"unknown"}, badges
+    pill = re.search(r'class="hdr-sheet-toggle hdr-pill ([\w-]+)"[^>]*>(.*?)</button>', html, re.S)
+    assert pill[1] == "pill-unknown" and "Nothing to check yet" in pill[2] and "No problems" not in pill[2]
+    panel = html.split('id="hdr-problems-list"', 1)[1].split("</div>", 1)[0]
+    assert "data-pill-first-run" in panel and "looks fine" not in panel
+    assert 'href="/device#adopt">Set up this device&hellip;</a>' in panel
+    # Once set up, the pill and the badges are the usual ones again.
+    await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
+    html = (await ctx.http.get("/")).text
+    assert "health-unknown" not in html.split("data-flow ", 1)[1] and "pill-unknown" not in html
+
+
 async def test_meter_strip_lists_every_channel_and_links_meters_and_graph(ctx):
     await _walkthrough(ctx)
     html = (await ctx.http.get("/")).text

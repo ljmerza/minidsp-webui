@@ -32,6 +32,7 @@
       let lastAt = 0;
       let timer = null;
       let listener = null;
+      let clipReset = null;
 
       return {
         level: blank(null),
@@ -43,12 +44,16 @@
           if (cfg.initial) this.apply(cfg.initial);
           listener = (e) => this.onMessage(e.detail);
           this.$el.addEventListener('sse:levels', listener);
+          // A [Reset CLIP] fix in a health list (static/js/shell.js) resets these latches too.
+          clipReset = () => this.resetAllClips();
+          document.addEventListener('mdsp-clip-reset', clipReset);
           timer = setInterval(() => this.tick(), 250);
         },
 
         destroy() {
           clearInterval(timer);
           if (listener) this.$el.removeEventListener('sse:levels', listener);
+          if (clipReset) document.removeEventListener('mdsp-clip-reset', clipReset);
         },
 
         onMessage(event) {

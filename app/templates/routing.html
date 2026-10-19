@@ -8,7 +8,7 @@
 {% else %}
 {% include "partials/adopt_banner.html" %}
 <div class="params" data-params data-serial="{{ serial }}" data-preset="{{ preset }}" data-edit-url="{{ edit_url }}"
-     data-output-levels='{{ initial_output_levels|tojson }}' hx-trigger="sse:sync, sse:desired, sse:levels">
+     data-output-levels='{{ initial_output_levels|tojson }}' hx-trigger="sse:sync, sse:desired, sse:verify, sse:levels">
   {{ m.params_data(statuses, values, failed_reasons) }}
   {% include "partials/syncbar.html" %}
 

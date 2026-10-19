@@ -488,3 +488,13 @@ def test_json_shape():
     assert set(out) >= {"name", "badge", "sentence", "parts", "total", "headroom", "problems", "sync"}
     assert out["problems"][0]["silences"] is True and out["parts"]["band"]["label"] == "Full range"
     assert data["inputs"][1]["sentence"] == "Not sent to any output."
+
+
+def test_first_run_badges_are_unknown_not_a_guess():
+    # Design 4.4 (review M2): before set-up the app hasn't sent or read anything, so no output is "⚠ Check".
+    unused = {**NAMES, ("output", 3): meta("output", 3, unused=True)}
+    s = run(walkthrough(), unused, first_run=True)
+    assert [(o.badge, o.badge_glyph, o.badge_word) for o in s.outputs[:3]] == [("unknown", "?", "Unknown")] * 3
+    assert s.outputs[3].badge == "not_in_use"  # muted and marked Not in use in Settings: the user said so
+    assert "set up this device" in s.outputs[0].badge_reason
+    assert run(walkthrough(), unused).outputs[1].badge == "silent"

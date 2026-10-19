@@ -3,7 +3,9 @@
 //
 // - hdrSheet: a disclosure (button + panel) in the header: the problems list, Help me…, the CLIP pop-up, and on phones
 //   the preset and Volume sheets. Esc or a click outside closes it (Esc puts focus back on its button); one is open
-//   at a time. While one is open the header isn't re-rendered under it: the refresh waits until it closes.
+//   at a time. While one is open the header isn't re-rendered under it: the refresh waits until it closes. The reply
+//   to a request made from inside the open sheet (a preset button, Volume −/+) is shown at once: the Volume sheet
+//   stays open across it, the others close.
 // - navSheet: below 900 px the ≡ button opens the navigation as a sheet; the rest of the page is inert meanwhile, and
 //   Esc, ✕ or the backdrop close it with focus back on ≡.
 // - The bottom bar hides while a text or number field outside the header has focus (body.is-typing), so a phone's
@@ -34,12 +36,46 @@
     return !!document.querySelector('#app-header .hdr-sheet.is-open');
   }
 
+  // The open sheet's id (its panel's), when the reply to a request made from inside it is let through.
+  let swapFromSheet = null;
+  // Sheets whose buttons are pressed repeatedly (Volume −/+) stay open across that swap; the others (a preset
+  // switch) close, and focus goes back to their toggle.
+  const KEEP_OPEN = new Set(['hdr-volume-sheet']);
+
+  function sheetPanelId(sheet) {
+    const toggle = sheet && sheet.querySelector('.hdr-sheet-toggle');
+    return toggle ? toggle.getAttribute('aria-controls') : null;
+  }
+
   document.addEventListener('htmx:beforeSwap', (e) => {
     const target = e.detail.target;
     if (!target || target.id !== 'app-header' || !e.detail.shouldSwap) return;
-    if (headerHeld()) {
-      e.detail.shouldSwap = false;
-      refreshWaiting = true;
+    if (!headerHeld()) return;
+    // A reply to something done inside the open sheet (a preset button, Volume −/+) shows its result at once;
+    // only unrelated refreshes wait until the sheet closes.
+    const elt = e.detail.requestConfig && e.detail.requestConfig.elt;
+    const sheet = elt && elt.closest ? elt.closest('#app-header .hdr-sheet.is-open') : null;
+    if (sheet) {
+      swapFromSheet = sheetPanelId(sheet);
+      refreshWaiting = false; // this reply is the fresh header
+      return;
+    }
+    e.detail.shouldSwap = false;
+    refreshWaiting = true;
+  });
+
+  document.addEventListener('htmx:afterSettle', (e) => {
+    if (!swapFromSheet || !e.detail.target || e.detail.target.id !== 'app-header') return;
+    const id = swapFromSheet;
+    swapFromSheet = null;
+    if (openSheet) openSheet = null; // the old component is gone with the old header
+    const toggle = document.querySelector(`#app-header .hdr-sheet-toggle[aria-controls="${id}"]`);
+    const sheet = toggle ? toggle.closest('.hdr-sheet') : null;
+    if (!sheet) return;
+    if (KEEP_OPEN.has(id) && window.Alpine) {
+      window.Alpine.$data(sheet).show();
+    } else {
+      toggle.focus();
     }
   });
 
@@ -309,6 +345,105 @@
         returnFocus: toggle,
       },
     });
+  });
+
+  // --- the other inline fixes (data-shell-action, partials/fix_macros.html) -------------------------------------------
+  //
+  // "master": Unmute all / Set −30 dB through the header's master endpoints (form fields, as its own buttons send);
+  // a guarded change (a big volume step) asks first, then Undo puts the old value back. "post": Retry on the edited
+  // preset. "clip": the CLIP lights' Reset.
+
+  async function postForm(url, fields, confirm = false) {
+    const toast = mdsp().toast || (() => {});
+    const body = new URLSearchParams();
+    for (const [k, v] of Object.entries(fields || {})) body.set(k, String(v));
+    if (confirm) body.set('confirm', 'true');
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        credentials: 'same-origin',
+      });
+    } catch {
+      toast('Request failed: the web UI server is unreachable');
+      return false;
+    }
+    if (response.ok) return true;
+    let detail = response.headers.get('X-Mdsp-Error') || '';
+    try {
+      detail = decodeURIComponent(detail);
+    } catch {
+      /* keep it as sent */
+    }
+    if (response.status === 409 && !confirm && 'volume' in (fields || {})) {
+      if (window.confirm(`${detail || 'That is a big change of the volume'}.\n\nApply it anyway?`)) {
+        return postForm(url, fields, true);
+      }
+      return false;
+    }
+    toast(detail || `Change refused (HTTP ${response.status})`);
+    return false;
+  }
+
+  function masterUrl(endpoint) {
+    const hdr = document.querySelector('#app-header [data-master-url]');
+    return hdr && endpoint ? `${hdr.dataset.masterUrl}/${endpoint}` : null;
+  }
+
+  document.addEventListener('click', async (e) => {
+    const button = e.target instanceof Element ? e.target.closest('[data-shell-action]') : null;
+    if (!button || button.getAttribute('aria-disabled') === 'true') return;
+    const kind = button.dataset.shellAction;
+    const toast = mdsp().toast || (() => {});
+    // As the preset-edit fixes above: focus goes to the card, the health line or the diagram's title on the page, or
+    // back to the problems pill in the header, since the button is about to be re-rendered.
+    const onPage = !button.closest('#app-header');
+    const scope = onPage ? button.closest('[data-fix-scope]') : null;
+    const back = onPage
+      ? button.closest('[data-output], [data-input]') || (scope && scope.querySelector('[tabindex="-1"]'))
+        || document.getElementById('flow-title')
+      : document.querySelector('#app-header .hdr-problems .hdr-sheet-toggle');
+    const focusBack = () => {
+      if (openSheet && !onPage) openSheet.close(false);
+      if (back && back.isConnected) back.focus();
+    };
+    if (kind === 'clip') {
+      const store = window.Alpine ? window.Alpine.store('clip') : null;
+      if (store) store.reset();
+      document.dispatchEvent(new CustomEvent('mdsp-clip-reset'));
+      focusBack();
+      toast(button.dataset.done || 'CLIP lights reset.', 'info', { near: back });
+      return;
+    }
+    let values;
+    let undo;
+    try {
+      values = JSON.parse(button.dataset.values || '{}');
+      undo = JSON.parse(button.dataset.undo || '{}');
+    } catch {
+      return;
+    }
+    const url = kind === 'master' ? masterUrl(button.dataset.endpoint) : button.dataset.url;
+    if (!url) return;
+    button.setAttribute('aria-disabled', 'true');
+    const ok = await postForm(url, kind === 'master' ? values : {});
+    button.removeAttribute('aria-disabled');
+    if (!ok) return;
+    focusBack();
+    refreshHeader();
+    const options = { near: back };
+    if (kind === 'master' && Object.keys(undo).length) {
+      options.action = {
+        label: 'Undo',
+        onClick: async () => {
+          if (await postForm(url, undo)) refreshHeader();
+        },
+        returnFocus: back,
+      };
+    }
+    toast(button.dataset.done || 'Done.', 'info', options);
   });
 
   // --- wiring ----------------------------------------------------------------------------------------------------------

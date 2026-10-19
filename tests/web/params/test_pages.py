@@ -34,8 +34,8 @@ async def test_routing_matrix_shows_the_desired_routes(ctx):
     assert "data-mono-sum" in html and "data-mono-target" in html
     assert "/static/js/params.js" in html and "/static/js/routing.js" in html
     # the routing guard needs live output levels, so this page also subscribes to them
-    assert "topics=master%2Cdevice%2Csync%2Cdesired%2Clevels" in html
-    assert 'hx-trigger="sse:sync, sse:desired, sse:levels"' in html
+    assert "topics=master%2Cdevice%2Csync%2Cdesired%2Cverify%2Clevels" in html
+    assert 'hx-trigger="sse:sync, sse:desired, sse:verify, sse:levels"' in html
     assert "data-output-levels='[]'" in html
 
 

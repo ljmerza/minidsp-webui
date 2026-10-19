@@ -363,6 +363,29 @@ def status_view(session: Any, preset: int | None = None, last_verify: Any = _LAS
     )
 
 
+# The editing pages' per-setting badges, the sync bar and the /meters cards keep the writer's keys (synced / pending /
+# failed / unknown, as in the API and the CSS classes) plus the overlay's "changed" and "waiting".
+BADGE_KEYS = {
+    SENT: "synced",
+    SENDING: "pending",
+    WAITING: "waiting",
+    FAILED: "failed",
+    UNKNOWN: "unknown",
+    CHANGED: "changed",
+}
+
+
+def badge_statuses(session: Any, preset: int, view: StatusView | None = None) -> dict[str, str]:
+    """Each path's status for the editing pages' badges, from `status_view`: the writer's status with "changed" (≠,
+    still open from the last check) and "waiting" (⏸, a preset that isn't playing) overlaid. Falls back to the writer's
+    own statuses when there is no view (raises `StateUnavailable` as `DeviceSession.sync_status` does)."""
+    if view is None:
+        view = status_view(session, preset)
+    if view is None or view.preset != preset:
+        return dict(session.sync_status(preset))
+    return {path: BADGE_KEYS[state] for path, state in view.states.items()}
+
+
 def changed_paths(session: Any, preset: int) -> set[str]:
     """The open "changed on device" paths of ``preset`` (`status_view`'s overlay); empty when unknown."""
     view = status_view(session, preset)
@@ -370,6 +393,7 @@ def changed_paths(session: Any, preset: int) -> set[str]:
 
 
 __all__ = [
+    "BADGE_KEYS",
     "CANT_CHECK",
     "CHANGED",
     "FAILED",
@@ -383,6 +407,7 @@ __all__ = [
     "CheckSummary",
     "Progress",
     "StatusView",
+    "badge_statuses",
     "changed_paths",
     "check_summary",
     "counts_of",

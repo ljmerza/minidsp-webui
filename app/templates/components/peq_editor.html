@@ -143,7 +143,7 @@
               <span class="band-off" x-show="isOff(band)">off</span>
               <span class="sync-badge is-compact" x-show="!isOff(band)" :class="`sync-${status(band)}`">
                 <span class="sync-icon" aria-hidden="true" x-text="statusIcon(band)"></span>
-                <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending' })[status(band)] || status(band)"></span>
+                <span class="sync-text visually-hidden" x-text="({ synced: 'sent', pending: 'sending', changed: 'changed on device' })[status(band)] || status(band)"></span>
               </span>
             </td>
             <td class="row-actions">

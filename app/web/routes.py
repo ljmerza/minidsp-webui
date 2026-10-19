@@ -24,6 +24,7 @@ from app.sync.session import (
     SessionManager,
     SessionState,
 )
+from app.sync.status import badge_statuses
 from app.sync.summary import session_summary
 from app.web import devices, flow, glossary, shell
 from app.web.nav import build_nav, nav_groups
@@ -136,8 +137,9 @@ def page_context(request: Request, session: DeviceSession | None, topics: tuple[
 
 
 # Same order and glyphs as the editing pages' sync badges (app/web/ui_common.py).
-_SYNC_ORDER = ("failed", "pending", "unknown", "synced")
-_SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?"}
+# The status model's order and glyphs (app/sync/status.py), in the badges' keys (status.badge_statuses).
+_SYNC_ORDER = ("failed", "changed", "pending", "waiting", "unknown", "synced")
+_SYNC_ICON = {"synced": "✓", "pending": "⟳", "failed": "⚠", "unknown": "?", "changed": "≠", "waiting": "⏸"}
 
 
 async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | None:
@@ -159,7 +161,7 @@ async def output_cards(session: DeviceSession | None) -> list[dict[str, Any]] | 
     if not 0 <= preset < session.profile.n_presets:
         return None
     doc = session.desired(preset)
-    sync = session.sync_status(preset)
+    sync = badge_statuses(session, preset)
     summary = session_summary(session, preset)  # the plain-language sentence and badge (phase 9 design 6)
     cards = []
     for i, out in enumerate(doc.outputs):

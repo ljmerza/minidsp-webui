@@ -242,7 +242,7 @@ input[type="range"] { accent-color: var(--accent); min-height: 2.5rem; margin: 0
 .health-badge.health-ready { color: var(--ok); border-color: rgba(60, 207, 122, 0.45); }
 .health-badge.health-silent { color: var(--bad); border-color: var(--bad); background: rgba(255, 92, 92, 0.1); }
 .health-badge.health-check, .health-badge.health-overload { color: var(--warn); border-color: rgba(240, 180, 41, 0.6); }
-.health-badge.health-muted, .health-badge.health-not_in_use { color: var(--text-muted); border-style: dashed; }
+.health-badge.health-muted, .health-badge.health-not_in_use, .health-badge.health-unknown { color: var(--text-muted); border-style: dashed; }
 .output-reason.health-silent { color: var(--bad); }
 .output-reason.health-check, .output-reason.health-overload { color: var(--warn); }
 .output-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.85rem; }

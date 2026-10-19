@@ -55,7 +55,7 @@ async def test_dashboard_renders_header_meters_and_cards(http):
     # output cards: re-fetched on sync / desired events; dashboard.js handles preset switches and the quick controls
     box = re.search(r"<div[^>]*data-output-cards[^>]*>", html, re.S).group(0)
     assert f'hx-get="/ui/dashboard/outputs?serial={SERIAL}"' in box
-    assert 'hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh"' in box
+    assert 'hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh"' in box
     assert 'x-data="outputCards" hx-trigger="sse:master"' in html
     assert "/static/js/dashboard.js" in html
     assert 'data-action="mute"' not in html  # no preset state loaded: no quick controls

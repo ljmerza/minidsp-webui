@@ -2,8 +2,11 @@
     page. Problems and cautions show with their fixes; info notes are folded. An inline fix ("Route In 1 → Sub") is a
     data-shell-fix button, so static/js/shell.js sends it and offers Undo exactly as in the header. Re-fetched from
     /ui/home/health. -#}
+{%- from "partials/fix_macros.html" import action_fix -%}
 {%- macro home_fix(fx) -%}
-  {%- if fx.values and health_fix_url -%}
+  {%- if fx.action -%}
+    {{ action_fix(fx, "btn-small home-fix", health_fix_url, health.preset) }}
+  {%- elif fx.values and health_fix_url -%}
     <button type="button" class="btn-small home-fix" data-shell-fix data-url="{{ health_fix_url }}"
             data-preset="{{ health.preset }}" data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}'
             data-done="{{ fx.done }}">{{ fx.label }}</button>

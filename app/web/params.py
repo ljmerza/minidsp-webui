@@ -31,7 +31,7 @@ from app.sync.session import (
     StateUnavailable,
     UnknownPreset,
 )
-from app.sync.status import status_view
+from app.sync.status import badge_statuses, status_view
 from app.web.templating import TEMPLATE_DIR
 from app.web.ui_common import (
     EDIT_TOPICS,
@@ -150,7 +150,7 @@ def _base_ctx(request: Request, session: DeviceSession, preset: int, title: str,
     ctx = edit_page_context(request, session, title)
     serial = session.serial
     page = page_ref(request)
-    statuses = session.sync_status(preset)
+    statuses = badge_statuses(session, preset)  # the status model, so the badges agree with the header (design 11.1)
     values = simple_values(session, preset)
     summary = session.sync_summary(preset)
     ctx.update(
@@ -342,7 +342,7 @@ def _current(session: DeviceSession, preset: int, paths: list[str]) -> dict[str,
 
 def _statuses(session: DeviceSession, preset: int, paths: list[str]) -> dict[str, str]:
     try:
-        status = session.sync_status(preset)
+        status = badge_statuses(session, preset)
     except (StateUnavailable, UnknownPreset):
         return {}
     return {p: status[p] for p in paths if p in status}
@@ -429,6 +429,9 @@ def syncbar_context(request: Request, session: DeviceSession, preset: int, page:
     summary = session.sync_summary(preset)
     active = device_preset(session)
     base = f"/ui/devices/{serial}/presets/{preset}"
+    # The status model (app/sync/status.py): its counts and headline state, so the bar never says "all sent" while the
+    # header says "changed on device".
+    view = status_view(session, preset)
     return {
         "session": session,
         "serial": serial,
@@ -437,6 +440,7 @@ def syncbar_context(request: Request, session: DeviceSession, preset: int, page:
         "is_active": active == preset,
         "summary": summary,
         "counts": summary["counts"],
+        "view": view,
         "tabs": preset_tabs(session, preset),
         "page": page,
         "preset_link": (lambda p: preset_link(request, page, p)) if page else None,

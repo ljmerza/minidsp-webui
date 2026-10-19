@@ -51,6 +51,7 @@
 .hdr-pill { border-radius: 999px; font-size: 0.9rem; white-space: nowrap; }
 .hdr-pill.pill-warn { color: var(--warn); border-color: rgba(240, 180, 41, 0.7); }
 .hdr-pill.pill-ok { color: var(--ok); border-color: rgba(60, 207, 122, 0.45); }
+.hdr-pill.pill-unknown { color: var(--text-muted); border-style: dashed; }
 .hdr-problems-list { width: min(34rem, calc(100vw - 1.5rem)); }
 .pill-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.55rem; }
 .pill-item { display: grid; gap: 0.3rem; }

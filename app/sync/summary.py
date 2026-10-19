@@ -19,7 +19,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from app.model.config_doc import ConfigDoc, OutputCh, PeqBand
+from app.model.config_doc import ConfigDoc, CrossoverGroup, OutputCh, PeqBand
 from app.model.device_profile import DeviceProfile
 from app.model.filters import Biquad
 
@@ -103,6 +103,8 @@ BADGES: dict[str, tuple[str, str]] = {
     "not_in_use": ("◌", "Not in use"),
     "check": ("⚠", "Check"),
     "ready": ("✓", "Ready"),
+    # First run (design 4.4): the device isn't set up, so the app doesn't know what the output holds.
+    "unknown": ("?", "Unknown"),
 }
 
 # Sync words (section 2), worst first.
@@ -628,6 +630,7 @@ class _Ctx:
     failed_by: dict[tuple[str, int], int]
     changed_by: dict[tuple[str, int], int]
     block_status: dict[tuple[str, int], dict[str, list[str]]]
+    first_run: bool = False
 
     def sync_problems(self, kind: str, index: int, name: str) -> list[Problem]:
         found = []
@@ -672,6 +675,7 @@ def summarize(
     master: Any = None,
     staged: bool = False,
     route_hints: Mapping[int, int] | None = None,
+    first_run: bool = False,
 ) -> PresetSummary:
     """The plain-language summary and health of one preset (sections 6 and 7). Pure: no I/O.
 
@@ -679,7 +683,8 @@ def summarize(
     ``last_verify`` is the last device check (see `_verify_paths`); ``levels`` turns on the live-meter rules;
     ``master`` (a `MasterStatus` or dict) adds Mute all, Volume and "editing a preset that isn't playing";
     ``staged`` says the preset's pending writes wait for it to be played; ``route_hints`` maps an output to the
-    input to suggest in its "Route In N → Out" fix (default In 1)."""
+    input to suggest in its "Route In N → Out" fix (default In 1); ``first_run``: the device isn't set up yet, so every
+    output's badge is "? Unknown" (design 4.4) instead of a guess from settings the app never sent or read."""
     th = Thresholds.from_settings(settings)
     statuses = statuses or {}
     volume = _master_value(master, "volume")
@@ -720,6 +725,7 @@ def summarize(
         failed_by=failed_by,
         changed_by=changed_by,
         block_status=block_status,
+        first_run=first_run,
     )
     inputs = [_input_summary(ctx, doc, i) for i in range(len(doc.inputs))]
     outputs = [_output_summary(ctx, doc, n) for n in range(len(doc.outputs))]
@@ -736,7 +742,7 @@ def summarize(
                 f"Volume is at {plain(volume, 1)} dB, which is very quiet.",
                 None,
                 None,
-                (Action("set_volume", f"Set {MINUS}30 dB", params={"volume": -30.0}),),
+                (Action("set_volume", f"Set {MINUS}30 dB", params={"volume": -30.0, "was": volume}),),
             )
         )
     if preset is not None and isinstance(playing, int) and playing != preset:
@@ -791,7 +797,7 @@ def _input_summary(ctx: _Ctx, doc: ConfigDoc, i: int) -> InputSummary:
                 "input",
                 i,
                 (
-                    Action("reset_filter", "Reset this filter to flat", params={"path": f"inputs.{i}.peq.{k}"}),
+                    _reset_action(f"inputs.{i}.peq.{k}", ch.peq[k]),
                     Action("open", "Open", href=f"/inputs/{i + 1}"),
                 ),
             )
@@ -910,9 +916,10 @@ def _output_summary(ctx: _Ctx, doc: ConfigDoc, n: int) -> OutputSummary:
             )
         )
     for g in band.empty:
-        mine.append(_empty_problem(name, n, f"band filter {g + 1}", f"outputs.{n}.crossover.{g}", "crossover"))
+        path = f"outputs.{n}.crossover.{g}"
+        mine.append(_empty_problem(name, n, f"band filter {g + 1}", path, "crossover", out.crossover[g]))
     for k in eq.empty:
-        mine.append(_empty_problem(name, n, f"EQ band {k + 1}", f"outputs.{n}.peq.{k}", "peq"))
+        mine.append(_empty_problem(name, n, f"EQ band {k + 1}", f"outputs.{n}.peq.{k}", "peq", out.peq[k]))
     if clipped:
         mine.append(
             Problem(
@@ -1082,6 +1089,8 @@ def _output_summary(ctx: _Ctx, doc: ConfigDoc, n: int) -> OutputSummary:
     reason: str | None = None
     if out.mute and unused:
         badge = "not_in_use"
+    elif ctx.first_run:
+        badge, reason = "unknown", f"The app doesn't know what {name} holds yet: set up this device first."
     elif silencing:
         badge, reason = "silent", silencing[0].text
     elif clipped:
@@ -1140,7 +1149,21 @@ def _master_problem() -> Problem:
     )
 
 
-def _empty_problem(name: str, n: int, what: str, path: str, tab: str) -> Problem:
+def _reset_action(path: str, current: PeqBand | CrossoverGroup) -> Action:
+    """[Reset this filter to flat]: ``flat`` is the filter as a flat, bypassed one (an EQ band's factory state; a band
+    filter group keeps its number of biquads), ``was`` what it holds now (for Undo)."""
+    if isinstance(current, PeqBand):
+        flat = PeqBand(external=current.external).model_dump(mode="json")
+    else:
+        flat = CrossoverGroup(compiled=[Biquad()] * len(current.compiled)).model_dump(mode="json")
+    return Action(
+        "reset_filter",
+        "Reset this filter to flat",
+        params={"path": path, "flat": flat, "was": current.model_dump(mode="json")},
+    )
+
+
+def _empty_problem(name: str, n: int, what: str, path: str, tab: str, current: PeqBand | CrossoverGroup) -> Problem:
     return Problem(
         "filter_empty",
         PROBLEM,
@@ -1148,7 +1171,7 @@ def _empty_problem(name: str, n: int, what: str, path: str, tab: str) -> Problem
         "output",
         n,
         (
-            Action("reset_filter", "Reset this filter to flat", params={"path": path}),
+            _reset_action(path, current),
             Action("open", "Open", href=_out_href(n, tab)),
         ),
     )
@@ -1298,6 +1321,7 @@ def session_summary(session: Any, preset: int | None = None, *, levels: Levels |
         preset=preset,
         master=master,
         staged=staged,
+        first_run=getattr(session, "needs_adoption", False) is True,
     )
 
 

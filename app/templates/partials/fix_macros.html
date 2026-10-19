@@ -1,0 +1,10 @@
+{#- Inline fixes that aren't preset edits (app/web/flow.py Fix.action; static/js/shell.js sends them, data-shell-action):
+    "master" (Unmute all, Set −30 dB) posts to the header's master endpoint and offers Undo, "post" (Retry) posts to
+    the edited preset's endpoint next to ``edit_url``, "clip" resets the CLIP lights. -#}
+{%- macro action_fix(fx, cls, edit_url, preset) -%}
+  <button type="button" class="{{ cls }}" data-shell-action="{{ fx.action }}"
+          {%- if fx.action == "post" and edit_url %} data-url="{{ edit_url.rsplit('/', 1)[0] }}/{{ fx.endpoint }}"
+          {%- elif fx.endpoint %} data-endpoint="{{ fx.endpoint }}"{% endif %}
+          data-preset="{{ preset }}" data-values='{{ fx.values|tojson }}' data-undo='{{ fx.undo|tojson }}'
+          data-done="{{ fx.done }}">{{ fx.label }}</button>
+{%- endmacro -%}

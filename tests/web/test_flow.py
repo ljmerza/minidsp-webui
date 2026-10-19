@@ -1,5 +1,6 @@
 """The signal-flow diagram's geometry, block states and rendering (app/web/flow.py; phase 9 design §5)."""
 
+import html as html_lib
 import re
 
 import pytest
@@ -299,3 +300,20 @@ async def test_the_fragment_only_takes_a_plain_level_anchor(http):
     response = await http.get("/ui/flow", params={"level_anchor": 'x"><script>'})
     assert response.status_code == 200
     assert "<script>" not in response.text
+
+
+EVIL = "'+(document.title='PWNED')+'\""
+
+
+def test_a_channel_name_never_lands_inside_an_alpine_expression():
+    # Review M2: the CLIP chip put the (HTML-escaped) name inside a quoted JS string in :aria-label; the browser
+    # decodes &#39; before Alpine evaluates the attribute, so a name with ' ran as code on Home.
+    names = {**UNUSED, ("output", 3): meta("output", 3, EVIL, unused=True), ("input", 1): meta("input", 1, EVIL)}
+    html = _render(build_flow(run(walkthrough(), names), M2X4HD))
+    expressions = re.findall(r'\s(?::[\w.-]+|x-[\w.:-]+|@[\w.:-]+)="([^"]*)"', html)
+    assert expressions
+    for expr in expressions:
+        decoded = html_lib.unescape(expr)
+        assert "PWNED" not in decoded, decoded
+    # The name still reaches the CLIP chip, through a data attribute.
+    assert 'data-name="&#39;+(document.title=&#39;PWNED&#39;)+&#39;&#34;"' in html

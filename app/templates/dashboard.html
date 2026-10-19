@@ -56,7 +56,7 @@
     <p class="hint terms-line">Output level{{ help("level") }} &middot; Delay{{ help("delay") }} &middot;
       Band (crossover){{ help("band") }} &middot; Status{{ help("status") }}</p>
     <div class="output-cards-box" data-output-cards hx-get="{{ outputs_url }}"
-         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, refresh" hx-swap="innerHTML">
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, refresh" hx-swap="innerHTML">
       {% include "partials/dashboard_outputs.html" %}
     </div>
   </section>
