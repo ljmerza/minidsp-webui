@@ -100,6 +100,9 @@
 /* EQ table on a phone (design §8.3, §16 phone rule 3): one card per band, no sideways scroll; unused bands fold away
    behind "Show all". */
 .peq-unused-toggle { display: none; }
+/* The − / + steppers are for the phone's cards; the desktop table keeps plain fields (design §8.2). */
+.peq-table .peq-step { display: none; }
+.peq-table .q-range { display: block; margin-top: 0.15rem; color: var(--text-muted); font-size: 0.75rem; white-space: nowrap; }
 @media (max-width: 599px) {
   .peq-editor .table-scroll { overflow-x: visible; }
   .peq-table, .peq-table > tbody, .peq-table tr { display: block; width: 100%; min-width: 0; }
@@ -118,6 +121,15 @@
   .peq-table > tbody > tr.peq-drawer-row > td { display: block; }
   .peq-table:not(.is-showing-all) > tbody.is-unused:not(.is-selected) { display: none; }
   .peq-unused-toggle { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; }
+  /* Steppers (design §8.3): frequency and width get a row each; Cut / Boost shares its row with the magnitude. */
+  .peq-table > tbody > tr:first-child { grid-template-columns: auto minmax(0, 1fr); }
+  .peq-table > tbody > tr > td.peq-num:not([data-label="dB"]) { grid-column: 1 / -1; flex-wrap: wrap; }
+  .peq-table > tbody > tr > td.peq-num input.num { flex: 1 1 3.5rem; width: auto; }
+  .peq-table .peq-step {
+    display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 44px; min-height: 44px;
+    padding: 0; font-size: 1.15rem; line-height: 1; color: var(--text);
+  }
+  .peq-table .q-range { display: inline; margin: 0; font-size: 0.8rem; }
 }
 
 @media (max-width: 599px), (pointer: coarse) {
