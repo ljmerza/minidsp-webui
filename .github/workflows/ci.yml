@@ -18,7 +18,8 @@ jobs:
     secrets: inherit
 
   build:
-    needs: tests
+    # PR images are throwaway (pr-N tags), so build them alongside the tests instead of after them; main and release
+    # builds (build-and-push.yml) still wait for the tests.
     permissions:
       contents: read
       packages: write

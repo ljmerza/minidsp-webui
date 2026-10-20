@@ -58,7 +58,9 @@ async def test_patch_preset(api, session, fake):
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["revision"] == 1 and data["changed"] == ["outputs.0.gain_db"]
-    assert data["sync"] == {"outputs.0.gain_db": "pending"}
+    # "pending" until the writer flushes (50 ms gather window); a slow (e.g. parallel, loaded) run can already see the
+    # flush done by the time the response is built. Either is correct; the write itself is checked below.
+    assert data["sync"]["outputs.0.gain_db"] in ("pending", "synced")
     await settle(session)
     assert fake.configs == [{"outputs": [{"index": 0, "gain": -2.5}]}]
     assert (await api.get(f"{BASE}/presets/0")).json()["sync"]["outputs.0.gain_db"] == "synced"
