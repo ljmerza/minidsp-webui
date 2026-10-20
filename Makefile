@@ -56,4 +56,4 @@ e2e-setup:
 	scripts/fetch-minidspd.sh
 
 test-e2e:
-	uv run pytest -m e2e tests/e2e
+	uv run pytest -m e2e tests/e2e -n $${E2E_WORKERS:-4} --dist loadfile

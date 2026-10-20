@@ -1,8 +1,8 @@
 // Master volume: an Alpine component keeps the slider and the numeric field in step; htmx sends the value after
 // an 80 ms pause (hx-trigger "input changed delay:80ms"). Header swaps are held back while the user is still
 // adjusting the volume (a drag, a press on −/+, a value being typed, a pending or in-flight send), so a refresh never
-// yanks a control out from under them or drops a pending change; and a swap settles at once, so the new controls
-// work from the first event after it.
+// yanks a control out from under them or drops a pending change. Swaps settle at once (htmx-config in base.html), so
+// the new controls work from the first event after one.
 //
 // The slider is dB-weighted (phase 9 design §10.3, P12): −127…−60 dB uses the first 15% of the track and −60…0 dB the
 // rest, so the usable range isn't a thin strip at the top. The <input type=range> stays native; its value is a track
@@ -130,17 +130,29 @@
     if (isVolume(e.detail.elt)) state.inflight = Math.max(0, state.inflight - 1);
   });
 
+  // A header refresh that went out before a write (Volume, Mute all, a preset, the source) may have been rendered
+  // before the write landed; answered after the write's reply, it would put the old value back on screen. So each
+  // refresh remembers how many writes had been answered when it was sent, and one answered after a newer write is
+  // dropped and the header fetched again (as dashboard.js does with the output cards).
+  const isHeader = (el) => !!el && el.id === 'app-header';
+  const isGet = (e) => !!e.detail.requestConfig && String(e.detail.requestConfig.verb).toLowerCase() === 'get';
+  let writesAnswered = 0;
+  const sentAfter = new WeakMap(); // a header refresh's xhr -> writesAnswered when it was sent
+  document.addEventListener('htmx:beforeRequest', (e) => {
+    if (isHeader(e.detail.target) && isGet(e) && e.detail.xhr) sentAfter.set(e.detail.xhr, writesAnswered);
+  });
+  document.addEventListener('htmx:afterRequest', (e) => {
+    if (isHeader(e.detail.target) && !isGet(e)) writesAnswered += 1; // after its reply was swapped in
+  });
+  const stale = (xhr) => !!xhr && sentAfter.has(xhr) && sentAfter.get(xhr) < writesAnswered;
+
   document.addEventListener('htmx:beforeSwap', (e) => {
     const target = e.detail.target;
     if (!target || target.id !== 'app-header' || !e.detail.shouldSwap) return;
-    if (busy(isVolume(e.detail.elt) ? 1 : 0)) {
+    if (busy(isVolume(e.detail.elt) ? 1 : 0) || stale(e.detail.xhr)) {
       e.detail.shouldSwap = false;
       scheduleRefresh();
-      return;
     }
-    // htmx binds the new controls' triggers when the swap settles, 20 ms after it by default; a tap, an arrow key or
-    // a −/+ click in between went nowhere (the slider moved, the device didn't). Settle in the same task instead.
-    e.detail.swapOverride = 'innerHTML settle:0ms';
   });
 
   document.addEventListener('htmx:afterSwap', (e) => {
