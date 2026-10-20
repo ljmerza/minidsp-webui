@@ -149,7 +149,15 @@
         for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
           document.addEventListener(type, () => this.stopHold(true), true);
         }
-        this.$el.addEventListener('pointerleave', () => this.stopHold(false), true);
+        // `pointerleave` doesn't bubble, but this capturing listener sees it for every element in the card: only the
+        // held button's own counts (the pointer left it), not its −/+ glyph's (the pointer moved onto its padding).
+        this.$el.addEventListener(
+          'pointerleave',
+          (e) => {
+            if (hold && e.target === hold.button) this.stopHold(false);
+          },
+          true,
+        );
         document.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') this.stopHold(false);
         }, true);
