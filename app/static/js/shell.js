@@ -73,7 +73,9 @@
     const sheet = toggle ? toggle.closest('.hdr-sheet') : null;
     if (!sheet) return;
     if (KEEP_OPEN.has(id) && window.Alpine) {
-      window.Alpine.$data(sheet).show();
+      // Header swaps settle in the swap's own task (master.js), before Alpine has started the new header's components
+      // (its mutation observer runs as a microtask); queued after it, $data is the sheet's, not the page's navSheet.
+      queueMicrotask(() => window.Alpine.$data(sheet).show());
     } else {
       toggle.focus();
     }
