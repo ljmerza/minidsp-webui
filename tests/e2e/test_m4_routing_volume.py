@@ -160,11 +160,15 @@ def test_one_confirm_rule_with_the_clearer_drop_wording(desktop: Page, api: Api)
     # is about to be swapped out, its debounced request is dropped, and the test times out (seen ~1 in 6 runs).
     settle(desktop)
 
-    # A tap on the track far below asks too, and the slider sends dB.
+    # A tap on the track far below asks too, and the slider sends dB. The slider is looked up and the input dispatched
+    # in one task: a locator resolved first could hand over a slider that a header swap detaches before the input lands.
     dialogs.clear()
-    slider = desktop.locator("#master-volume")
-    tap = "(el) => { el.value = String(window.mdsp.volumeScale.toPos(-60)); el.dispatchEvent(new Event('input')); }"
-    slider.evaluate(tap)
+    tap = """() => {
+      const el = document.getElementById('master-volume');
+      el.value = String(window.mdsp.volumeScale.toPos(-60));
+      el.dispatchEvent(new Event('input'));
+    }"""
+    desktop.evaluate(tap)
     wait_until(lambda: _volume(api) == -60, what="the confirmed slider drop", page=desktop)
     assert dialogs and dialogs[0].startswith("Drop the volume from −10 to −60 dB?")
     api.master(volume=-30, confirm=True)
