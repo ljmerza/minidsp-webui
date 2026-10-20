@@ -310,10 +310,12 @@ class _Burst:
     source: str
     doc: ConfigDoc  # the desired doc after the burst's latest edit: what its revision records
     timer: asyncio.TimerHandle | None = None
+    interrupted: bool = False  # another setting changed since: the next commit, whatever it is, closes the burst
 
     def takes(self, paths: Sequence[str], source: str) -> bool:
-        """Whether a commit of ``paths`` from ``source`` continues this burst (an edit that changed nothing does)."""
-        return source == self.source and (not paths or frozenset(paths) == self.paths)
+        """Whether a commit of ``paths`` from ``source`` continues this burst (an edit that changed nothing does,
+        unless another setting changed after the burst's last edit: that commit, e.g. a slider release, is its own)."""
+        return not self.interrupted and source == self.source and (not paths or frozenset(paths) == self.paths)
 
 
 def flush_json(result: FlushResult | None) -> dict[str, Any] | None:
@@ -1764,6 +1766,8 @@ class DeviceSession:
         if not paths:
             return old, [], []
         self._flat_cache[preset] = (new, new_flat)
+        if (burst := self._bursts.get(preset)) is not None and not burst.paths.issuperset(paths):
+            burst.interrupted = True
         device_paths = self.writer.set_desired(preset, new)
         self._schedule_persist(preset)
         self._mark_uncommitted(preset, source, summary)
@@ -1867,8 +1871,12 @@ class DeviceSession:
         have stopped for ``commit_coalesce_s``. Any other commit of the preset (another setting, Apply, a profile load,
         a revert, shutdown) writes the burst first, as its own revision. Returns the preset's current revision, which
         doesn't count a burst still held."""
+        waited = False
         while (burst := self._bursts.get(preset)) is not None and not burst.takes(paths, source):
             await self._flush_burst(preset)
+            waited = True
+        if waited:  # edits staged while the flush ran are newer than ``doc``; the burst must not record an older one
+            doc = self.writer.state(preset).desired
         if self.commit_coalesce_s <= 0 or self._stopped:
             return await self.commit(preset)
         if burst is None:
@@ -1931,7 +1939,8 @@ class DeviceSession:
         doc: ConfigDoc | None = None,
     ) -> int:
         """`commit` of the current desired doc, or of ``doc``, an earlier one (a burst's): then later edits stay
-        uncommitted for the next revision."""
+        uncommitted for the next revision, and the stored preset state keeps the current doc (only the history row
+        records the earlier one)."""
         partial = doc is not None and doc is not self.writer.state(preset).desired
         if not partial and (handle := self._commit_timers.pop(preset, None)):
             handle.cancel()
@@ -1953,7 +1962,14 @@ class DeviceSession:
                 applied, unknown = self._stored_shadow(preset)
                 try:
                     revision = await self.repo.commit_revision(
-                        self.serial, preset, doc, summary=text, source=origin, applied=applied, unknown_paths=unknown
+                        self.serial,
+                        preset,
+                        doc,
+                        summary=text,
+                        source=origin,
+                        applied=applied,
+                        unknown_paths=unknown,
+                        state=current if partial else None,
                     )
                 except Exception as exc:
                     self._uncommitted.setdefault(preset, pending or _Uncommitted(origin, summary))
@@ -1969,6 +1985,8 @@ class DeviceSession:
                 revision += 1
             self.revisions[preset] = revision
             self._baseline[preset] = doc
+            if partial and preset not in self._uncommitted:  # the newer edits still need a revision of their own
+                self._mark_uncommitted(preset, origin, None)
         self.bus.publish(
             DESIRED,
             {

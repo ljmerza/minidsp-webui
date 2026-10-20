@@ -129,6 +129,14 @@ async def test_commit_revision_skips_unchanged(repo):
     assert await repo.commit_revision(SERIAL, 0, doc(1), skip_if_unchanged=False) == 2
 
 
+async def test_commit_revision_can_store_a_newer_state_than_its_history_row(repo):
+    """A held-back burst records an earlier doc; the stored preset state keeps the current one."""
+    assert await repo.commit_revision(SERIAL, 0, doc(1), state=doc(2)) == 1
+    assert (await repo.get_revision(SERIAL, 0, 1)).desired == doc(1)
+    st = await repo.get_preset_state(SERIAL, 0)
+    assert st.revision == 1 and st.desired == doc(2)
+
+
 async def test_commit_after_debounced_persist_of_same_doc(repo):
     """The debounced persist may already hold the new doc; the commit must still record a revision."""
     await repo.commit_revision(SERIAL, 0, doc(1))

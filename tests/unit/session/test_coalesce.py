@@ -252,3 +252,64 @@ async def test_failed_burst_write_keeps_the_edits_uncommitted(make_session, repo
     monkeypatch.undo()
     assert await s.commit(0) == 1
     assert [r.summary for r in await repo.list_revisions(SERIAL, 0)] == ["outputs.0.gain_db: 0 → -1"]
+
+
+async def stored_gains(repo) -> list[float]:
+    return [o["gain_db"] for o in (await repo.get_preset_state(SERIAL, 0)).desired["outputs"]]
+
+
+async def test_concurrent_presses_while_a_burst_is_held_store_the_current_doc(make_session, repo, fake):
+    """Two presses on other settings at once: the second one's burst must not record (or store) the doc as it was
+    before the first one's flush, which would put output 3 back to 0 in the history and in the stored state."""
+    s = await make_session(commit_idle_s=60.0, commit_coalesce_s=WINDOW)
+    await press(s, 0, "outputs.0.gain_db", -0.5)
+    await asyncio.gather(press(s, 0, "outputs.1.gain_db", -1.0), press(s, 0, "outputs.2.gain_db", -2.0))
+    await wait_window(s)
+    expected = [o.gain_db for o in s.desired(0).outputs]
+    assert expected == [-0.5, -1.0, -2.0, 0.0]
+    assert await stored_gains(repo) == expected
+    for row in await repo.list_revisions(SERIAL, 0):  # no revision undoes a press
+        assert "→ 0" not in row.summary, row.summary
+    assert (await repo.list_revisions(SERIAL, 0))[0].revision == s.revisions[0]
+    latest = await repo.get_revision(SERIAL, 0, s.revisions[0])
+    assert [o["gain_db"] for o in latest.desired["outputs"]] == expected
+    await s.stop()
+    assert await stored_gains(repo) == expected
+
+    # A restart on the same database has nothing to write back.
+    fake.configs.clear()
+    again = await make_session(commit_idle_s=60.0, commit_coalesce_s=WINDOW)
+    assert [o.gain_db for o in again.desired(0).outputs] == expected
+    await settle(again)
+    assert fake.outputs_written() == []
+
+
+async def test_slider_release_after_a_press_is_its_own_revision(make_session, repo):
+    """Press on X, then drag and release Y inside the window: the release (which changes nothing: the drag already
+    staged its value) closes X's burst and is recorded at once; the stored state never loses Y."""
+    s = await make_session(commit_idle_s=60.0, commit_coalesce_s=60.0)
+    await press(s, 0, "outputs.0.gain_db", -0.5)
+    await s.set_value(0, "outputs.1.gain_db", -6.0, source="ui")  # the drag
+    released = await press(s, 0, "outputs.1.gain_db", -6.0)  # the release: same value, commit
+    assert released.paths == [] and released.revision == 2
+    assert s._bursts == {}
+    rows = await repo.list_revisions(SERIAL, 0)
+    assert [r.summary for r in rows] == ["outputs.1.gain_db: 0 → -6", "outputs.0.gain_db: 0 → -0.5"]
+    assert await stored_gains(repo) == [-0.5, -6.0, 0.0, 0.0]
+    assert s.sync_summary(0)["uncommitted"] is False
+
+
+async def test_burst_flushed_after_a_drag_keeps_the_dragged_value_stored(make_session, repo):
+    """The burst's revision records the doc as of its last press, but the stored state (what a restart loads) must
+    stay the current doc even when the 1 s persister has already written it."""
+    s = await make_session(commit_idle_s=60.0, commit_coalesce_s=WINDOW)
+    await press(s, 0, "outputs.0.gain_db", -0.5)
+    await s.set_value(0, "outputs.1.gain_db", -6.0, source="ui")  # a drag tick, no commit
+    await s._persister.flush([(SERIAL, 0)])  # the persister got there first
+    assert await stored_gains(repo) == [-0.5, -6.0, 0.0, 0.0]
+    await wait_window(s)
+    [row] = await repo.list_revisions(SERIAL, 0)
+    assert row.summary == "outputs.0.gain_db: 0 → -0.5"
+    assert row.revision == 1 and (await repo.get_revision(SERIAL, 0, 1)).desired["outputs"][1]["gain_db"] == 0.0
+    assert await stored_gains(repo) == [-0.5, -6.0, 0.0, 0.0]
+    assert s.sync_summary(0)["uncommitted"] is True  # the drag still gets its own revision
