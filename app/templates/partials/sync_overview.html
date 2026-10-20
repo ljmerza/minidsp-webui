@@ -4,8 +4,11 @@
     events. Its buttons replace #sync-overview-box, which stays put while this element reloads. -#}
 {%- set v = view -%}
 <div class="sync-overview" id="sync-overview" hx-get="{{ bar.syncbar_url }}"
-     hx-trigger="sse:sync throttle:1s, sse:sync delay:500ms, sse:master throttle:750ms, sse:verify delay:300ms, mdsp-sync-changed from:body"
+     hx-trigger="sse:verify delay:300ms, mdsp-sync-changed from:body, refresh"
      hx-target="this" hx-swap="outerHTML">
+  {#- Sync and master events: at most one re-fetch per 1000 ms and one after the last (static/js/app.js,
+      data-throttle-refresh); the other triggers stay prompt. -#}
+  <span hidden hx-trigger="sse:sync, sse:master" data-throttle-refresh="1000" data-refresh-target="#sync-overview"></span>
   {% if bar.tabs|length > 1 %}
   <nav class="preset-tabs sync-presets" aria-label="Preset to show">
     <span class="hdr-label">Preset</span>{{ help("device-preset") }}

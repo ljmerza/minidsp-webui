@@ -2,8 +2,11 @@
     status model (app/sync/status.py), grouped by channel, problems only by default. Values are in words; internal
     names and raw coefficients only show with "Show technical details". Rendered with ``t``. -#}
 <div class="sync-table" id="sync-table" hx-get="{{ t.table_url }}"
-     hx-trigger="sse:sync throttle:1s, sse:sync delay:600ms, sse:verify delay:400ms, mdsp-sync-changed from:body"
+     hx-trigger="sse:verify delay:400ms, mdsp-sync-changed from:body, refresh"
      hx-target="this" hx-swap="outerHTML">
+  {#- Sync events: at most one re-fetch per 1000 ms and one after the last (static/js/app.js,
+      data-throttle-refresh); the other triggers stay prompt. -#}
+  <span hidden hx-trigger="sse:sync" data-throttle-refresh="1000" data-refresh-target="#sync-table"></span>
   <div class="sync-table-head">
     <div class="filter" role="group" aria-label="Rows to show">
       <button type="button" class="btn-small{% if t.show == 'unsynced' %} is-current{% endif %}"

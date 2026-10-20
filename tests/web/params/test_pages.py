@@ -202,7 +202,8 @@ async def test_header_sync_summary_and_staged_dots(ctx):
     html = (await ctx.http.get("/routing")).text
     assert "not tracked yet" not in html
     assert re.search(r'class="hdr-status" href="/device\?preset=1#sync"', html)
-    assert "sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body" in html
+    assert 'hx-trigger="sse:sync" data-throttle-refresh="1000" data-refresh-target="#app-header"' in html
+    assert "sse:verify delay:300ms, mdsp-sync-changed from:body delay:500ms" in html
     await ctx.session.adopt(AdoptMode.TRUST, preset=0, confirm_defaults=True)
     assert "All sent" in (await ctx.http.get("/ui/header")).text
     # an edit to inactive preset 2 waits: its header button and its editing tab get a ⏸, and the header says so in

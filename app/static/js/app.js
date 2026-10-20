@@ -271,6 +271,68 @@
     heldParts.set(target, true);
   });
 
+  // A part that a noisy event re-fetches (a Volume drag sends a "master" event per step) is fetched at most once per
+  // window, and its other triggers keep working. htmx's own "throttle:" can't do this: it throttles the element, so for
+  // the whole window the part ignored every trigger (its "refresh", sse:sync …), and it drops the last event, so the
+  // part could stay stale. Instead a hidden receiver (hx-trigger="sse:…", no hx-get) with data-throttle-refresh="<ms>"
+  // triggers "refresh" on data-refresh-target (a selector) at the first event, then once more at the end of every
+  // window that saw more events, so the last state always shows. data-refresh-now="master.preset …": an event that
+  // changes one of these fields of its payload is fetched at once. State is kept per target, so a receiver inside the
+  // part it refreshes may be swapped out with it.
+  const throttled = new Map(); // target selector -> { timer, pending, seen: Map(field -> value) }
+  function refreshPart(selector) {
+    const part = document.querySelector(selector);
+    if (part && window.htmx) window.htmx.trigger(part, 'refresh');
+  }
+  function fieldChanged(receiver, message, seen) {
+    const fields = (receiver.getAttribute('data-refresh-now') || '').split(/\s+/).filter(Boolean);
+    if (!fields.length) return false;
+    let data = null;
+    try {
+      data = JSON.parse(message && message.data);
+    } catch {
+      return false;
+    }
+    let changed = false;
+    for (const field of fields) {
+      const value = field.split('.').reduce((v, key) => (v && typeof v === 'object' ? v[key] : undefined), data);
+      if (value === undefined) continue;
+      if (seen.has(field) && seen.get(field) !== value) changed = true;
+      seen.set(field, value);
+    }
+    return changed;
+  }
+  document.addEventListener('htmx:sseMessage', (e) => {
+    const receiver = e.target;
+    if (!(receiver instanceof Element) || !receiver.hasAttribute('data-throttle-refresh')) return;
+    const selector = receiver.getAttribute('data-refresh-target');
+    if (!selector) return;
+    const every = Number(receiver.getAttribute('data-throttle-refresh')) || 1000;
+    let state = throttled.get(selector);
+    if (!state) {
+      state = { timer: null, pending: false, seen: new Map() };
+      throttled.set(selector, state);
+    }
+    const now = fieldChanged(receiver, e.detail, state.seen);
+    if (state.timer !== null && !now) {
+      state.pending = true;
+      return;
+    }
+    clearTimeout(state.timer);
+    state.pending = false;
+    refreshPart(selector);
+    const tick = () => {
+      if (!state.pending) {
+        state.timer = null;
+        return;
+      }
+      state.pending = false;
+      refreshPart(selector);
+      state.timer = setTimeout(tick, every);
+    };
+    state.timer = setTimeout(tick, every);
+  });
+
   // A device showed up (or changed) after this page was rendered without it: reload so the page matches.
   document.addEventListener('htmx:afterSwap', (e) => {
     if (!e.detail.target || e.detail.target.id !== 'app-header') return;

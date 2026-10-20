@@ -159,8 +159,6 @@ def test_home_switch_to_preset_survives_a_presets_refresh_during_the_press(deskt
     visit(desktop, "/")
     switch = desktop.locator(".home-presets-box button", has_text="Switch to preset 2")
     expect(switch).to_be_visible()
-    # htmx throttles per element: for a second after the page's first "master" event the box ignores "refresh" too.
-    desktop.wait_for_function("() => !document.querySelector('.home-presets-box')['htmx-internal-data'].throttle")
     sent = _writes(desktop, "/master/preset")
     dialogs = _answer(desktop)
     try:

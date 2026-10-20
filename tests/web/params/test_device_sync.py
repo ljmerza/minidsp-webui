@@ -40,7 +40,7 @@ async def test_device_page_uses_one_feed_that_keeps_the_header_sync_badge_curren
     body_feed = re.search(r'<body[^>]*sse-connect="([^"]+)"', html).group(1)
     assert "sync" in body_feed.split("topics=", 1)[1].split("&", 1)[0].split("%2C")
     header = html.split('id="app-header"', 1)[1].split("</header>", 1)[0]
-    assert "sse:sync throttle:1s, sse:sync delay:500ms, sse:verify delay:300ms, mdsp-sync-changed from:body" in header
+    assert 'hx-trigger="sse:sync" data-throttle-refresh="1000" data-refresh-target="#app-header"' in header
 
 
 async def test_sync_table_lists_unknown_paths_until_adopted(ctx):

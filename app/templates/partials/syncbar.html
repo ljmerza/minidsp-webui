@@ -22,8 +22,11 @@
   {%- if c.unknown %}{% set _ = parts.append(c.unknown ~ " unknown") %}{% endif -%}
 {%- endif -%}
 <div class="syncbar" id="syncbar" hx-get="{{ bar.syncbar_url }}"
-     hx-trigger="sse:sync throttle:750ms, sse:master throttle:750ms, sse:verify delay:300ms, mdsp-sync-changed from:body"
+     hx-trigger="sse:verify delay:300ms, mdsp-sync-changed from:body, refresh"
      hx-target="this" hx-swap="outerHTML">
+  {#- Sync and master events: at most one re-fetch per 750 ms and one after the last (static/js/app.js,
+      data-throttle-refresh); the other triggers stay prompt. -#}
+  <span hidden hx-trigger="sse:sync, sse:master" data-throttle-refresh="750" data-refresh-target="#syncbar"></span>
   <nav class="preset-tabs" aria-label="Preset to edit">
     <span class="hdr-label" id="syncbar-editing">Editing preset</span>{{ help("editing-preset") }}
     {% for t in bar.tabs %}

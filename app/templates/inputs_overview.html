@@ -20,8 +20,10 @@
   <h2 class="visually-hidden" id="overview-title">Inputs of the playing preset</h2>
   <p class="hint home-overview-hint">The playing preset's inputs. Open one for its level, EQ and routing.</p>
   <section class="home-inputs" aria-labelledby="overview-title">
+    <span hidden hx-trigger="sse:master" data-throttle-refresh="1000" data-refresh-target=".home-inputs > .home-cards-box"
+          data-refresh-now="master.preset"></span>
     <div class="home-cards-box" hx-get="{{ inputs_url }}"
-         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, sse:master throttle:1000ms, mdsp-sync-changed from:body, refresh"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, mdsp-sync-changed from:body, refresh"
          hx-swap="innerHTML">
       {% include "partials/input_cards.html" %}
     </div>
