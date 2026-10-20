@@ -256,6 +256,9 @@
   };
   document.addEventListener('pointerup', endPress, true);
   document.addEventListener('pointercancel', endPress, true);
+  // Escape, or the window losing focus (no release may follow), ends the press too.
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') endPress(); }, true);
+  if (typeof window.addEventListener === 'function') window.addEventListener('blur', endPress);
   document.addEventListener('htmx:beforeSwap', (e) => {
     const part = e.detail.target;
     if (!e.detail.shouldSwap || !pressing() || !(part instanceof Element) || !part.contains(press.el)) return;
