@@ -73,8 +73,21 @@ def seed() -> Callable[[Api], None]:
     return walkthrough
 
 
+# The box of the first element matching the selector, or null when it isn't displayed, read in one go in the page.
+_BOX = """(selector) => {
+  const el = document.querySelector(selector);
+  if (!el || !el.getClientRects().length) return null;
+  const r = el.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+}"""
+
+
 def _box(page: Page, selector: str) -> dict:
-    box = page.locator(selector).first.bounding_box()
+    # Not locator.bounding_box(): that finds the element, then measures it in a second round trip. The header
+    # re-renders (#app-header's innerHTML) on its own events, e.g. the `device` event when the device stream reconnects
+    # to start sending levels, about a second after a page opens its feed. One landing in between leaves the found
+    # element detached, and its box comes back None ("isn't displayed"), which a loaded machine made likely.
+    box = page.evaluate(_BOX, selector)
     assert box, f"{selector} isn't displayed"
     return box
 
