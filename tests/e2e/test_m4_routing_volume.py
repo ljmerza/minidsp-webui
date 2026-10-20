@@ -156,6 +156,9 @@ def test_one_confirm_rule_with_the_clearer_drop_wording(desktop: Page, api: Api)
     field.press("Enter")
     wait_until(lambda: _volume(api) == -10, what="the small drop", page=desktop)
     assert dialogs == []
+    # Let the header refresh that follows the −10 write finish first; otherwise the tap below can land on a slider that
+    # is about to be swapped out, its debounced request is dropped, and the test times out (seen ~1 in 6 runs).
+    settle(desktop)
 
     # A tap on the track far below asks too, and the slider sends dB.
     dialogs.clear()

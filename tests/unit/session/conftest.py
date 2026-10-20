@@ -10,7 +10,7 @@ import pytest
 from app.model.device_profile import M2X4HD
 from app.model.master import MasterStatus
 from app.state import Database, Repo
-from app.sync.session import DeviceSession
+from app.sync.session import COMMIT_COALESCE_S, DeviceSession
 
 from ..conftest import DEVICE_JSON, MASTER_JSON, SERIAL
 
@@ -80,7 +80,14 @@ async def make_session(client, bus, settings, repo, fake):
     """``await make_session(**settings_overrides)``: a loaded session (by default started) on the fake daemon."""
     created: list[DeviceSession] = []
 
-    async def make(*, start: bool = True, with_repo: bool = True, commit_idle_s: float = 0.2, **overrides: Any):
+    async def make(
+        *,
+        start: bool = True,
+        with_repo: bool = True,
+        commit_idle_s: float = 0.2,
+        commit_coalesce_s: float = COMMIT_COALESCE_S,
+        **overrides: Any,
+    ):
         s = DeviceSession(
             SERIAL,
             M2X4HD,
@@ -90,6 +97,7 @@ async def make_session(client, bus, settings, repo, fake):
             daemon_index=0,
             repo=repo if with_repo else None,
             commit_idle_s=commit_idle_s,
+            commit_coalesce_s=commit_coalesce_s,
         )
         s.monitor.update_master(MasterStatus.model_validate(fake.master))
         await s.ensure_loaded()

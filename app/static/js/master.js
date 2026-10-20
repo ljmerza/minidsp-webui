@@ -1,6 +1,8 @@
 // Master volume: an Alpine component keeps the slider and the numeric field in step; htmx sends the value after
 // an 80 ms pause (hx-trigger "input changed delay:80ms"). Header swaps are held back while the user is still
-// adjusting the volume, so a refresh never yanks the slider out from under a drag or drops a pending change.
+// adjusting the volume (a drag, a press on −/+, a value being typed, a pending or in-flight send), so a refresh never
+// yanks a control out from under them or drops a pending change; and a swap settles at once, so the new controls
+// work from the first event after it.
 //
 // The slider is dB-weighted (phase 9 design §10.3, P12): −127…−60 dB uses the first 15% of the track and −60…0 dB the
 // rest, so the usable range isn't a thin strip at the top. The <input type=range> stays native; its value is a track
@@ -67,7 +69,8 @@
   const STUCK_REQUEST_MS = 10000;
 
   const state = {
-    dragging: false,
+    dragging: false, // a pointer is down on the slider or −/+ (a click needs the same button under the press and release)
+    editing: false, // the number field holds a typed value it hasn't sent yet
     lastInput: 0,
     inflight: 0,
     lastRequestAt: 0,
@@ -77,11 +80,13 @@
   };
 
   const isVolume = (el) => !!(el && el.matches && el.matches('[data-volume-input]'));
+  const isVolumeStep = (el) => !!(el && el.closest && el.closest('#volume-down, #volume-up'));
+  const isVolumeField = (el) => isVolume(el) && el.type === 'number';
 
   function busy(ownRequests = 0) {
     const now = performance.now();
     const inflight = state.inflight - ownRequests > 0 && now - state.lastRequestAt < STUCK_REQUEST_MS;
-    return state.dragging || inflight || now - state.lastInput < IDLE_MS;
+    return state.dragging || state.editing || inflight || now - state.lastInput < IDLE_MS;
   }
 
   function scheduleRefresh() {
@@ -99,12 +104,22 @@
     setTimeout(tick, 100);
   }
 
-  document.addEventListener('pointerdown', (e) => { if (isVolume(e.target)) state.dragging = true; }, true);
+  document.addEventListener('pointerdown', (e) => {
+    if (isVolume(e.target) || isVolumeStep(e.target)) state.dragging = true;
+  }, true);
   const release = () => { state.dragging = false; };
   window.addEventListener('pointerup', release, true);
   window.addEventListener('pointercancel', release, true);
   window.addEventListener('blur', release);
-  document.addEventListener('input', (e) => { if (isVolume(e.target)) state.lastInput = performance.now(); }, true);
+  document.addEventListener('input', (e) => {
+    if (!isVolume(e.target)) return;
+    state.lastInput = performance.now();
+    if (isVolumeField(e.target)) state.editing = true;
+  }, true);
+  // A typed value is done with once it is sent (Enter or leaving the field fires change) or the field loses focus.
+  const doneTyping = (e) => { if (isVolumeField(e.target)) state.editing = false; };
+  document.addEventListener('change', doneTyping, true);
+  document.addEventListener('focusout', doneTyping, true);
 
   document.addEventListener('htmx:beforeRequest', (e) => {
     if (!isVolume(e.detail.elt)) return;
@@ -121,7 +136,11 @@
     if (busy(isVolume(e.detail.elt) ? 1 : 0)) {
       e.detail.shouldSwap = false;
       scheduleRefresh();
+      return;
     }
+    // htmx binds the new controls' triggers when the swap settles, 20 ms after it by default; a tap, an arrow key or
+    // a −/+ click in between went nowhere (the slider moved, the device didn't). Settle in the same task instead.
+    e.detail.swapOverride = 'innerHTML settle:0ms';
   });
 
   document.addEventListener('htmx:afterSwap', (e) => {

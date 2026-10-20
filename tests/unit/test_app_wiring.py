@@ -45,6 +45,29 @@ async def test_state_layer_and_routers_are_wired(settings, client, daemon):
             assert response.status_code == 200, page
 
 
+async def test_favicon_is_linked_and_served(settings, client, daemon):
+    async with running(settings, client, daemon) as (_, http):
+        page = await http.get("/")
+        assert '<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg?v=' in page.text
+        svg = await http.get("/static/img/favicon.svg")
+        assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg+xml")
+        assert svg.text.lstrip().startswith("<svg") and "#4ea1ff" in svg.text  # the accent colour
+        ico = await http.get("/favicon.ico")
+        assert ico.status_code == 200 and ico.headers["content-type"].startswith("image/svg+xml")
+        assert ico.content == svg.content
+
+
+async def test_shutdown_records_a_held_burst_of_presses(settings, client, daemon):
+    async with running(settings, client, daemon) as (app, _):
+        session = app.state.manager.get(SERIAL)
+        for gain in (-1.0, -2.0, -3.0):
+            await session.set_value(0, "outputs.0.gain_db", gain, commit=True, coalesce=True, source="ui")
+        assert await app.state.repo.count_revisions(SERIAL, 0) == 0
+    async with running(settings, client, daemon) as (app, _):
+        [row] = await app.state.repo.list_revisions(SERIAL, 0)
+        assert row.summary == "outputs.0.gain_db: 0 → -3"
+
+
 async def test_stored_runtime_settings_apply_at_startup(settings, client, daemon):
     async with running(settings, client, daemon) as (app, _):
         await app.state.repo.set_setting("ui.runtime_settings", {"gain_step_confirm_db": 3.0})

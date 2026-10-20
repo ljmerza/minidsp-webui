@@ -18,6 +18,8 @@
   const GAIN_TYPES = new Set(['peaking', 'lowshelf', 'highshelf', 'gain']);
   const FREQ_TYPES = new Set(['peaking', 'lowshelf', 'highshelf', 'lp1', 'hp1', 'lp2', 'hp2', 'bandpass', 'notch', 'ap1', 'ap2']);
   const Q_TYPES = new Set(['peaking', 'lowshelf', 'highshelf', 'lp2', 'hp2', 'bandpass', 'notch', 'ap2']);
+  // Types whose Q reads as a range of hertz (the width hint); a shelf's or pass filter's Q shapes a corner instead.
+  const RANGE_TYPES = new Set(['peaking', 'notch', 'bandpass']);
   const FREQ_MIN = 5;
   const FREQ_MAX = 24000;
   const Q_MIN = 0.1;
@@ -26,6 +28,7 @@
   const GAIN_MAX = 20;
   const WHEEL_COMMIT_MS = 400;
   const WHEEL_RADIUS_PX = 30;
+  const STEP_COMMIT_MS = 400; // quick − / + presses are sent once
   const RELOAD_DELAY_MS = 350;
   const KEYS = ['b0', 'b1', 'b2', 'a1', 'a2'];
 
@@ -197,29 +200,60 @@
   }
 
   // What a peaking band's width means in Hz (phase 9 design §8.2, help "q"): the two frequencies where the cut or boost
-  // is half its depth in dB, f0·(√(1 + 1/4Q²) ∓ 1/2Q). Q 4 at 40 Hz → about 35–45 Hz; Q 0.7 → about 21–78 Hz.
-  // Returns null for a frequency or Q that isn't a positive number.
-  function widthRange(freq, q) {
+  // is half its depth in dB, f0·(√(1 + 1/4Q²) ∓ 1/2Q). Q 4 at 40 Hz → about 35–45 Hz; Q 0.7 → about 21–78 Hz. The
+  // same edges are a notch's or band-pass's −3 dB points. This is the analog formula: the digital filter's edges sit a
+  // little closer together towards Nyquist, hence "about". `maxHz` (Nyquist) caps the upper edge. Returns null for a
+  // frequency or Q that isn't a positive number.
+  function widthRange(freq, q, maxHz = Infinity) {
     const f = Number(freq);
     const width = Number(q);
     if (!(f > 0) || !(width > 0)) return null;
     const root = Math.sqrt(1 + 1 / (4 * width * width));
-    return [f * (root - 1 / (2 * width)), f * (root + 1 / (2 * width))];
+    return [f * (root - 1 / (2 * width)), Math.min(f * (root + 1 / (2 * width)), maxHz)];
+  }
+
+  // "35–45 Hz": the affected range in whole hertz (10 Hz steps from 1 kHz up); "" when there is nothing to say.
+  function rangeText(freq, q, maxHz) {
+    const range = widthRange(freq, q, maxHz);
+    if (!range) return '';
+    const hz = (v) => (v < 1000 ? String(Math.round(v)) : String(Math.round(v / 10) * 10));
+    return `${hz(range[0])}–${hz(range[1])} Hz`;
   }
 
   // "Width (Q 4) at 40 Hz: affects about 35–45 Hz" for the hint under the EQ table; "" when there is nothing to say.
-  function widthHint(freq, q) {
-    const range = widthRange(freq, q);
+  function widthHint(freq, q, maxHz) {
+    const range = rangeText(freq, q, maxHz);
     if (!range) return '';
-    const hz = (v) => (v < 1000 ? String(Math.round(v)) : String(Math.round(v / 10) * 10));
-    return `Width (Q ${fieldText(roundQ(Number(q)))}) at ${fieldText(roundFreq(Number(freq)))} Hz: `
-      + `affects about ${hz(range[0])}–${hz(range[1])} Hz`;
+    return `Width (Q ${fieldText(roundQ(Number(q)))}) at ${fieldText(roundFreq(Number(freq)))} Hz: affects about ${range}`;
+  }
+
+  // − / + steps on the phone's band cards (phase 9 design §8.3, §16 phone rule 4). Frequency moves 1/6 octave; Q walks
+  // a ladder of round values about 1/4 octave apart that holds the help's Wide 1.4 / Medium 4 / Narrow 8; the Cut /
+  // Boost magnitude moves 0.5 dB on a 0.5 dB grid. A value off the ladder or grid goes to the next one in the step's
+  // direction. Callers clamp to the field's range.
+  const FREQ_STEP = 2 ** (1 / 6);
+  const Q_LADDER = [
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.71, 0.8, 1, 1.2, 1.4, 1.7, 2, 2.4, 2.8, 3.4, 4, 4.8, 5.6, 6.7, 8, 10, 12, 14, 17, 20,
+    24, 30,
+  ];
+  const GAIN_STEP_DB = 0.5;
+  const EPS = 1e-9;
+  const stepFreq = (freq, direction) => roundFreq(Number(freq) * FREQ_STEP ** Math.sign(direction));
+  function stepQ(q, direction) {
+    const v = Number(q);
+    if (direction > 0) return Q_LADDER.find((x) => x > v + EPS) ?? Q_LADDER.at(-1);
+    return Q_LADDER.findLast((x) => x < v - EPS) ?? Q_LADDER[0];
+  }
+  function stepMagnitude(magnitude, direction) {
+    const units = Number(magnitude) / GAIN_STEP_DB;
+    const next = direction > 0 ? Math.floor(units + EPS) + 1 : Math.ceil(units - EPS) - 1;
+    return roundGain(Math.max(0, next * GAIN_STEP_DB));
   }
 
   const helpers = {
     ICON, RANK, BAND_COLORS, request, send, errorText, parseEvent, worst, applySync, remember, biquadFromForm,
     stability, fullPrecision, createPlot, pageView, startView, pointerData, roundFreq, roundQ, roundGain, clamp,
-    parseSigned, fieldText, widthRange, widthHint,
+    parseSigned, fieldText, widthRange, rangeText, widthHint, stepFreq, stepQ, stepMagnitude,
   };
   window.mdsp = Object.assign(window.mdsp || {}, { filters: helpers });
 
@@ -277,6 +311,7 @@
       wheel: null,
       wheelTimer: null,
       reloadTimer: null,
+      stepTimers: new Map(), // band index -> commit timer of − / + presses
     };
 
     return {
@@ -397,11 +432,21 @@
       statusText(band) {
         return this.isOff(band) ? 'off' : this.status(band);
       },
-      // The width hint under the table follows the selected band, else the first peaking band in use.
+      // The width hint under the table follows the selected band, else the first peaking, notch or band-pass band in
+      // use.
       widthHint() {
-        const peaking = (b) => b && b.form.type === 'peaking' && !this.isOff(b);
-        const band = peaking(this.bands[this.selected]) ? this.bands[this.selected] : this.bands.find(peaking);
-        return band ? widthHint(band.form.freq, band.form.q) : '';
+        const ranged = (b) => b && RANGE_TYPES.has(b.form.type) && !this.isOff(b);
+        const band = ranged(this.bands[this.selected]) ? this.bands[this.selected] : this.bands.find(ranged);
+        return band ? widthHint(band.form.freq, band.form.q, this.nyquist()) : '';
+      },
+      // Each band's own range beside its width (Q) field, "about 35–45 Hz"; follows typing, steps, drags and pinches.
+      qRange(band) {
+        if (!RANGE_TYPES.has(band.form.type)) return '';
+        const range = rangeText(band.form.freq, band.form.q, this.nyquist());
+        return range ? `about ${range}` : '';
+      },
+      nyquist() {
+        return (cfg.fs || 96000) / 2;
       },
       isDragging(band) {
         return ctl.drag !== null && ctl.drag.index === band.index;
@@ -717,6 +762,52 @@
         if (Q_TYPES.has(form.type)) fit('q', Q_MIN, Q_MAX, roundQ);
         if (GAIN_TYPES.has(form.type)) fit('gain_db', GAIN_MIN, GAIN_MAX, roundGain);
         if (GAIN_TYPES.has(form.type)) setGainFields(form);
+      },
+
+      // --- − / + steppers (the phone's band cards) ---------------------------------------------------------------
+
+      // The value a stepper moves: frequency, Q, or the Cut / Boost magnitude (`gain`); null when there is none.
+      stepValue(band, field) {
+        const v = num(field === 'gain' ? band.form.gain_db : band.form[field]);
+        if (v === null || !Number.isFinite(v)) return null;
+        return field === 'gain' ? Math.abs(v) : v;
+      },
+      // The stepped value's limits: the same ranges clampForm applies to typed values.
+      stepLimits(band, field) {
+        if (field === 'freq') return [FREQ_MIN, Math.min(FREQ_MAX, (cfg.fs || 96000) * 0.45)];
+        if (field === 'q') return [Q_MIN, Q_MAX];
+        return [0, band.form.cut ? -GAIN_MIN : GAIN_MAX];
+      },
+      canStep(band, field, direction) {
+        if (!band || band.external || !this.uses(band, field)) return false;
+        const v = this.stepValue(band, field);
+        if (v === null) return false;
+        const [lo, hi] = this.stepLimits(band, field);
+        return direction > 0 ? v < hi - EPS : v > lo + EPS;
+      },
+      // A step is a typed edit: the preview follows at once and the band is sent once the presses pause. The gain
+      // keeps its Cut / Boost choice; only the magnitude moves, so a step never flips the sign.
+      step(band, field, direction) {
+        if (!this.canStep(band, field, direction)) return;
+        const [lo, hi] = this.stepLimits(band, field);
+        const v = this.stepValue(band, field);
+        if (field === 'freq') band.form.freq = roundFreq(clamp(stepFreq(v, direction), lo, hi));
+        else if (field === 'q') band.form.q = roundQ(clamp(stepQ(v, direction), lo, hi));
+        else {
+          band.form.gain_db = signedGain(band.form.cut, clamp(stepMagnitude(v, direction), lo, hi));
+          setGainFields(band.form);
+        }
+        this.onFieldInput(band);
+        const index = band.index;
+        clearTimeout(ctl.stepTimers.get(index));
+        ctl.stepTimers.set(
+          index,
+          setTimeout(() => {
+            ctl.stepTimers.delete(index);
+            const current = this.bands[index]; // re-read: the band object may have been replaced meanwhile
+            if (current && current.dirty) this.commitForm(current);
+          }, cfg.stepDelayMs ?? STEP_COMMIT_MS),
+        );
       },
 
       // Choosing a filter for an unused band turns it on in the same request (phase 9 P07): before, a band picked

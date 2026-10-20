@@ -164,12 +164,17 @@ def master_values(session: DeviceSession) -> dict[str, Any]:
     return {"volume": master.volume if master else None, "mute": master.mute if master else None}
 
 
-async def apply_edits(session: DeviceSession, preset: int, values: Mapping[str, Any], *, confirm: bool) -> UndoRecord:
+async def apply_edits(
+    session: DeviceSession, preset: int, values: Mapping[str, Any], *, confirm: bool, coalesce: bool = False
+) -> UndoRecord:
     """One committed edit of ``values`` (path -> value) through the session, as the editors' endpoint makes it.
-    Raises what `DeviceSession.edit` raises (`ConfirmationRequired` for a big raise without ``confirm``)."""
+    ``coalesce`` for repeated nudges: a burst of them is one revision. Raises what `DeviceSession.edit` raises
+    (`ConfirmationRequired` for a big raise without ``confirm``)."""
     paths = list(values)
     before = values_of(session, preset, paths)
-    await session.edit(preset, patch_from_values(dict(values)), confirm=confirm, commit=True, source="ui")
+    await session.edit(
+        preset, patch_from_values(dict(values)), confirm=confirm, commit=True, source="ui", coalesce=coalesce
+    )
     after = values_of(session, preset, paths)
     return UndoRecord(preset, {p: (before.get(p), after.get(p)) for p in paths if p in after})
 

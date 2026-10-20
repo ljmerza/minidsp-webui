@@ -21,7 +21,16 @@
     return 1;
   }
 
-  window.mdsp = Object.assign(window.mdsp || {}, { meterFraction });
+  // A meter's reading in words: "—" without data, "no signal" below the floor (the Settings value, design §5.3; none
+  // given: never), else "−18.0 dBFS".
+  function signalText(db, stale, floor) {
+    if (stale || db === null || db === undefined || !Number.isFinite(db)) return '—';
+    if (Number.isFinite(floor) && db < floor) return 'no signal';
+    const fmt = window.mdsp && window.mdsp.fmtDb;
+    return fmt ? fmt(db, 1, 'dBFS') : `${db.toFixed(1)} dBFS`;
+  }
+
+  window.mdsp = Object.assign(window.mdsp || {}, { meterFraction, signalText });
 
   document.addEventListener('alpine:init', () => {
     window.Alpine.data('levelMeters', (cfg) => {
@@ -119,6 +128,24 @@
 
         peakStyle(key) {
           return `bottom: ${(meterFraction(this.peak[key]) * 100).toFixed(2)}%`;
+        },
+
+        // The peak-hold tick of a horizontal bar; hidden without data.
+        hpeakStyle(key) {
+          const v = this.peak[key];
+          if (this.stale || v === null || !Number.isFinite(v)) return 'display: none';
+          return `left: ${(meterFraction(v) * 100).toFixed(2)}%`;
+        },
+
+        // The reading with "no signal" below cfg.floor (signalText above).
+        signalText(key) {
+          return signalText(this.level[key], this.stale, cfg.floor);
+        },
+
+        // "In 1: −18.0 dBFS", for a role="meter"'s aria-valuetext.
+        namedReading(key) {
+          const c = channels.find((ch) => ch.key === key);
+          return `${c ? c.name : key}: ${this.signalText(key)}`;
         },
 
         readout(key) {

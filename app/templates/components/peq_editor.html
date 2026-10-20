@@ -77,6 +77,13 @@
   </optgroup>
 {%- endmacro %}
 
+{#- A − / + stepper button of a band field ("freq", "q" or "gain", the Cut / Boost magnitude); label is a JS template. -#}
+{% macro step_button(field, direction, label) -%}
+<button type="button" class="step-btn peq-step" data-step="{{ field }}{{ '+' if direction > 0 else '-' }}"
+        @click="step(band, '{{ field }}', {{ direction }})" :disabled="!canStep(band, '{{ field }}', {{ direction }})"
+        :aria-label="{{ label }}">{{ "+" if direction > 0 else "&minus;"|safe }}</button>
+{%- endmacro %}
+
 {% macro editor(side, index, color, name, view="full", bass=false) -%}
 {%- set base = root ~ "/ui/devices/" ~ serial ~ "/presets/" ~ preset ~ "/" ~ side ~ "/" ~ index ~ "/peq" -%}
 {#- bass: the graph opens at 5–300 Hz unless this channel's own view was chosen before (phase 9 design §8.2). -#}
@@ -135,12 +142,20 @@
               <select x-model="band.form.type" @change="onTypeChange(band)" :disabled="band.external"
                       :aria-label="`Band ${band.index + 1} type`">{{ type_options() }}</select>
             </td>
-            <td data-label="Hz"><input type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
+            {#- The − / + steppers show on the phone's band cards only (phase 9 design §8.3): 1/6 octave, Q ladder, 0.5 dB. -#}
+            <td data-label="Hz" class="peq-num">{{ step_button("freq", -1, "`Band ${band.index + 1}: frequency 1/6 octave lower`") }}<input
+                       type="number" class="num" inputmode="decimal" min="1" max="24000" step="0.1"
                        x-model.number="band.form.freq" @input="onFieldInput(band)" @change="commitForm(band)"
-                       :disabled="band.external || !uses(band, 'freq')" :aria-label="`Band ${band.index + 1} frequency in Hz`"></td>
-            <td data-label="Width Q"><input type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
+                       :disabled="band.external || !uses(band, 'freq')" :aria-label="`Band ${band.index + 1} frequency in Hz`">{{
+                step_button("freq", 1, "`Band ${band.index + 1}: frequency 1/6 octave higher`") }}</td>
+            <td data-label="Width Q" class="peq-num">{{ step_button("q", -1, "`Band ${band.index + 1}: wider (lower Q)`") }}<input
+                       type="number" class="num" inputmode="decimal" min="0.1" max="30" step="0.01"
                        x-model.number="band.form.q" @input="onFieldInput(band)" @change="commitForm(band)"
-                       :disabled="band.external || !uses(band, 'q')" :aria-label="`Band ${band.index + 1} Q`"></td>
+                       :disabled="band.external || !uses(band, 'q')" :aria-label="`Band ${band.index + 1} Q`"
+                       :aria-describedby="qRange(band) ? `${prefix}.${band.index}.qrange` : null">{{
+                step_button("q", 1, "`Band ${band.index + 1}: narrower (higher Q)`") }}
+              {#- The width in plain hertz (design §8.2/§8.3): where the cut or boost is at least half its depth. -#}
+              <span class="q-range" :id="`${prefix}.${band.index}.qrange`" x-show="qRange(band)" x-text="qRange(band)"></span></td>
             <td>
               {#- Cut / Boost + a magnitude (phase 9 P01): no minus key needed; the stored gain stays signed. -#}
               <div class="cut-boost" role="radiogroup" :aria-label="`Band ${band.index + 1}: cut or boost`">
@@ -153,10 +168,12 @@
               </div>
             </td>
             {#- Text, not type=number: a number field reports a lone "-" as empty and Alpine wiped it, so "-4" became +4. -#}
-            <td data-label="dB"><input type="text" class="num mag" inputmode="decimal" autocomplete="off" spellcheck="false"
+            <td data-label="dB" class="peq-num">{{ step_button("gain", -1, "`Band ${band.index + 1}: ${band.form.cut ? 'cut' : 'boost'} 0.5 dB less`") }}<input
+                       type="text" class="num mag" inputmode="decimal" autocomplete="off" spellcheck="false"
                        x-model="band.form.mag" @input="onGainInput(band)" @change="commitGain(band)"
                        :disabled="band.external || !uses(band, 'gain')"
-                       :aria-label="`Band ${band.index + 1}: dB to ${band.form.cut ? 'cut' : 'boost'}`"></td>
+                       :aria-label="`Band ${band.index + 1}: dB to ${band.form.cut ? 'cut' : 'boost'}`">{{
+                step_button("gain", 1, "`Band ${band.index + 1}: ${band.form.cut ? 'cut' : 'boost'} 0.5 dB more`") }}</td>
             <td class="source"><span x-text="sourceText(band)"></span></td>
             <td class="band-status">
               <span class="band-off" x-show="isOff(band)">off</span>

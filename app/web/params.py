@@ -229,6 +229,14 @@ async def routing_page(request: Request, serial: int | None = None, preset: int 
     ctx["sse_url"] = url(request, "/api/v1/events", topics=",".join((*EDIT_TOPICS, "levels")), serial=session.serial)
     status = session.status
     ctx["initial_output_levels"] = list(status.output_levels) if status else []
+    # The row heads' input meters (static/js/meters.js) on the same stream show which inputs carry signal.
+    settings = getattr(session, "settings", None) or request.app.state.settings
+    ctx["input_meters"] = {
+        "inputs": ctx["input_names"],
+        "outputs": [],
+        "initial": {"i": list(status.input_levels) if status else []},
+        "floor": float(getattr(settings, "guidance_no_signal_dbfs", -90.0)),
+    }
     ctx.update(_routing_summary(request, session, p))
     return render(request, "routing.html", ctx)
 
@@ -454,7 +462,8 @@ def _session_or_404(request: Request, serial: int) -> DeviceSession | None:
 async def edit_values(request: Request, serial: int, preset: int) -> Response:
     """Set desired values by path: ``{"values": {"outputs.0.gain_db": -3}, "commit": false, "confirm": false}``.
 
-    ``commit`` marks a commit boundary (slider release, toggle, submit); drags send ``commit=false``.
+    ``commit`` marks a commit boundary (slider release, toggle, submit); drags send ``commit=false``. Commits from
+    here coalesce: a burst of +/- presses on the same setting is one revision (`DeviceSession._commit_soon`).
     """
     if not is_htmx(request):
         return PlainTextResponse("HTMX request expected", status_code=400)
@@ -473,7 +482,7 @@ async def edit_values(request: Request, serial: int, preset: int) -> Response:
             return _edit_error(session, preset, paths, 422, "invalid", "values must be finite numbers")
     try:
         result = await session.edit(
-            preset, patch_from_values(body.values), confirm=body.confirm, commit=body.commit, source="ui"
+            preset, patch_from_values(body.values), confirm=body.confirm, commit=body.commit, source="ui", coalesce=True
         )
     except ConfirmationRequired as exc:
         from app.web.sync_ui import confirmation_text  # sync_ui builds on this module

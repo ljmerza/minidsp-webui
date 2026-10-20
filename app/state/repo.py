@@ -394,12 +394,15 @@ class Repo:
         applied: Any = UNSET,
         unknown_paths: Iterable[str] | Any = UNSET,
         skip_if_unchanged: bool = True,
+        state: Any = None,
     ) -> int:
         """Record a commit boundary: bump ``preset_state.revision``, store ``desired`` there and as a history row,
         and trim history to the newest ``REVISION_RETENTION`` rows for this preset. One transaction.
 
-        ``applied``/``unknown_paths`` default to keeping what is stored. With ``skip_if_unchanged`` a desired doc equal
-        to the latest history row writes nothing and returns the current revision. Returns the (new) revision.
+        ``state`` is stored in ``preset_state`` instead of ``desired`` when the revision records an earlier doc than
+        the current one (a held-back burst of edits). ``applied``/``unknown_paths`` default to keeping what is stored.
+        With ``skip_if_unchanged`` a desired doc equal to the latest history row writes nothing and returns the current
+        revision. Returns the (new) revision.
         """
         _check_preset(preset)
         if source not in REVISION_SOURCES:
@@ -428,7 +431,8 @@ class Repo:
                     return current
             new = current + 1
             now = self._now()
-            await _write_committed_state(tx, serial, preset, desired_json, new, now, applied, unknown_paths)
+            state_json = desired_json if state is None else dumps(state)
+            await _write_committed_state(tx, serial, preset, state_json, new, now, applied, unknown_paths)
             await tx.execute(
                 "INSERT INTO revision (serial, preset, revision, desired_json, summary, source, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",

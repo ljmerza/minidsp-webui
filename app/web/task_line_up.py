@@ -495,7 +495,7 @@ async def act(ctx: TaskCtx, params: Mapping[str, str]) -> Step:
     else:
         return await render(ctx, params)
     try:
-        record = await apply_edits(session, preset, values, confirm=False)
+        record = await apply_edits(session, preset, values, confirm=False, coalesce=op == "nudge")
     except ConfirmationRequired as exc:
         error = confirm_error(exc)
     except (DesiredValidationError, MasterValidationError) as exc:

@@ -56,6 +56,9 @@ from app.sync.writer import DeviceWriter, FlushResult, PresetState, SyncStatus
 log = logging.getLogger(__name__)
 
 COMMIT_IDLE_S = 5.0
+# A burst of commits to the same setting(s) from the same source (+/- presses) is held and written as one revision once
+# the presses have stopped for this long. Only the revision row waits; the device writes go out as they always do.
+COMMIT_COALESCE_S = 2.0
 COMMIT_RETRY_MAX_S = 60.0  # a failing revision save is retried with exponential backoff up to this interval
 _FILTER_UNIT = re.compile(r"(inputs|outputs)\.(\d+)\.(peq|crossover)\.(\d+)\.")
 _FIR_UNIT = re.compile(r"outputs\.(\d+)\.fir\.")
@@ -297,6 +300,22 @@ class UndoResult:
 class _Uncommitted:
     source: str
     summary: str | None = None
+
+
+@dataclass
+class _Burst:
+    """Commits held back so a burst of presses is one revision (see `DeviceSession._commit_soon`)."""
+
+    paths: frozenset[str]
+    source: str
+    doc: ConfigDoc  # the desired doc after the burst's latest edit: what its revision records
+    timer: asyncio.TimerHandle | None = None
+    interrupted: bool = False  # another setting changed since: the next commit, whatever it is, closes the burst
+
+    def takes(self, paths: Sequence[str], source: str) -> bool:
+        """Whether a commit of ``paths`` from ``source`` continues this burst (an edit that changed nothing does,
+        unless another setting changed after the burst's last edit: that commit, e.g. a slider release, is its own)."""
+        return not self.interrupted and source == self.source and (not paths or frozenset(paths) == self.paths)
 
 
 def flush_json(result: FlushResult | None) -> dict[str, Any] | None:
@@ -566,6 +585,7 @@ class DeviceSession:
         daemon_index: int | None = None,
         repo: Repo | None = None,
         commit_idle_s: float = COMMIT_IDLE_S,
+        commit_coalesce_s: float = COMMIT_COALESCE_S,
     ) -> None:
         self.serial = serial
         self.profile = profile
@@ -576,6 +596,7 @@ class DeviceSession:
         self.daemon_index = daemon_index
         self.repo = repo
         self.commit_idle_s = commit_idle_s
+        self.commit_coalesce_s = commit_coalesce_s
         self.state = SessionState.STARTING
         self.preset_switching: int | None = None  # target preset while a switch is in progress
         self._master_lock = asyncio.Lock()
@@ -621,6 +642,7 @@ class DeviceSession:
         self._flat_cache: dict[int, tuple[ConfigDoc, dict[str, Any]]] = {}
         self._uncommitted: dict[int, _Uncommitted] = {}
         self._commit_timers: dict[int, asyncio.TimerHandle] = {}
+        self._bursts: dict[int, _Burst] = {}  # per preset: a held-back burst of commits (`_commit_soon`)
         self._commit_failures: dict[int, int] = {}  # consecutive failed revision saves per preset (retry backoff)
         self._load_lock = asyncio.Lock()
         self._edit_lock = asyncio.Lock()
@@ -656,9 +678,12 @@ class DeviceSession:
         for handle in self._commit_timers.values():
             handle.cancel()
         self._commit_timers.clear()
+        for burst in self._bursts.values():
+            if burst.timer is not None:
+                burst.timer.cancel()
         if self.loaded:
-            for preset in list(self._uncommitted):
-                await self._commit_quietly(preset)
+            for preset in list(dict.fromkeys([*self._bursts, *self._uncommitted])):
+                await self._commit_quietly(preset)  # a held-back burst first, as its own revision
         if self._persister is not None:
             await self._persister.aclose()
         tasks = [t for t in self._tasks if not t.done()]
@@ -1585,8 +1610,12 @@ class DeviceSession:
         source: str = "api",
         commit: bool = False,
         summary: str | None = None,
+        coalesce: bool = False,
     ) -> EditResult:
         """Apply a merge patch (see `merge_patch`) to a preset's desired state and queue the device writes.
+
+        With ``commit`` and ``coalesce`` the revision may wait: repeated commits of the same setting(s) from the same
+        source (+/- presses) become one revision (see `_commit_soon`). The device writes never wait.
 
         Raises `DesiredValidationError` (422), `ConfirmationRequired` (a gain raise above the big-step threshold
         without ``confirm``), `RevisionConflict` (``expected_revision`` is stale) or `UnknownPreset`.
@@ -1603,7 +1632,7 @@ class DeviceSession:
             new = parse_doc(merge_patch(current.model_dump(mode="json"), patch))
             await self._prime_fir(current, new)
             change = self._stage(preset, new, confirm=confirm, source=source, summary=summary)
-        return await self._finish(preset, change, commit=commit)
+        return await self._finish(preset, change, commit=commit, coalesce=coalesce, source=source)
 
     async def patch_desired(
         self,
@@ -1737,6 +1766,8 @@ class DeviceSession:
         if not paths:
             return old, [], []
         self._flat_cache[preset] = (new, new_flat)
+        if (burst := self._bursts.get(preset)) is not None and not burst.paths.issuperset(paths):
+            burst.interrupted = True
         device_paths = self.writer.set_desired(preset, new)
         self._schedule_persist(preset)
         self._mark_uncommitted(preset, source, summary)
@@ -1760,6 +1791,8 @@ class DeviceSession:
         commit: bool,
         bulk: bool = False,
         timeout: float | None = BULK_TIMEOUT_S,
+        coalesce: bool = False,
+        source: str = "api",
     ) -> EditResult:
         doc, paths, device_paths = change
         flush = None
@@ -1767,7 +1800,10 @@ class DeviceSession:
             # Called right after `_stage` with no await in between, so the mute wrap is requested before the
             # writer's next cycle can pick the changes up.
             flush = await self.writer.flush(preset, mute_wrap=self.settings.mute_wrap_bulk_apply, timeout=timeout)
-        revision = await self.commit(preset) if commit else self.revisions.get(preset, 0)
+        if commit and coalesce:
+            revision = await self._commit_soon(preset, doc, paths, source)
+        else:
+            revision = await self.commit(preset) if commit else self.revisions.get(preset, 0)
         return EditResult(preset, revision, doc, paths, device_paths, flush)
 
     def _publish_desired(
@@ -1826,6 +1862,52 @@ class DeviceSession:
         with contextlib.suppress(StateUnavailable):
             await self.commit(preset)
 
+    async def _commit_soon(self, preset: int, doc: ConfigDoc, paths: Sequence[str], source: str) -> int:
+        """A commit boundary that may wait, so a burst of +/- presses is one revision: "outputs.0.gain_db: 12 → 2",
+        one SQLite write, instead of one per press. ``doc`` is the desired doc right after the edit and ``paths`` what
+        the edit changed.
+
+        Commits of the same paths from the same source extend the held burst, and its revision is written once they
+        have stopped for ``commit_coalesce_s``. Any other commit of the preset (another setting, Apply, a profile load,
+        a revert, shutdown) writes the burst first, as its own revision. Returns the preset's current revision, which
+        doesn't count a burst still held."""
+        waited = False
+        while (burst := self._bursts.get(preset)) is not None and not burst.takes(paths, source):
+            await self._flush_burst(preset)
+            waited = True
+        if waited:  # edits staged while the flush ran are newer than ``doc``; the burst must not record an older one
+            doc = self.writer.state(preset).desired
+        if self.commit_coalesce_s <= 0 or self._stopped:
+            return await self.commit(preset)
+        if burst is None:
+            if not paths:  # nothing changed and nothing held: a plain commit, as without coalescing
+                return await self.commit(preset)
+            burst = self._bursts[preset] = _Burst(frozenset(paths), source, doc)
+        elif paths:
+            burst.doc = doc
+        if burst.timer is not None:
+            burst.timer.cancel()
+        held = burst
+        burst.timer = asyncio.get_running_loop().call_later(
+            self.commit_coalesce_s, lambda: self._spawn(self._flush_burst_quietly(preset, held), "burst-commit")
+        )
+        return self.revisions.get(preset, 0)
+
+    async def _flush_burst(self, preset: int, only: _Burst | None = None) -> None:
+        """Write the preset's held-back burst (`_commit_soon`) as its own revision, if there is one (and it is
+        ``only``, when given)."""
+        burst = self._bursts.get(preset)
+        if burst is None or (only is not None and burst is not only):
+            return
+        del self._bursts[preset]
+        if burst.timer is not None:
+            burst.timer.cancel()
+        await self._commit(preset, source=burst.source, doc=burst.doc)
+
+    async def _flush_burst_quietly(self, preset: int, burst: _Burst) -> None:
+        with contextlib.suppress(StateUnavailable):
+            await self._flush_burst(preset, burst)
+
     async def _check_revision(self, preset: int, expected: int | None) -> None:
         if expected is None:
             return
@@ -1840,26 +1922,54 @@ class DeviceSession:
     ) -> int:
         """Commit boundary: write a revision row if the desired doc changed since the last one. Returns the
         revision. ``force`` writes even without a change relative to the last commit (the repo still skips a doc
-        identical to the latest history row)."""
+        identical to the latest history row). A held-back burst (`_commit_soon`) is written first, as its own
+        revision."""
         self._check_preset(preset)
         await self.ensure_loaded()
-        if handle := self._commit_timers.pop(preset, None):
+        await self._flush_burst(preset)
+        return await self._commit(preset, summary=summary, source=source, force=force)
+
+    async def _commit(
+        self,
+        preset: int,
+        *,
+        summary: str | None = None,
+        source: str | None = None,
+        force: bool = False,
+        doc: ConfigDoc | None = None,
+    ) -> int:
+        """`commit` of the current desired doc, or of ``doc``, an earlier one (a burst's): then later edits stay
+        uncommitted for the next revision, and the stored preset state keeps the current doc (only the history row
+        records the earlier one)."""
+        partial = doc is not None and doc is not self.writer.state(preset).desired
+        if not partial and (handle := self._commit_timers.pop(preset, None)):
             handle.cancel()
         async with self._commit_lock:
-            pending = self._uncommitted.pop(preset, None)
-            doc = self.writer.state(preset).desired
+            current = self.writer.state(preset).desired
+            partial = doc is not None and doc is not current
+            pending = self._uncommitted.get(preset) if partial else self._uncommitted.pop(preset, None)
+            if doc is None:
+                doc = current
             baseline = self._baseline.get(preset)
             paths = diff_paths(baseline, doc) if baseline is not None else []
             if not paths and not force:
                 return self.revisions.get(preset, 0)
-            text = summary or (pending.summary if pending else None) or describe_change(baseline, doc, paths)
+            pending_summary = pending.summary if pending and not partial else None
+            text = summary or pending_summary or describe_change(baseline, doc, paths)
             origin = source or (pending.source if pending else "api")
             revision = self.revisions.get(preset, 0)
             if self.repo is not None:
                 applied, unknown = self._stored_shadow(preset)
                 try:
                     revision = await self.repo.commit_revision(
-                        self.serial, preset, doc, summary=text, source=origin, applied=applied, unknown_paths=unknown
+                        self.serial,
+                        preset,
+                        doc,
+                        summary=text,
+                        source=origin,
+                        applied=applied,
+                        unknown_paths=unknown,
+                        state=current if partial else None,
                     )
                 except Exception as exc:
                     self._uncommitted.setdefault(preset, pending or _Uncommitted(origin, summary))
@@ -1875,6 +1985,8 @@ class DeviceSession:
                 revision += 1
             self.revisions[preset] = revision
             self._baseline[preset] = doc
+            if partial and preset not in self._uncommitted:  # the newer edits still need a revision of their own
+                self._mark_uncommitted(preset, origin, None)
         self.bus.publish(
             DESIRED,
             {
@@ -1892,10 +2004,13 @@ class DeviceSession:
         return revision
 
     async def history(self, preset: int, *, limit: int = 50, before: int | None = None) -> list[RevisionInfo]:
-        """Revision rows, newest first."""
+        """Revision rows, newest first. A held-back burst (`_commit_soon`) is written first, so the timeline shows it
+        and the revision before it can be reverted to (undoing the whole burst)."""
         await self._ready(preset)
         if self.repo is None:
             return []
+        with contextlib.suppress(StateUnavailable):
+            await self._flush_burst(preset)
         return await self.repo.list_revisions(self.serial, preset, limit=limit, before=before)
 
     # --- sync -----------------------------------------------------------------------------------------------------
