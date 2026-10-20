@@ -226,12 +226,16 @@
   // A refresh never replaces a button or link while it is being pressed: a click needs the same element under the
   // press and the release, so a swap in between lost it (Mute all and the preset buttons in the header, the Home cards'
   // Mute, "Switch to preset N"). Such a swap is dropped instead, and once the press is over the part is fetched again
-  // with its own hx-get, unless the click sent a request whose reply goes into that part anyway. Parts without an
-  // hx-get of their own can't be fetched again, so they are swapped as before.
+  // with its own hx-get, unless the click sent a request whose reply goes into that part anyway. Only a refresh is held
+  // (a GET of the part's own hx-get, which can be fetched again): a reply to a write or to another GET (Duplicate's
+  // "Created …", "Problems only") carries what no refresh does, so it is swapped as before, as is a part without an
+  // hx-get of its own.
   const PRESS_MAX_MS = 10000; // a release that never arrives (e.g. the window lost focus) doesn't hold swaps for good
   let press = null; // { el, at }: the button or link under a primary pointer that is down
-  const heldParts = new Map(); // a part whose swap was dropped during the press -> whether a reply will refresh it
+  const heldParts = new Map(); // a part whose refresh was dropped during the press -> whether a reply will refresh it
   const pressing = () => !!press && press.el.isConnected && performance.now() - press.at < PRESS_MAX_MS;
+  const isRefresh = (part, config) =>
+    !!config && String(config.verb).toLowerCase() === 'get' && config.path === part.getAttribute('hx-get');
   document.addEventListener('pointerdown', (e) => {
     const el = e.button === 0 && e.target instanceof Element ? e.target.closest('button, a[href]') : null;
     press = el ? { el, at: performance.now() } : null;
@@ -255,13 +259,16 @@
   document.addEventListener('htmx:beforeSwap', (e) => {
     const part = e.detail.target;
     if (!e.detail.shouldSwap || !pressing() || !(part instanceof Element) || !part.contains(press.el)) return;
-    if (!part.hasAttribute('hx-get')) return;
+    if (!part.hasAttribute('hx-get') || !isRefresh(part, e.detail.requestConfig)) return;
     e.detail.shouldSwap = false;
-    if (!heldParts.has(part)) heldParts.set(part, false);
+    heldParts.set(part, false); // even if a reply was expected: this may have been it
   });
+  // Only a request sent once the press is over (the click's) answers a held refresh; one sent during the press is
+  // another refresh, and its reply is dropped too.
   document.addEventListener('htmx:beforeRequest', (e) => {
     const { elt, target } = e.detail;
-    if (heldParts.has(target) && elt instanceof Element && target.contains(elt)) heldParts.set(target, true);
+    if (pressing() || !heldParts.has(target) || !(elt instanceof Element) || !target.contains(elt)) return;
+    heldParts.set(target, true);
   });
 
   // A device showed up (or changed) after this page was rendered without it: reload so the page matches.

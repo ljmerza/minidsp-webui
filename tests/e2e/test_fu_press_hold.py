@@ -3,7 +3,9 @@
 A click needs the same element under the press and the release. Mute all, the header's preset buttons, the Home cards'
 Mute and Home's "Switch to preset N" sit in parts that re-render on every event, so a swap between pointerdown and
 pointerup replaced the pressed button and the click went nowhere. Each test presses the button, forces its part's
-refresh while the button is held down, releases, and counts the writes (and the confirm, for a preset switch).
+refresh while the button is held down, releases, and counts the writes (and the confirm, for a preset switch). The
+last ones check what the hold must not do: let a second refresh during the press stand in for the catch-up after it, or
+hold back the reply to a write (it carries what no refresh does).
 """
 
 from collections.abc import Callable
@@ -170,3 +172,60 @@ def test_home_switch_to_preset_survives_a_presets_refresh_during_the_press(deskt
     finally:
         api.master(preset=0)
         wait_until(lambda: _status(api)["preset"] == 0, what="preset 1 again")
+
+
+def test_two_refreshes_during_a_cancelled_preset_switch_still_end_on_the_new_state(desktop: Page, api: Api):
+    api.master(mute=False)
+    visit(desktop, "/")
+    sent = _writes(desktop, "/master/preset")
+    dialogs = _answer(desktop, accept=False)
+    mute = desktop.locator("#master-mute")
+    _press(desktop, desktop.locator("#preset-2"))
+    with desktop.expect_response(lambda r: "/ui/header" in r.url):
+        api.master(mute=True)
+    # A second refresh while the button is still down is held too; it doesn't stand in for the catch-up after release.
+    with desktop.expect_response(lambda r: "/ui/header" in r.url):
+        desktop.evaluate("htmx.trigger(document.querySelector('#app-header'), 'refresh')")
+    desktop.wait_for_timeout(200)
+    expect(mute).to_have_attribute("aria-pressed", "false")
+    desktop.mouse.up()
+    wait_until(lambda: dialogs, what="the question", page=desktop)
+    expect(mute).to_have_attribute("aria-pressed", "true")
+    settle(desktop)
+    assert sent == [] and len(dialogs) == 1, (sent, dialogs)
+    api.master(mute=False)
+
+
+def test_a_press_released_off_mute_through_two_changes_ends_on_the_new_state(desktop: Page, api: Api):
+    api.master(mute=False, volume=-30, confirm=True)
+    visit(desktop, "/")
+    sent = _writes(desktop, "/master/")
+    mute = desktop.locator("#master-mute")
+    _press(desktop, mute)
+    for change in ({"mute": True}, {"volume": -34}):
+        with desktop.expect_response(lambda r: "/ui/header" in r.url):
+            api.master(**change)
+    desktop.wait_for_timeout(200)
+    expect(mute).to_have_attribute("aria-pressed", "false")
+    desktop.mouse.move(5, 890)  # slid off the button: the release is no click
+    desktop.mouse.up()
+    expect(mute).to_have_attribute("aria-pressed", "true")
+    expect(desktop.locator("#master-volume-num")).to_have_value("-34.0")
+    settle(desktop)
+    assert sent == [], sent
+    api.master(mute=False, volume=-30)  # back up 4 dB: under the gain-step guard
+
+
+def test_a_write_reply_lands_during_a_press_in_the_same_part(desktop: Page, api: Api):
+    """Only refreshes are held: Duplicate's reply carries a message no refresh of the list does."""
+    api.create_profile("Press probe", api.desired(0))
+    visit(desktop, "/profiles")
+    item = desktop.locator(".profile-item[data-profile-name='Press probe']")
+    _press(desktop, item.get_by_role("button", name="Compare"))
+    with desktop.expect_response(lambda r: r.request.method == "POST" and "/duplicate" in r.url):
+        item.get_by_role("button", name="Duplicate").evaluate("(b) => b.click()")
+    message = desktop.locator("#profile-list .profile-msg")
+    expect(message).to_have_text("Created “Press probe (copy)”.")
+    desktop.mouse.up()
+    settle(desktop, 500)
+    expect(message).to_have_text("Created “Press probe (copy)”.")
