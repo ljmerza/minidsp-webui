@@ -25,8 +25,12 @@
   {#- 1. The health line: the playing preset's problems and cautions with their fixes; notes folded. -#}
   <section class="card home-health-card" aria-labelledby="home-health-title" data-fix-scope>
     <h2 id="home-health-title" class="visually-hidden" tabindex="-1">Is anything wrong?</h2>
+    {#- "master" comes with every Volume step: at most one re-fetch a second, at once for a new preset or Mute all
+        (static/js/app.js, data-throttle-refresh); the box's own triggers stay prompt. -#}
+    <span hidden hx-trigger="sse:master" data-throttle-refresh="1000" data-refresh-target=".home-health-box"
+          data-refresh-now="master.preset master.mute"></span>
     <div class="home-health-box" hx-get="{{ health_url }}"
-         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, sse:master throttle:1000ms, mdsp-sync-changed from:body, refresh"
+         hx-trigger="sse:sync delay:300ms, sse:desired delay:300ms, sse:verify delay:300ms, mdsp-sync-changed from:body, refresh"
          hx-swap="innerHTML">
       {% include "partials/home_health.html" %}
     </div>
@@ -54,8 +58,10 @@
     {#- 5. Presets & profiles. -#}
     <section class="card home-presets" aria-labelledby="home-presets-title">
       <h2 id="home-presets-title">Presets &amp; profiles{{ help("device-preset") }}</h2>
+      <span hidden hx-trigger="sse:master" data-throttle-refresh="1000" data-refresh-target=".home-presets-box"
+            data-refresh-now="master.preset"></span>
       <div class="home-presets-box" hx-get="{{ presets_url }}"
-           hx-trigger="sse:sync delay:500ms, sse:desired delay:500ms, sse:master throttle:1000ms, refresh" hx-swap="innerHTML">
+           hx-trigger="sse:sync delay:500ms, sse:desired delay:500ms, refresh" hx-swap="innerHTML">
         {% include "partials/home_presets.html" %}
       </div>
     </section>

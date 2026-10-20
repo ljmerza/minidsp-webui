@@ -132,7 +132,7 @@
   function outputCards() {
     const queues = new Map(); // "<edit url>|<output>" -> { inflight, queued: values | null }
     let focus = null; // the quick control that had focus before a re-fetch replaced it
-    let hold = null; // { button, timer, repeated } while a −/+ is held down
+    let hold = null; // { button, timer, repeated, missed, ended } while a −/+ is held down
     let deferred = false; // a re-fetch was skipped while an Adjust ▾ menu was open
     let writes = 0; // changes sent so far
     let fetchedAfter = null; // `writes` when the cards' newest re-fetch went out
@@ -144,9 +144,16 @@
         this.$el.addEventListener('click', (e) => this.onClick(e));
         this.$el.addEventListener('sse:master', (e) => this.onMaster(e.detail));
         this.$el.addEventListener('pointerdown', (e) => this.onPointerDown(e));
-        for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) {
-          this.$el.addEventListener(type, () => this.stopHold(), true);
+        // A hold ends with the release (wherever it happens), or early: the pointer leaves the button, Escape, or the
+        // window loses focus (no release may follow then).
+        for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+          document.addEventListener(type, () => this.stopHold(true), true);
         }
+        this.$el.addEventListener('pointerleave', () => this.stopHold(false), true);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') this.stopHold(false);
+        }, true);
+        if (typeof window.addEventListener === 'function') window.addEventListener('blur', () => this.stopHold(false));
         // An open Adjust ▾ menu holds re-fetches back (they would close it); closing it catches up.
         this.$el.addEventListener(
           'toggle',
@@ -165,8 +172,11 @@
         });
         box.addEventListener('htmx:beforeSwap', (e) => {
           // A re-fetch landing while a change is on its way would flash the old value; the drain re-fetches anyway.
-          if (this.busy() || hold) e.detail.shouldSwap = false;
-          else if (fetchedAfter !== null && fetchedAfter < writes) {
+          // One landing while −/+ is held would replace the button under the pointer; the end of the hold catches up.
+          if (this.busy() || (hold && !hold.ended)) {
+            e.detail.shouldSwap = false;
+            if (hold) hold.missed = true;
+          } else if (fetchedAfter !== null && fetchedAfter < writes) {
             // Asked for before the newest change went out, so it shows the old values (and an Undo would then find
             // nothing to undo). The drain's own re-fetch was dropped while this one was in flight: fetch again.
             e.detail.shouldSwap = false;
@@ -227,7 +237,7 @@
           const mute = card.dataset.mute !== 'true';
           if (this.setMute(card, mute)) this.muteToast(o, card.dataset.name || `Out ${o + 1}`, mute);
         } else if (button.dataset.action === 'level') {
-          if (hold && hold.repeated) return; // the held button already stepped; this is its release
+          if (hold && hold.repeated && hold.button === button) return; // it already stepped; this is its release
           this.levelPress(card, Number(button.dataset.step));
         } else if (button.dataset.action === 'nudge') {
           const gain = nudgedGain(
@@ -295,7 +305,7 @@
         this.stopHold();
         const card = button.closest('[data-output]');
         if (!card) return;
-        const current = { button, timer: null, repeated: false };
+        const current = { button, timer: null, repeated: false, missed: false, ended: false };
         hold = current;
         current.timer = setTimeout(function repeat() {
           if (hold !== current || button.disabled || !button.isConnected) return;
@@ -305,19 +315,20 @@
         }.bind(this), HOLD_DELAY_MS);
       },
 
-      stopHold() {
-        if (!hold) return;
-        clearTimeout(hold.timer);
+      // The hold is over (`released`: the pointer went up or was cancelled) or stops early (left the button, Escape,
+      // the window lost focus). The repeat stops, and a re-fetch skipped during the hold is fetched again, unless a
+      // change is on its way (its own re-fetch follows): a release off the button sends no click, so nothing else
+      // would. The click that follows the release of a repeated hold must not step once more, so a repeated hold
+      // that stopped early is kept (it no longer holds re-fetches) until the release.
+      stopHold(released = true) {
         const ended = hold;
-        if (!ended.repeated) {
-          hold = null;
-          return;
-        }
-        // The click that follows the release of a repeated hold must not step once more; re-fetches skipped during
-        // the hold catch up once it is over.
+        if (!ended) return;
+        clearTimeout(ended.timer);
+        const first = !ended.ended;
+        ended.ended = true;
         setTimeout(() => {
-          if (hold === ended) hold = null;
-          if (!this.busy()) this.refresh();
+          if (hold === ended && (released || !ended.repeated)) hold = null;
+          if (first && (ended.repeated || ended.missed) && !this.busy()) this.refresh();
         }, 0);
       },
 
