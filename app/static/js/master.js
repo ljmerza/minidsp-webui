@@ -130,10 +130,26 @@
     if (isVolume(e.detail.elt)) state.inflight = Math.max(0, state.inflight - 1);
   });
 
+  // A header refresh that went out before a write (Volume, Mute all, a preset, the source) may have been rendered
+  // before the write landed; answered after the write's reply, it would put the old value back on screen. So each
+  // refresh remembers how many writes had been answered when it was sent, and one answered after a newer write is
+  // dropped and the header fetched again (as dashboard.js does with the output cards).
+  const isHeader = (el) => !!el && el.id === 'app-header';
+  const isGet = (e) => !!e.detail.requestConfig && String(e.detail.requestConfig.verb).toLowerCase() === 'get';
+  let writesAnswered = 0;
+  const sentAfter = new WeakMap(); // a header refresh's xhr -> writesAnswered when it was sent
+  document.addEventListener('htmx:beforeRequest', (e) => {
+    if (isHeader(e.detail.target) && isGet(e) && e.detail.xhr) sentAfter.set(e.detail.xhr, writesAnswered);
+  });
+  document.addEventListener('htmx:afterRequest', (e) => {
+    if (isHeader(e.detail.target) && !isGet(e)) writesAnswered += 1; // after its reply was swapped in
+  });
+  const stale = (xhr) => !!xhr && sentAfter.has(xhr) && sentAfter.get(xhr) < writesAnswered;
+
   document.addEventListener('htmx:beforeSwap', (e) => {
     const target = e.detail.target;
     if (!target || target.id !== 'app-header' || !e.detail.shouldSwap) return;
-    if (busy(isVolume(e.detail.elt) ? 1 : 0)) {
+    if (busy(isVolume(e.detail.elt) ? 1 : 0) || stale(e.detail.xhr)) {
       e.detail.shouldSwap = false;
       scheduleRefresh();
     }
