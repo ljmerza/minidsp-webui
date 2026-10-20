@@ -50,7 +50,9 @@ jobs:
       - name: Browser tests
         env:
           MDW_E2E_REQUIRED: "1"  # a missing minidspd fails instead of skipping
-        run: uv run pytest -m e2e tests/e2e -rfEs --screenshot only-on-failure --tracing retain-on-failure
+        # 4 workers (the runner has 4 cores). --dist loadfile keeps each test module on one worker, because a module shares
+        # one app + mock minidspd (module-scoped fixtures on their own ephemeral ports and temp dir).
+        run: uv run pytest -m e2e tests/e2e -n 4 --dist loadfile -rfEs --screenshot only-on-failure --tracing retain-on-failure
 
       - name: Upload screenshots and traces of failures
         if: failure()
