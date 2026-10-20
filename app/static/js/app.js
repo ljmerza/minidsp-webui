@@ -223,6 +223,47 @@
     if (next) next.focus();
   });
 
+  // A refresh never replaces a button or link while it is being pressed: a click needs the same element under the
+  // press and the release, so a swap in between lost it (Mute all and the preset buttons in the header, the Home cards'
+  // Mute, "Switch to preset N"). Such a swap is dropped instead, and once the press is over the part is fetched again
+  // with its own hx-get, unless the click sent a request whose reply goes into that part anyway. Parts without an
+  // hx-get of their own can't be fetched again, so they are swapped as before.
+  const PRESS_MAX_MS = 10000; // a release that never arrives (e.g. the window lost focus) doesn't hold swaps for good
+  let press = null; // { el, at }: the button or link under a primary pointer that is down
+  const heldParts = new Map(); // a part whose swap was dropped during the press -> whether a reply will refresh it
+  const pressing = () => !!press && press.el.isConnected && performance.now() - press.at < PRESS_MAX_MS;
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.button === 0 && e.target instanceof Element ? e.target.closest('button, a[href]') : null;
+    press = el ? { el, at: performance.now() } : null;
+  }, true);
+  function catchUp() {
+    if (pressing()) return; // pressed again meanwhile: that release catches up
+    for (const [part, answered] of heldParts) {
+      if (!answered && part.isConnected && window.htmx) {
+        window.htmx.ajax('GET', part.getAttribute('hx-get'), { source: part, target: part });
+      }
+    }
+    heldParts.clear();
+  }
+  const endPress = () => {
+    if (!press) return;
+    press = null;
+    if (heldParts.size) setTimeout(catchUp, 0); // after the click that follows the release
+  };
+  document.addEventListener('pointerup', endPress, true);
+  document.addEventListener('pointercancel', endPress, true);
+  document.addEventListener('htmx:beforeSwap', (e) => {
+    const part = e.detail.target;
+    if (!e.detail.shouldSwap || !pressing() || !(part instanceof Element) || !part.contains(press.el)) return;
+    if (!part.hasAttribute('hx-get')) return;
+    e.detail.shouldSwap = false;
+    if (!heldParts.has(part)) heldParts.set(part, false);
+  });
+  document.addEventListener('htmx:beforeRequest', (e) => {
+    const { elt, target } = e.detail;
+    if (heldParts.has(target) && elt instanceof Element && target.contains(elt)) heldParts.set(target, true);
+  });
+
   // A device showed up (or changed) after this page was rendered without it: reload so the page matches.
   document.addEventListener('htmx:afterSwap', (e) => {
     if (!e.detail.target || e.detail.target.id !== 'app-header') return;
